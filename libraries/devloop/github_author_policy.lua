@@ -72,11 +72,23 @@ local function collect_collaborator_logins(rows, logins)
   end
 end
 
+local function resolve_github_handle(github_handle)
+  if type(github_handle) == "function" then
+    local ok, resolved = pcall(github_handle)
+    if ok then
+      return resolved
+    end
+    return nil
+  end
+  return github_handle
+end
+
 local function append_repo_collaborator_logins(logins, exec, github_handle)
   if not repo_collaborator_authorization_enabled(exec) then
     return
   end
   local repo = configured_repo(exec)
+  github_handle = resolve_github_handle(github_handle)
   if repo == nil or type(github_handle) ~= "table" or type(github_handle.api_paginate_slurp) ~= "function" then
     return
   end
