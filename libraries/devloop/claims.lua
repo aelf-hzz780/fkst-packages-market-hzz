@@ -305,7 +305,7 @@ function C.claim_admission_inputs(current)
   if claim_mode ~= "label" and author ~= nil and author ~= "" and author ~= owner then
     managed = C.managed_bot_logins()
     if not C.is_managed_bot_login(author, managed) then
-      trusted_author_policy = github_author_policy.from_env()
+      trusted_author_policy = github_author_policy.from_env(nil, github)
     end
   end
   return {
