@@ -433,6 +433,179 @@ function M.is_authorized(author_login_value, whitelist)
   return type(whitelist) == "table" and whitelist[canonical] == true
 end
 
+local function append_csv_logins(logins, raw)
+  for login in tostring(raw or ""):gmatch("[^,%s]+") do
+    table.insert(logins, login)
+  end
+end
+
+local function append_login(logins, login)
+  local value = strings.trim(login or "")
+  if value ~= "" then
+    table.insert(logins, value)
+  end
+end
+
+local function read_env_or_nil(read_env, name)
+  if type(read_env) ~= "function" then
+    return nil
+  end
+  local ok, raw = pcall(read_env, name)
+  if not ok then
+    return nil
+  end
+  return raw
+end
+
+local function flag_enabled(read_env, name)
+  return strings.trim(read_env_or_nil(read_env, name) or "") == "1"
+end
+
+local function configured_repo(read_env, repo_env)
+  local repo = strings.trim(read_env_or_nil(read_env, repo_env or "FKST_GITHUB_REPO") or "")
+  if repo:match("^[^/%s]+/[^/%s]+$") == nil then
+    return nil
+  end
+  return repo
+end
+
+local function repo_owner(repo)
+  return tostring(repo or ""):match("^([^/]+)/[^/]+$")
+end
+
+local function decode_json_list(stdout)
+  local ok_decode, decoded = pcall(json.decode, stdout or "[]")
+  if not ok_decode or type(decoded) ~= "table" then
+    return nil
+  end
+  return decoded
+end
+
+local function fetch_paginated_json(github_handle, path)
+  if type(github_handle) ~= "table" or type(github_handle.api_paginate_slurp) ~= "function" then
+    return nil
+  end
+  local ok_fetch, result = pcall(github_handle.api_paginate_slurp, path)
+  if not ok_fetch or type(result) ~= "table" or tonumber(result.exit_code) ~= 0 then
+    return nil
+  end
+  return decode_json_list(result.stdout or "[]")
+end
+
+local function has_write_permission(row)
+  if type(row) ~= "table" then
+    return false
+  end
+  local permissions = row.permissions
+  if type(permissions) == "table" then
+    if permissions.push == true or permissions.maintain == true or permissions.admin == true then
+      return true
+    end
+    if permissions.pull == true or permissions.triage == true then
+      return false
+    end
+  end
+  local permission = strings.trim(row.permission or row.role_name or ""):lower()
+  if permission == "push" or permission == "write" or permission == "maintain" or permission == "admin" then
+    return true
+  end
+  if permission == "pull" or permission == "read" or permission == "triage" then
+    return false
+  end
+  return permissions == nil and permission == ""
+end
+
+local function collect_collaborator_logins(rows, logins)
+  if type(rows) ~= "table" then
+    return
+  end
+  if rows.login ~= nil then
+    if has_write_permission(rows) then
+      append_login(logins, rows.login)
+    end
+    return
+  end
+  for _, row in ipairs(rows) do
+    collect_collaborator_logins(row, logins)
+  end
+end
+
+local function collect_member_logins(rows, logins)
+  if type(rows) ~= "table" then
+    return
+  end
+  if rows.login ~= nil then
+    append_login(logins, rows.login)
+    return
+  end
+  for _, row in ipairs(rows) do
+    collect_member_logins(row, logins)
+  end
+end
+
+local function append_repo_collaborator_logins(logins, read_env, github_handle, opts)
+  if not flag_enabled(read_env, opts.repo_collaborators_flag_env or "FKST_GITHUB_AUTHORIZE_REPO_COLLABORATORS") then
+    return
+  end
+  local repo = configured_repo(read_env, opts.repo_env)
+  if repo == nil then
+    return
+  end
+  local rows = fetch_paginated_json(github_handle, "repos/" .. repo .. "/collaborators?permission=push&per_page=100")
+  collect_collaborator_logins(rows, logins)
+end
+
+local function append_org_member_logins(logins, read_env, github_handle, opts)
+  if not flag_enabled(read_env, opts.org_members_flag_env or "FKST_GITHUB_AUTHORIZE_ORG_MEMBERS") then
+    return
+  end
+  local repo = configured_repo(read_env, opts.repo_env)
+  local org = repo_owner(repo)
+  if org == nil then
+    return
+  end
+  local rows = fetch_paginated_json(github_handle, "orgs/" .. org .. "/members?per_page=100")
+  collect_member_logins(rows, logins)
+end
+
+function M.author_policy_from_options(opts)
+  local options = opts or {}
+  local read_env = options.read_env
+  local bot_login = strings.trim(options.bot_login or read_env_or_nil(read_env, options.bot_login_env or "FKST_GITHUB_BOT_LOGIN") or "")
+  if bot_login == "" then
+    error(tostring(options.owner or "forge.github.content_filter") .. ": missing-github-bot-login: "
+      .. tostring(options.bot_login_env or "FKST_GITHUB_BOT_LOGIN") .. " is required for authored GitHub reads")
+  end
+  local logins = { bot_login }
+  for _, env_name in ipairs(options.extra_login_envs or {}) do
+    append_csv_logins(logins, read_env_or_nil(read_env, env_name))
+  end
+  local github_handle = options.github_handle
+  append_repo_collaborator_logins(logins, read_env, github_handle, options)
+  append_org_member_logins(logins, read_env, github_handle, options)
+  return M.author_policy_from_logins(logins)
+end
+
+function M.github_author_options(read_env, owner, opts)
+  local options = opts or {}
+  local policy = nil
+  return {
+    trusted_author_policy = function(github_handle)
+      if policy == nil then
+        local build_options = {}
+        for key, value in pairs(options) do
+          build_options[key] = value
+        end
+        build_options.read_env = read_env
+        build_options.owner = owner
+        build_options.github_handle = github_handle
+        policy = M.author_policy_from_options(build_options)
+      end
+      return policy
+    end,
+  }
+end
+
 function M.redaction_marker(field, author_login_value, bytes_removed)
   local login = M.canon_login(author_login_value) or "unknown"
   return M.MARKER_PREFIX
