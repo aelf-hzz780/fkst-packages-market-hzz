@@ -199,6 +199,25 @@ return {
     t.eq(#calls, 2)
   end,
 
+  test_partial_github_backed_failure_keeps_csv_only_authorization = function()
+    local handle, calls = make_handle(base_env({
+      FKST_GITHUB_AUTHORIZE_REPO_COLLABORATORS = "1",
+      FKST_GITHUB_AUTHORIZE_ORG_MEMBERS = "1",
+    }), "[]", {
+      stdout_by_path = {
+        [collaborator_path] = '[{"login":"write-collab","permissions":{"push":true}}]',
+      },
+      fail_paths = {
+        [org_members_path] = true,
+      },
+    })
+
+    t.eq(handle.is_authorized_author("trusted-human"), true)
+    t.eq(handle.is_authorized_author("write-collab"), false)
+    t.eq(handle.is_authorized_author("org-member"), false)
+    t.eq(#calls, 2)
+  end,
+
   test_from_handle_policy_reuses_handle_bound_production_policy = function()
     local handle, calls = make_handle(base_env({
       FKST_GITHUB_AUTHORIZE_ORG_MEMBERS = "1",

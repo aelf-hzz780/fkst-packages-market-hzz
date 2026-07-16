@@ -543,29 +543,45 @@ local function collect_member_logins(rows, logins)
   end
 end
 
-local function append_repo_collaborator_logins(logins, read_env, github_handle, opts)
+local function repo_collaborator_logins(read_env, github_handle, opts)
   if not flag_enabled(read_env, opts.repo_collaborators_flag_env or "FKST_GITHUB_AUTHORIZE_REPO_COLLABORATORS") then
-    return
+    return true, {}
   end
   local repo = configured_repo(read_env, opts.repo_env)
   if repo == nil then
-    return
+    return false, {}
   end
   local rows = fetch_paginated_json(github_handle, "repos/" .. repo .. "/collaborators?permission=push&per_page=100")
+  if rows == nil then
+    return false, {}
+  end
+  local logins = {}
   collect_collaborator_logins(rows, logins)
+  return true, logins
 end
 
-local function append_org_member_logins(logins, read_env, github_handle, opts)
+local function org_member_logins(read_env, github_handle, opts)
   if not flag_enabled(read_env, opts.org_members_flag_env or "FKST_GITHUB_AUTHORIZE_ORG_MEMBERS") then
-    return
+    return true, {}
   end
   local repo = configured_repo(read_env, opts.repo_env)
   local org = repo_owner(repo)
   if org == nil then
-    return
+    return false, {}
   end
   local rows = fetch_paginated_json(github_handle, "orgs/" .. org .. "/members?per_page=100")
+  if rows == nil then
+    return false, {}
+  end
+  local logins = {}
   collect_member_logins(rows, logins)
+  return true, logins
+end
+
+local function append_logins(target, source)
+  for _, login in ipairs(source or {}) do
+    table.insert(target, login)
+  end
 end
 
 function M.author_policy_from_options(opts)
@@ -581,8 +597,18 @@ function M.author_policy_from_options(opts)
     append_csv_logins(logins, read_env_or_nil(read_env, env_name))
   end
   local github_handle = options.github_handle
-  append_repo_collaborator_logins(logins, read_env, github_handle, options)
-  append_org_member_logins(logins, read_env, github_handle, options)
+  local dynamic_logins = {}
+  local ok_collaborators, collaborator_logins = repo_collaborator_logins(read_env, github_handle, options)
+  if not ok_collaborators then
+    return M.author_policy_from_logins(logins)
+  end
+  append_logins(dynamic_logins, collaborator_logins)
+  local ok_members, member_logins = org_member_logins(read_env, github_handle, options)
+  if not ok_members then
+    return M.author_policy_from_logins(logins)
+  end
+  append_logins(dynamic_logins, member_logins)
+  append_logins(logins, dynamic_logins)
   return M.author_policy_from_logins(logins)
 end
 
