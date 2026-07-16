@@ -289,6 +289,96 @@ return {
     t.eq(result.raises[1].payload.number, 7)
   end,
 
+  test_repo_collaborator_is_admitted_through_production_policy_wiring = function()
+    mock_command_times('printf %s "$FKST_GITHUB_REPO"', "owner/repo", 2)
+    mock_command_times('printf %s "$FKST_GITHUB_WRITE"', "")
+    mock_command_times('printf %s "$FKST_GITHUB_BOT_LOGIN"', "fkst-test-bot", 2)
+    mock_command_times('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', "fkst-test-bot", 2)
+    mock_command_times('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', "")
+    mock_command_times('printf %s "$FKST_EXTERNAL_PR_TRUSTED_CONTRIBUTOR_LOGINS"', "")
+    mock_command_times('printf %s "$FKST_GITHUB_AUTHORIZE_REPO_COLLABORATORS"', "1")
+    mock_command_times('printf %s "$FKST_EXTERNAL_PR_BRIDGE_MIN_AGE_SECONDS"', "", 2)
+    t.mock_command("gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&per_page=100'", {
+      stdout = '[{"number":7,"title":"Contributor patch","state":"open","created_at":"2026-06-03T01:02:03Z","updated_at":"2026-06-19T01:02:03Z","user":{"login":"write-collab"},"head":{"ref":"feature/contrib"},"base":{"ref":"dev"}}]\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh api --paginate --slurp 'repos/owner/repo/collaborators?permission=push&per_page=100'", {
+      stdout = '[{"login":"write-collab","permissions":{"push":true}}]\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh pr view", {
+      stdout = pr_json({
+        authors = { "write-collab" },
+        claimed = false,
+        read_count = 0,
+        title = "Contributor patch",
+      }),
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh issue list", {
+      stdout = "[]\n",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = t.run_department("departments/external_pr_intake/main.lua", {
+      queue = "github-external-pr-intake.external_pr_scan",
+      payload = { schema = "github-external-pr-intake.v1" },
+    })
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].payload.number, 7)
+  end,
+
+  test_org_member_is_admitted_through_production_policy_wiring = function()
+    mock_command_times('printf %s "$FKST_GITHUB_REPO"', "owner/repo", 2)
+    mock_command_times('printf %s "$FKST_GITHUB_WRITE"', "")
+    mock_command_times('printf %s "$FKST_GITHUB_BOT_LOGIN"', "fkst-test-bot", 2)
+    mock_command_times('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', "fkst-test-bot", 2)
+    mock_command_times('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', "")
+    mock_command_times('printf %s "$FKST_EXTERNAL_PR_TRUSTED_CONTRIBUTOR_LOGINS"', "")
+    mock_command_times('printf %s "$FKST_GITHUB_AUTHORIZE_ORG_MEMBERS"', "1")
+    mock_command_times('printf %s "$FKST_EXTERNAL_PR_BRIDGE_MIN_AGE_SECONDS"', "", 2)
+    t.mock_command("gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&per_page=100'", {
+      stdout = '[{"number":7,"title":"Contributor patch","state":"open","created_at":"2026-06-03T01:02:03Z","updated_at":"2026-06-19T01:02:03Z","user":{"login":"org-member"},"head":{"ref":"feature/contrib"},"base":{"ref":"dev"}}]\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh api --paginate --slurp 'orgs/owner/members?per_page=100'", {
+      stdout = '[{"login":"org-member"}]\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh pr view", {
+      stdout = pr_json({
+        authors = { "org-member" },
+        claimed = false,
+        read_count = 0,
+        title = "Contributor patch",
+      }),
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh issue list", {
+      stdout = "[]\n",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = t.run_department("departments/external_pr_intake/main.lua", {
+      queue = "github-external-pr-intake.external_pr_scan",
+      payload = { schema = "github-external-pr-intake.v1" },
+    })
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].payload.number, 7)
+  end,
+
   test_non_authorized_durable_candidate_is_rejected_before_bridge_writes = function()
     local github = fake_github({ allowed = {}, authors = { "untrusted-contributor" } })
     local logs = run_candidate(github)

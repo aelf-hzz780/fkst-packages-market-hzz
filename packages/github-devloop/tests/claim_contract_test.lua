@@ -57,6 +57,24 @@ local function mock_repo_collaborator_authorization(stdout)
   })
 end
 
+local function mock_org_member_authorization(stdout)
+  t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZE_ORG_MEMBERS"', {
+    stdout = "1",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_GITHUB_REPO"', {
+    stdout = "owner/repo",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("gh api --paginate --slurp 'orgs/owner/members?per_page=100'", {
+    stdout = stdout or '[{"login":"org-member"}]',
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function count_calls(needle)
   local count = 0
   for _, call in ipairs(t.command_calls()) do
@@ -481,6 +499,33 @@ return {
     t.eq(raised[1].queue, "github-proxy.github_issue_create_request")
     t.eq(raised[1].payload.dedup_key, forks.fork_issue_dedup_key("owner/repo", 43))
     t.eq(count_calls("gh api --paginate --slurp 'repos/owner/repo/collaborators?permission=push&per_page=100'"), 1)
+  end,
+
+  test_org_member_authorizes_claim_admission_path = function()
+    mock_bot("fkst-test-bot", "1")
+    mock_authorized_login("")
+    mock_org_member_authorization()
+    t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 43), {
+      stdout = issue_state_json({ author_login = "org-member", created_at = created_after_grace() }),
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local ok, raised = capture_raises(function()
+      return m_claims.claim_issue_for_management(core,
+        "claim_contract",
+        "owner/repo",
+        43,
+        self_current({ author_login = "org-member", created_at = created_after_grace() }),
+        "github-devloop/issue/owner/repo/43"
+      )
+    end)
+
+    t.eq(ok, false)
+    t.eq(#raised, 1)
+    t.eq(raised[1].queue, "github-proxy.github_issue_create_request")
+    t.eq(raised[1].payload.dedup_key, forks.fork_issue_dedup_key("owner/repo", 43))
+    t.eq(count_calls("gh api --paginate --slurp 'orgs/owner/members?per_page=100'"), 1)
   end,
 
   test_non_whitelisted_other_author_skips_before_fork_side_effects = function()

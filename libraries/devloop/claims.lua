@@ -21,7 +21,12 @@ local function forks()
 end
 
 local function github()
-  if github_handle ~= nil then
+  if type(fkst) == "table" and type(fkst.test) == "table" then
+    if type(github_factory.reset_production_handle_for_tests) == "function" then
+      github_factory.reset_production_handle_for_tests()
+    end
+    github_handle = nil
+  elseif github_handle ~= nil then
     return github_handle
   end
   if type(exec_argv) ~= "function" then
@@ -305,7 +310,7 @@ function C.claim_admission_inputs(current)
   if claim_mode ~= "label" and author ~= nil and author ~= "" and author ~= owner then
     managed = C.managed_bot_logins()
     if not C.is_managed_bot_login(author, managed) then
-      trusted_author_policy = github_author_policy.from_env(nil, github)
+      trusted_author_policy = github_author_policy.from_handle_policy(github)
     end
   end
   return {

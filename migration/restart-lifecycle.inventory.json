@@ -1,5 +1,5 @@
 {
-  "artifact_sha256": "c615a06e7fb0ce5da732d2f5a2a805fca37bb5afe89973f9402b64738b13bb45",
+  "artifact_sha256": "9880b23001d8d617f495a8b026f977e7b9d1e691e150d48d9bc5056795b178bb",
   "consumer_entry_acceptors": [
     {
       "ordinal": "consumes:consensus.consensus_converge",
@@ -13549,7 +13549,7 @@
                 "kind": "external",
                 "ref": "owner/repo#issue/42"
               },
-              "title": "Fork of #42: [fkst:blocked-github-content:v1 field=\"title\" existed=\"true\" author_login=\"human\" why=\"non-whitelisted-author\"]"
+              "title": "Fork of #42: Implement decision recorder"
             },
             "queue": "github-proxy.github_issue_create_request"
           }
