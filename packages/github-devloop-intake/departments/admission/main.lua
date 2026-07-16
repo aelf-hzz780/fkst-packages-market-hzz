@@ -12,7 +12,9 @@ local devloop_commands = require("devloop.commands")
 local config = require("devloop.config")
 local entity_lib = require("devloop.entity")
 local admission_core = require("core.admission")
+local intake_capacity = require("core.intake_capacity")
 local replay_authorization = require("core.replay_authorization")
+local capacity_controller = intake_capacity.production(core)
 
 local spec = {
   consumes = { "github-proxy.github_entity_changed", "github-proxy.github_issue_observed" },
@@ -36,11 +38,58 @@ local function raise_reintake_refusal(repo, issue_number, proposal_id, command, 
   devloop_logging.log_raise("admission", proposal_id, "github-proxy.github_issue_comment_request", request)
 end
 
+local function reconcile_capacity(repo, proposal_id)
+  local reconciled, reason = capacity_controller.reconcile(repo, proposal_id)
+  devloop_logging.log_cas_decision(
+    "admission",
+    proposal_id,
+    { state = nil, version = nil },
+    "capacity-grant",
+    "capacity-grant",
+    reconciled and "reconciled" or "deferred",
+    reason
+  )
+  return reconciled
+end
+
+local function claim_with_capacity(repo, issue_number, current, proposal_id, admission, detail)
+  local granted, reason = capacity_controller.authorize(repo, issue_number, current, proposal_id)
+  if not granted then
+    devloop_logging.log_cas_decision(
+      "admission",
+      proposal_id,
+      { state = nil, version = nil },
+      "capacity-grant",
+      "candidate",
+      "skip-capacity",
+      reason
+    )
+    return false
+  end
+  if m_claims.claim_issue_for_management(
+    core,
+    "admission",
+    repo,
+    issue_number,
+    current,
+    proposal_id,
+    admission,
+    detail
+  ) then
+    return true
+  end
+  if not capacity_controller.relinquish(repo, issue_number, proposal_id) then
+    error("github-devloop-intake: capacity-relinquish-contended: failed claim grant remains remotely authorized")
+  end
+  return false
+end
+
 local function handle_pending_reintake(repo, issue, current, proposal_id, source_ref)
   local command = core.pending_reintake_command(current.comments)
   if command == nil then
     return false
   end
+  reconcile_capacity(repo, proposal_id)
   if current.state ~= "OPEN" then
     raise_reintake_refusal(repo, issue.number, proposal_id, command, "reintake requires an open issue", source_ref)
     return true
@@ -57,7 +106,7 @@ local function handle_pending_reintake(repo, issue, current, proposal_id, source
     raise_reintake_refusal(repo, issue.number, proposal_id, command, "reintake requires terminal blocked or no active devloop state; use rereview, reready, or reimplement for recoverable active states", source_ref)
     return true
   end
-  if not m_claims.claim_issue_for_management(core, "admission", repo, issue.number, current, proposal_id) then
+  if not claim_with_capacity(repo, issue.number, current, proposal_id) then
     return true
   end
   local payload = core.build_intake_admission_candidate(repo, issue, command, now(), current.comments)
@@ -138,23 +187,27 @@ local function admit_issue_event(event, entity)
     return
   end
   if current.state ~= "OPEN" then
+    reconcile_capacity(repo, proposal_id)
     devloop_logging.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "entity", "candidate", "skip-closed", "fresh issue is not open")
     return
   end
   if core.should_skip_known_intake_issue(current.labels) then
+    reconcile_capacity(repo, proposal_id)
     devloop_logging.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "entity", "candidate", "skip-known-state", "fresh issue labels show an active devloop state")
     return
   end
   if m_facts.has_intake_decision_marker(current.comments, proposal_id) then
+    reconcile_capacity(repo, proposal_id)
     devloop_logging.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "entity", "candidate", "skip-intake-decision", "trusted intake decision marker is already visible")
     return
   end
   local in_milestone_scope, claim_admission, claim_detail = initial_claim_is_in_milestone_scope(current)
   if not in_milestone_scope then
+    reconcile_capacity(repo, proposal_id)
     devloop_logging.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "entity", "candidate", "skip-outside-intake-milestone", "fresh issue milestone=" .. tostring(current.milestone_number or "none") .. " is outside configured intake scope")
     return
   end
-  if not m_claims.claim_issue_for_management(core, "admission", repo, issue_number, current, proposal_id, claim_admission, claim_detail) then
+  if not claim_with_capacity(repo, issue_number, current, proposal_id, claim_admission, claim_detail) then
     return
   end
 
@@ -183,6 +236,7 @@ local function act_issue_observed(event)
   with_lock(lock_key, function()
     local terminal, precondition_reason, observe_snapshot = replay_authorization.terminal_precondition(entity.source_ref)
     if terminal == nil then
+      reconcile_capacity(repo, proposal_id)
       devloop_logging.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "observed", "replay-candidate", "skip-" .. tostring(precondition_reason or "not-authorized"), "intake replay terminal precondition failed")
       return
     end
@@ -196,7 +250,27 @@ local function act_issue_observed(event)
       terminal = terminal,
     })
     if authorization == nil then
+      reconcile_capacity(repo, proposal_id)
       devloop_logging.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "observed", "replay-candidate", "skip-" .. tostring(reason or "not-authorized"), "intake replay precondition failed")
+      return
+    end
+
+    local capacity_granted, capacity_reason = capacity_controller.authorize(
+      repo,
+      issue_number,
+      current,
+      proposal_id
+    )
+    if not capacity_granted then
+      devloop_logging.log_cas_decision(
+        "admission",
+        proposal_id,
+        { state = nil, version = nil },
+        "observed",
+        "replay-candidate",
+        "skip-capacity",
+        capacity_reason
+      )
       return
     end
 
@@ -213,9 +287,6 @@ end
 local function act_entity_changed(event)
   local entity = event.payload or {}
   if entity.type ~= "issue" then
-    return
-  end
-  if tostring(entity.state or ""):upper() ~= "OPEN" then
     return
   end
   admit_issue_event(event, entity)

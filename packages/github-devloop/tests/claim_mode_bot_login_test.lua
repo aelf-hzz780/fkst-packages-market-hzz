@@ -331,4 +331,30 @@ return {
     t.eq(m_claims.claim_owner(), "chronoai-bot")
     devloop_base.configure_trusted_bot_login(nil)
   end,
+
+  test_capacity_release_fresh_reads_and_removes_only_claim_label = function()
+    mock_env("fkst-test-bot", "label", "1")
+    t.mock_command("gh issue view 42 --repo owner/repo --json assignees,author,labels", {
+      stdout = ownership_json({}, "human", { claimed_label }),
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh issue edit 42 --repo owner/repo --remove-label '" .. claimed_label .. "'", {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local released = m_claims.release_issue_claim_if_self(core,
+      "admission",
+      "owner/repo",
+      42,
+      "github-devloop/issue/owner/repo/42",
+      "inactive-intake-claim"
+    )
+
+    t.eq(released, true)
+    t.eq(count_adapter_calls("--remove-label", claimed_label), 1)
+    t.eq(count_adapter_calls("--remove-assignee", "fkst-test-bot"), 0)
+  end,
 }

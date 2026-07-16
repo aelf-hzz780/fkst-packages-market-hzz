@@ -786,4 +786,49 @@ return {
     end)
     t.eq(ok, false)
   end,
+
+  test_capacity_release_fresh_reads_and_removes_only_self_assignee = function()
+    mock_bot("fkst-test-bot", "1")
+    t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", 42), {
+      stdout = ownership_json({ "fkst-test-bot" }, "human"),
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh issue edit '42' --repo 'owner/repo' --remove-assignee 'fkst-test-bot'", {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local released = m_claims.release_issue_claim_if_self(core,
+      "admission",
+      "owner/repo",
+      42,
+      "github-devloop/issue/owner/repo/42",
+      "excess-active-intake-claim"
+    )
+
+    t.eq(released, true)
+    t.eq(count_calls("--remove-assignee fkst-test-bot"), 1)
+  end,
+
+  test_capacity_release_never_mutates_non_self_assignee = function()
+    mock_bot("fkst-test-bot", "1")
+    t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", 42), {
+      stdout = ownership_json({ "human" }, "human"),
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local released = m_claims.release_issue_claim_if_self(core,
+      "admission",
+      "owner/repo",
+      42,
+      "github-devloop/issue/owner/repo/42",
+      "excess-active-intake-claim"
+    )
+
+    t.eq(released, false)
+    t.eq(count_calls("gh issue edit"), 0)
+  end,
 }

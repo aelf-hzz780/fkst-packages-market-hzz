@@ -104,7 +104,11 @@ return {
   test_admission_filters_non_issue_closed_known_hold_and_trusted_marker = function()
     local cases = {
       { name = "pr", event = entity_changed(42, { type = "pr" }), view = nil },
-      { name = "closed-event", event = entity_changed(42, { state = "CLOSED" }), view = nil },
+      {
+        name = "closed-event",
+        event = entity_changed(42, { state = "CLOSED" }),
+        view = { number = 42, state = "CLOSED" },
+      },
       { name = "enabled", event = entity_changed(40), view = { number = 40, labels = { "fkst-dev:enabled" } } },
       { name = "thinking", event = entity_changed(41), view = { number = 41, labels = { "fkst-dev:thinking" } } },
       { name = "hold", event = entity_changed(42), view = { number = 42, labels = { "fkst-dev:hold" } } },

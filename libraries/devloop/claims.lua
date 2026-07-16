@@ -9,6 +9,7 @@ local contract_time = require("contract.time")
 local config = require("devloop.config")
 local github_author_policy = require("devloop.github_author_policy")
 local github_view = require("forge.github_view")
+local github_proxy_entity_view = require("devloop.github_proxy_entity_view")
 local devloop_logging = require("devloop.logging")
 local forks_handle = nil
 local devloop_state_handle = nil
@@ -473,6 +474,34 @@ function C.claim_issue_for_management(M, dept, repo, issue_number, current, prop
   M.invalidate_entity_after_write(repo, "issue", issue_number)
   log_claim(dept, proposal_id, "claim-lost", "assignee claim lost after assign verification")
   return false
+end
+
+function C.release_issue_claim_if_self(_M, dept, repo, issue_number, proposal_id, reason)
+  local owner = C.claim_owner()
+  local ownership = C.read_current_issue_ownership(repo, issue_number)
+  local claim_state = C.issue_claim_state(
+    ownership and ownership.assignees,
+    owner,
+    ownership and ownership.labels
+  )
+  if claim_state ~= "self" then
+    log_claim(dept, proposal_id, "skip-release-not-self", "fresh ownership no longer shows the configured actor's claim")
+    return false
+  end
+
+  if devloop_base.read_env("FKST_GITHUB_WRITE") ~= "1" then
+    log_claim(dept, proposal_id, "dry-run-release", tostring(reason or "capacity reconciliation"))
+    return true
+  end
+
+  if config.claim_mode() == "label" then
+    github().issue_remove_label(repo, issue_number, claimed_label, 30)
+  else
+    github().issue_unassign(repo, issue_number, owner, 30)
+  end
+  github_proxy_entity_view.invalidate_entity_after_write(repo, "issue", issue_number)
+  log_claim(dept, proposal_id, "claim-released", tostring(reason or "capacity reconciliation"))
+  return true
 end
 
 function C.claim_required_payload(source_ref)
