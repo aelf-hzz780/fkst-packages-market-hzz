@@ -176,7 +176,7 @@ local function make_department(ports)
       })
       devloop_logging.log_forged_markers("consensus_result", reached.proposal_id, current.comments)
       local state = devloop_state.current_state(current.comments, reached.proposal_id)
-      local trusted_author_policy = github_author_policy.from_env()
+      local trusted_author_policy = github_author_policy.from_handle_policy(ports.github)
       if not github_author_policy.is_authorized(trusted_author_policy, current.author_login) then
         devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", "thinking", "skip-non-whitelisted-author", "issue author is not authorized for GitHub content")
         return

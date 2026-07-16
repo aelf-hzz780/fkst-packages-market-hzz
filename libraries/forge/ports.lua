@@ -16,31 +16,7 @@ function M.github_author_options(read_env, owner, opts)
   if type(bot_login_env) ~= "string" or bot_login_env == "" then
     error("forge.ports.github_author_options requires opts.bot_login_env", 2)
   end
-  local extra_login_envs = options.extra_login_envs or {}
-  local content_filter = require("forge.github.content_filter")
-  local strings = require("contract.strings")
-  local policy = nil
-  local function append_csv_logins(logins, raw)
-    for login in tostring(raw or ""):gmatch("[^,%s]+") do
-      table.insert(logins, login)
-    end
-  end
-  return {
-    trusted_author_policy = function()
-      if policy == nil then
-        local bot_login = strings.trim(read_env(bot_login_env) or "")
-        if bot_login == "" then
-          error(tostring(owner or "forge.ports") .. ": missing-github-bot-login: " .. bot_login_env .. " is required for authored GitHub reads")
-        end
-        local logins = { bot_login }
-        for _, env_name in ipairs(extra_login_envs) do
-          append_csv_logins(logins, read_env(env_name))
-        end
-        policy = content_filter.author_policy_from_logins(logins)
-      end
-      return policy
-    end,
-  }
+  return require("forge.github.content_filter").github_author_options(read_env, owner or "forge.ports", options)
 end
 
 local function production_exec_argv()
