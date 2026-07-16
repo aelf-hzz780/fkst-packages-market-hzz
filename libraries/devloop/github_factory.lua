@@ -32,4 +32,10 @@ function M.production_handle()
   return production_handle
 end
 
+function M.reset_production_handle_for_tests()
+  if type(fkst) == "table" and type(fkst.test) == "table" then
+    production_handle = nil
+  end
+end
+
 return M
