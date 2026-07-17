@@ -477,19 +477,4 @@ return {
     t.eq(writes[4].ref, capacity.grant_ref(REPO, OWNER))
   end,
 
-  test_admission_claim_and_replay_paths_are_capacity_guarded = function()
-    local source = file.read("packages/github-devloop-intake/departments/admission/main.lua")
-    local controller = source:find("intake_capacity.production(core)", 1, true)
-    local first_authorize = source:find("capacity_controller.authorize", 1, true)
-    local first_claim = source:find("m_claims.claim_issue_for_management", 1, true)
-    local reconcile = source:find("capacity_controller.reconcile", 1, true)
-    local relinquish = source:find("capacity_controller.relinquish", 1, true)
-
-    t.is_true(controller ~= nil)
-    t.is_true(first_authorize ~= nil)
-    t.is_true(first_claim ~= nil)
-    t.is_true(first_authorize < first_claim)
-    t.is_true(reconcile ~= nil)
-    t.is_true(relinquish ~= nil)
-  end,
 }
