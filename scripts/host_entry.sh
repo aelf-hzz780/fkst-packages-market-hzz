@@ -299,6 +299,117 @@ host_entry_package_test_project_root() {
   printf '%s\n' "$HOST_ENTRY_HOST_ROOT"
 }
 
+host_entry_package_has_run_graph_tests() {
+  local pkg="$1"
+  compgen -G "$pkg/tests/run_graph*_test.lua" >/dev/null
+}
+
+host_entry_package_has_non_run_graph_tests() {
+  local pkg="$1" path base
+  for path in "$pkg"/tests/*_test.lua; do
+    [ -f "$path" ] || continue
+    base="$(basename "$path")"
+    case "$base" in
+      run_graph*_test.lua) ;;
+      *) return 0 ;;
+    esac
+  done
+  for path in "$pkg"/departments/*/*_test.lua; do
+    [ -f "$path" ] || continue
+    return 0
+  done
+  return 1
+}
+
+host_entry_copy_test_package() {
+  local src="$1" dest="$2" role="$3"
+  mkdir -p "$dest"
+  case "$role" in
+    normal)
+      (cd "$src" && LC_ALL=C tar --exclude './tests/run_graph*_test.lua' -cf - .) \
+        | (cd "$dest" && LC_ALL=C tar xf -)
+      ;;
+    graph-target)
+      (cd "$src" && LC_ALL=C tar --exclude './departments/test_*' --exclude './tests/*_test.lua' -cf - .) \
+        | (cd "$dest" && LC_ALL=C tar xf -)
+      if compgen -G "$src/tests/run_graph*_test.lua" >/dev/null; then
+        mkdir -p "$dest/tests"
+        cp "$src"/tests/run_graph*_test.lua "$dest/tests/"
+      fi
+      ;;
+    graph-dep)
+      (cd "$src" && LC_ALL=C tar --exclude './departments/test_*' --exclude './tests' -cf - .) \
+        | (cd "$dest" && LC_ALL=C tar xf -)
+      ;;
+    *)
+      echo "error: unknown host test package copy role: $role" >&2
+      return 2
+      ;;
+  esac
+}
+
+host_entry_copy_test_libraries_from() {
+  local source_root="$1" work="$2" lib dest
+  [ -d "$source_root/libraries" ] || return 0
+  mkdir -p "$work/libraries"
+  for lib in "$source_root"/libraries/*; do
+    [ -d "$lib" ] || continue
+    dest="$work/libraries/$(basename "$lib")"
+    [ -e "$dest" ] && continue
+    mkdir -p "$dest"
+    (cd "$lib" && LC_ALL=C tar -cf - .) | (cd "$dest" && LC_ALL=C tar xf -)
+  done
+}
+
+host_entry_prepare_test_workspace() {
+  local work="$1"
+  mkdir -p "$work/libraries"
+  host_entry_copy_test_libraries_from "$HOST_ENTRY_HOST_ROOT" "$work"
+  if ! host_entry_same_path "$HOST_ENTRY_HOST_ROOT" "$HOST_ENTRY_PLATFORM_ROOT"; then
+    host_entry_copy_test_libraries_from "$HOST_ENTRY_PLATFORM_ROOT" "$work"
+  fi
+  cat > "$work/fkst.workspace.toml" <<'TOML'
+[workspace]
+units = ["packages/*", "libraries/*"]
+packages = ["packages/*"]
+libraries = ["libraries/*"]
+
+[registries]
+workspace = "workspace"
+TOML
+}
+
+host_entry_prepare_normal_test_root() {
+  local target_pkg="$1" work="$2" name dest
+  name="$(basename "$target_pkg")"
+  dest="$work/packages/$name"
+  mkdir -p "$work/packages"
+  host_entry_copy_test_package "$target_pkg" "$dest" normal || return 1
+  host_entry_prepare_test_workspace "$work" || return 1
+  HOST_ENTRY_NORMAL_TEST_ROOT="$dest"
+}
+
+host_entry_prepare_run_graph_test_roots() {
+  local target_pkg="$1" work="$2" root name dest
+  HOST_ENTRY_GRAPH_TEST_ROOTS=()
+  mkdir -p "$work/packages"
+  for root in "${HOST_ENTRY_PACKAGE_ROOTS[@]}"; do
+    name="$(basename "$root")"
+    dest="$work/packages/$name"
+    if [ -e "$dest" ]; then
+      echo "error: duplicate host graph package root name: $name" >&2
+      return 1
+    fi
+    if [ "$root" = "$target_pkg" ]; then
+      host_entry_copy_test_package "$root" "$dest" graph-target || return 1
+    else
+      host_entry_copy_test_package "$root" "$dest" graph-dep || return 1
+    fi
+    HOST_ENTRY_GRAPH_TEST_ROOTS+=("$dest")
+  done
+  host_entry_prepare_test_workspace "$work" || return 1
+}
+
 host_entry_cmd_check() {
   host_entry_build_package_roots
   host_entry_run_shared_source_ratchets
@@ -309,6 +420,8 @@ host_entry_cmd_check() {
 
 host_entry_cmd_test() {
   local target="" pkg name project_root ran=0 fail=0 report_dir report_file conf_cmd=() test_cmd=() test_roots=() rc
+  local normal_pkg normal_project_root normal_work graph_work graph_root has_run_graph run_normal
+  local -a graph_args
   while [ "$#" -gt 0 ]; do
     case "$1" in
       -v|--verbose) FKST_TEST_VERBOSE=1; export FKST_TEST_VERBOSE ;;
@@ -376,10 +489,55 @@ host_entry_cmd_test() {
           ;;
       esac
       report_file="$report_dir/$name.json"
-      test_cmd=("$BIN" test --project-root "$project_root" --package-root "$pkg")
-      test_cmd+=(--report-json "$report_file")
-      if ! run_quiet_keep '^FAIL |passed, [0-9]+ failed|panic' "${test_cmd[@]}"; then
-        fail=$((fail + 1))
+      has_run_graph=0
+      run_normal=1
+      normal_pkg="$pkg"
+      normal_project_root="$project_root"
+      normal_work=""
+      if host_entry_package_has_run_graph_tests "$pkg"; then
+        has_run_graph=1
+        if host_entry_package_has_non_run_graph_tests "$pkg"; then
+          normal_work="$(mktemp -d "$HOST_TEST_RUNTIME_ROOT/host-test-normal-$name.XXXXXX")" || {
+            echo "error: could not create host normal-test staging root for $name" >&2
+            fail=$((fail + 1))
+            continue
+          }
+          if ! host_entry_prepare_normal_test_root "$pkg" "$normal_work"; then
+            fail=$((fail + 1))
+            continue
+          fi
+          normal_pkg="$HOST_ENTRY_NORMAL_TEST_ROOT"
+          normal_project_root="$normal_work"
+        else
+          run_normal=0
+        fi
+      fi
+      if [ "$run_normal" -eq 1 ]; then
+        test_cmd=("$BIN" test --project-root "$normal_project_root" --package-root "$normal_pkg")
+        test_cmd+=(--report-json "$report_file")
+        if ! run_quiet_keep '^FAIL |passed, [0-9]+ failed|panic' "${test_cmd[@]}"; then
+          fail=$((fail + 1))
+          continue
+        fi
+      fi
+      if [ "$has_run_graph" -eq 1 ]; then
+        graph_work="$(mktemp -d "$HOST_TEST_RUNTIME_ROOT/host-test-graph-$name.XXXXXX")" || {
+          echo "error: could not create host graph-test staging root for $name" >&2
+          fail=$((fail + 1))
+          continue
+        }
+        if ! host_entry_prepare_run_graph_test_roots "$pkg" "$graph_work"; then
+          fail=$((fail + 1))
+          continue
+        fi
+        graph_args=()
+        for graph_root in "${HOST_ENTRY_GRAPH_TEST_ROOTS[@]}"; do
+          graph_args+=(--package-root "$graph_root")
+        done
+        test_cmd=("$BIN" test --project-root "$graph_work" "${graph_args[@]}" --report-json "$report_dir/$name.graph.json")
+        if ! run_quiet_keep '^FAIL |passed, [0-9]+ failed|panic' "${test_cmd[@]}"; then
+          fail=$((fail + 1))
+        fi
       fi
     done
   fi
