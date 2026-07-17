@@ -1,9 +1,9 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
-local gh_argv = require("testkit.gh_argv_mock")
+local gh_argv = require("testkit_internal.gh_argv_mock")
 local entity_list_cache = require("devloop.entity_list_cache")
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 
 local function count_calls(needle)
   local count = 0

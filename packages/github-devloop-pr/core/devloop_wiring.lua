@@ -1,5 +1,5 @@
 local W = {}
-local registry = require("workflow.registry")
+local registry = require("workflow_internal.registry")
 local pr_review_replay_facts = require("devloop.restart.pr_review_replay_facts")
 
 local package_name = "github-devloop-pr"

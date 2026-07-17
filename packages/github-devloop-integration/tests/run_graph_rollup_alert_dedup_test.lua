@@ -2,7 +2,7 @@ local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
 local graph = require("testkit.graph")
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 
 local repo = "owner/repo"
 local pr_number = 9

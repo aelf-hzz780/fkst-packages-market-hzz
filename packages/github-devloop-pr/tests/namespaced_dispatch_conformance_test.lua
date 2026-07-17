@@ -3,7 +3,7 @@ local h = require("tests.devloop_helpers")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local t = h.t
 local core = h.core
-local conformance = require("testkit.namespaced_dispatch_conformance")
+local conformance = require("testkit_internal.namespaced_dispatch_conformance")
 local m_mq = require("devloop.merge_queue")
 
 local function load_department(path, module_name)

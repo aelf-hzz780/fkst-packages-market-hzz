@@ -1,5 +1,5 @@
 local h = require("tests.proxy_integration_helpers")
-local conformance = require("testkit.saga_conformance")
+local conformance = require("testkit_internal.saga_conformance")
 local t = h.t
 local core = h.core
 

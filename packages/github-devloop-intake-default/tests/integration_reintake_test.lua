@@ -11,7 +11,7 @@ local conv_reconcile = require("devloop.convergence.reconcile")
 local conv_rounds = require("devloop.convergence.rounds")
 local convergence_shared = require("devloop.convergence.shared")
 local m_builders = require("devloop.markers.builders")
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 
 local function encode_json_string(value)
   return h.encode_json_string(value)

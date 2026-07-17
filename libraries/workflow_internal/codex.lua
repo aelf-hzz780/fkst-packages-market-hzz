@@ -78,11 +78,11 @@ end
 
 function M.dispatch(identity, opts)
   if type(identity) ~= "table" then
-    error("workflow.codex: dispatch identity must be a convergence identity")
+    error("workflow_internal.codex: dispatch identity must be a convergence identity")
   end
   local role, proposal_id, dedup_key = identity_parts(identity)
   if role == nil or proposal_id == nil or dedup_key == nil then
-    error("workflow.codex: dispatch identity is incomplete")
+    error("workflow_internal.codex: dispatch identity is incomplete")
   end
   if M.live_run_active(identity) then
     return {

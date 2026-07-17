@@ -1,6 +1,6 @@
 """Structural ratchet for identity-carrying codex dispatch.
 
-The canonical path is ``workflow.codex.dispatch(identity, opts)``. Raw
+The canonical path is ``workflow_internal.codex.dispatch(identity, opts)``. Raw
 ``spawn_codex`` and ``spawn_codex_sync`` may exist for non-identity work, but if
 their opts carry ``role``, ``proposal_id``, and ``dedup_key`` they must be inside
 that wrapper.
@@ -165,7 +165,7 @@ def function_ranges(masked: str) -> list[tuple[int, int, str]]:
 
 
 def in_workflow_dispatch(path: str, masked: str, index: int) -> bool:
-    if path != "libraries/workflow/codex.lua":
+    if path != "libraries/workflow_internal/codex.lua":
         return False
     for start, end, name in function_ranges(masked):
         if start <= index < end and name == "M.dispatch":
@@ -248,12 +248,12 @@ def ratchet_messages(
         if base_allowlist is None:
             return []
         return [
-            f"{site} grows {ALLOWLIST} relative to dev; migrate the dispatch to workflow.codex.dispatch instead"
+            f"{site} grows {ALLOWLIST} relative to dev; migrate the dispatch to workflow_internal.codex.dispatch instead"
             for site in sorted(current - base_allowlist)
         ]
     current_keys = {site.allowlist_key() for site in current}
     messages = [
-        f"{site.allowlist_key()} raw identity-carrying {site.callee} is forbidden outside workflow.codex.dispatch"
+        f"{site.allowlist_key()} raw identity-carrying {site.callee} is forbidden outside workflow_internal.codex.dispatch"
         for site in current
         if site.allowlist_key() not in allowlist
     ]
@@ -266,7 +266,7 @@ def ratchet_messages(
     )
     if base_allowlist is not None:
         messages.extend(
-            f"{site} grows {ALLOWLIST} relative to dev; migrate the dispatch to workflow.codex.dispatch instead"
+            f"{site} grows {ALLOWLIST} relative to dev; migrate the dispatch to workflow_internal.codex.dispatch instead"
             for site in sorted(allowlist - base_allowlist)
         )
     return messages

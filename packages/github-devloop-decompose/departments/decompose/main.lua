@@ -13,7 +13,7 @@ local config = require("devloop.config")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local conv_attempts = require("devloop.convergence.attempts")
 local devloop_entity_view = require("devloop.github_proxy_entity_view")
-local workflow_codex = require("workflow.codex")
+local workflow_codex = require("workflow_internal.codex")
 local devloop_logging = require("devloop.logging")
 local devloop_commands = require("devloop.commands")
 

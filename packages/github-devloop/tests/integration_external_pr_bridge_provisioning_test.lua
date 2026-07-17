@@ -1,7 +1,7 @@
 local h = require("tests.devloop_helpers")
 local bridge = require("contract.external_pr_bridge")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
-local gh_argv = require("testkit.gh_argv_mock")
+local gh_argv = require("testkit_internal.gh_argv_mock")
 local m_builders = require("devloop.markers.builders")
 local m_facts = require("devloop.markers.facts")
 

@@ -1,7 +1,7 @@
 local S = {}
 local contract_time = require("contract.time")
-local liveness_shared = require("workflow.liveness.shared")
-local Ports = require("workflow.ports")
+local liveness_shared = require("workflow_internal.liveness.shared")
+local Ports = require("workflow_internal.ports")
 local installed = setmetatable({}, { __mode = "k" })
 
 local function installed_function(M, name)
@@ -12,7 +12,7 @@ end
 function S.restart_liveness_inventory_errors(M, rows, inventory)
   local fn = installed_function(M, "restart_liveness_inventory_errors")
   if type(fn) ~= "function" then
-    error("workflow.restart_liveness_contract: restart_liveness_inventory_errors not installed")
+    error("workflow_internal.restart_liveness_contract: restart_liveness_inventory_errors not installed")
   end
   return fn(rows, inventory)
 end

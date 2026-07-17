@@ -4,8 +4,8 @@ local conv_rounds = require("devloop.convergence.rounds")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
 local h = require("tests.devloop_helpers")
-local observation_support = require("testkit.old_behavior_observation_support")
-local testing = require("testkit.testing")
+local observation_support = require("testkit_internal.old_behavior_observation_support")
+local testing = require("testkit_internal.testing")
 local loop_department = require("departments.loop.main")
 
 local t = h.t

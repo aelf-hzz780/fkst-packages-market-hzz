@@ -1,7 +1,7 @@
 local base_ids = require("devloop.base_ids")
 local convergence_identity = require("contract.convergence_identity")
 local devloop_logging = require("devloop.logging")
-local workflow_codex = require("workflow.codex")
+local workflow_codex = require("workflow_internal.codex")
 local C = {}
 
 function C.dispatch_live_run_exec_ref(role, proposal_id, dedup_key)

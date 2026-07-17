@@ -1,4 +1,4 @@
-local workflow_registry = require("workflow.registry")
+local workflow_registry = require("workflow_internal.registry")
 local t = fkst.test
 
 local function expect_error_contains(fn, needle)

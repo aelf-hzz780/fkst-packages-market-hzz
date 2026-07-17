@@ -1,6 +1,6 @@
 local devloop_base = require("devloop.base")
 local core = require("core")
-local conformance = require("testkit.namespaced_dispatch_conformance")
+local conformance = require("testkit_internal.namespaced_dispatch_conformance")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")

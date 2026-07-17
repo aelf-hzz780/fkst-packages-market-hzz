@@ -1,4 +1,4 @@
-local testing = require("testkit.testing")
+local testing = require("testkit_internal.testing")
 local git_fake = require("forge.git_fake")
 local core = require("core")
 local ref_detect = require("departments.ref_detect.main")

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+import tomllib
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -40,6 +41,16 @@ DEVLOOP_FAMILY = {
     "github-devloop-ops",
     "github-devloop-pr",
     "github-proxy",
+}
+HOST_LIBRARY_SURFACES = {
+    "workflow": {
+        "exports": ["workflow.dead_letter", "workflow.saga"],
+        "lib_deps": ["contract"],
+    },
+    "testkit": {
+        "exports": ["testkit.graph"],
+        "lib_deps": [],
+    },
 }
 
 
@@ -159,6 +170,43 @@ def check_devloop_visibility(root: Path, violations: list[str], add) -> None:
         add(violations, "G-LIB-DEP", f"devloop visibility must list only {sorted(DEVLOOP_FAMILY)}; observed {sorted(observed)}")
 
 
+def check_host_library_surfaces(root: Path, violations: list[str], add) -> None:
+    for library_name, expected in HOST_LIBRARY_SURFACES.items():
+        path = root / "libraries" / library_name / "fkst.toml"
+        if not path.exists():
+            continue
+        try:
+            manifest = tomllib.loads(path.read_text(encoding="utf-8"))
+        except tomllib.TOMLDecodeError as exc:
+            add(violations, "G-LIB-DEP", f"{path.relative_to(root)} is invalid TOML: {exc}")
+            continue
+
+        library = manifest.get("library") or {}
+        if library.get("publishable") is not True:
+            add(
+                violations,
+                "G-LIB-DEP",
+                f"{library_name} host surface must set [library].publishable = true",
+            )
+
+        exports = manifest.get("exports") or {}
+        observed_exports = exports.get("public")
+        if exports.get("exact") is not True or observed_exports != expected["exports"]:
+            add(
+                violations,
+                "G-LIB-DEP",
+                f"{library_name} host surface exports must be exactly {expected['exports']} with exact = true",
+            )
+
+        lib_deps = (manifest.get("lib_deps") or {}).get("libraries")
+        if lib_deps != expected["lib_deps"]:
+            add(
+                violations,
+                "G-LIB-DEP",
+                f"{library_name} host surface lib_deps must be exactly {expected['lib_deps']}",
+            )
+
+
 
 
 def check_devloop_forge_import_inventory(root: Path, violations: list[str], read_text, rel, add, strip_lua_comments_and_strings, is_unmasked_range) -> None:
@@ -209,5 +257,6 @@ def check_std_dependency_model(
     strip_lua_comments_and_strings: Callable[[str], str],
     is_unmasked_range: Callable[[str, str, int, int], bool],
 ) -> None:
+    check_host_library_surfaces(root, violations, add)
     check_devloop_visibility(root, violations, add)
     check_devloop_forge_import_inventory(root, violations, read_text, rel, add, strip_lua_comments_and_strings, is_unmasked_range)

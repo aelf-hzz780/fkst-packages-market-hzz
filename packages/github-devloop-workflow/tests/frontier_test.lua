@@ -6,7 +6,7 @@ local core = require("core")
 local m_builders = require("devloop.markers.builders")
 local m_facts = require("devloop.markers.facts")
 local devloop_base = require("devloop.base")
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 local t = fkst.test
 
 local repo = "owner/repo"

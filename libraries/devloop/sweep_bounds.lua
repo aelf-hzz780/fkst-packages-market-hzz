@@ -1,5 +1,5 @@
 local sweep_bounds = {}
-local sweep = require("workflow.sweep")
+local sweep = require("workflow_internal.sweep")
 
 local default_call_timeout = 10
 local default_wall_clock_budget = 90

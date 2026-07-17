@@ -3,9 +3,9 @@ local base_ids = require("devloop.base_ids")
 local default_intake = require("core.default_intake")
 local payloads_builders = require("devloop.payloads.builders")
 local saga = require("workflow.saga")
-local testing = require("testkit.testing")
+local testing = require("testkit_internal.testing")
 local t = fkst.test
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 
 local candidate_queue = "github-devloop-intake.devloop_intake_candidate"
 

@@ -2,7 +2,7 @@ local h = require("tests.devloop_core_helpers")
 local payloads_predicates = require("devloop.payloads.predicates")
 local core = h.core
 local t = h.t
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 
 local function json_string(value)
   return tostring(value or "")

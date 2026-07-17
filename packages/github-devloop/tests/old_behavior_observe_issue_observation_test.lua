@@ -6,9 +6,9 @@ local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local h = require("tests.devloop_helpers")
-local observation_support = require("testkit.old_behavior_observation_support")
+local observation_support = require("testkit_internal.old_behavior_observation_support")
 local payloads_builders = require("devloop.payloads.builders")
-local testing = require("testkit.testing")
+local testing = require("testkit_internal.testing")
 local observe_issue_department = require("departments.observe_issue.main")
 
 local t = h.t

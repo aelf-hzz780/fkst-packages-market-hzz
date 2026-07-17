@@ -4,9 +4,9 @@ local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
-local gh_argv = require("testkit.gh_argv_mock")
+local gh_argv = require("testkit_internal.gh_argv_mock")
 local m_builders = require("devloop.markers.builders")
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 
 local repo = "owner/repo"
 local issue_number = 42

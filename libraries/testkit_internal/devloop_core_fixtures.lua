@@ -1,7 +1,7 @@
 local M = {}
 
-local gh_argv = require("testkit.gh_argv_mock")
-local author_policy = require("testkit.github_author_policy")
+local gh_argv = require("testkit_internal.gh_argv_mock")
+local author_policy = require("testkit_internal.github_author_policy")
 
 local function configure_test_bot_login(login)
   local ok, devloop_base = pcall(require, "devloop.base")
@@ -27,7 +27,7 @@ end
 
 function M.new(deps)
   deps = deps or {}
-  local core = deps.core or error("testkit.devloop_core_fixtures: deps.core is required")
+  local core = deps.core or error("testkit_internal.devloop_core_fixtures: deps.core is required")
   local t = deps.t or fkst.test
 
   gh_argv.install(t, core)

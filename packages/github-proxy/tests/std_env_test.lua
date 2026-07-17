@@ -1,4 +1,4 @@
-local env = require("workflow.env")
+local env = require("workflow_internal.env")
 local t = fkst.test
 
 local allowed_env = {

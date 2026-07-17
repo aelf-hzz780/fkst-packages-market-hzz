@@ -4,7 +4,7 @@ local digest = require("core.digest")
 local materialization = require("core.materialization")
 local materialize_reconcile = require("materialize_reconcile")
 local marker = require("core.marker")
-local testing = require("testkit.testing")
+local testing = require("testkit_internal.testing")
 local t = fkst.test
 
 local repo = "owner/repo"

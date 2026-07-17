@@ -2,7 +2,7 @@ local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
 local seam = require("tests.entity_read_mock_helpers")
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 
 local function decode(text)
   local ok, value = pcall(json.decode, text or "")

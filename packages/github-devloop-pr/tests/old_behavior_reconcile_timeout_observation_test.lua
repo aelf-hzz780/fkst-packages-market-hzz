@@ -8,9 +8,9 @@ local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local h = require("tests.devloop_helpers")
 local m_rae = require("devloop.restart_actionable_epoch")
 local m_mgw = require("devloop.merge_gate_wait")
-local observation_support = require("testkit.old_behavior_observation_support")
+local observation_support = require("testkit_internal.old_behavior_observation_support")
 local replay_fields = require("devloop.replay_fields")
-local testing = require("testkit.testing")
+local testing = require("testkit_internal.testing")
 local reconcile_department = require("departments.reconcile.main")
 
 local t = h.t

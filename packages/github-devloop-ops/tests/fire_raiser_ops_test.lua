@@ -139,7 +139,15 @@ local function setup_workspace(name, child_test)
   local root = temp_root(name)
   local source = repo_root()
   write_file(root .. "/fkst.workspace.toml", '[workspace]\nunits = ["packages/*", "libraries/*"]\n')
-  for _, lib in ipairs({ "contract", "workflow", "testkit", "forge", "devloop" }) do
+  for _, lib in ipairs({
+    "contract",
+    "workflow",
+    "workflow_internal",
+    "testkit",
+    "testkit_internal",
+    "forge",
+    "devloop",
+  }) do
     copy_dir(source .. "/libraries/" .. lib, root .. "/libraries/" .. lib)
   end
   copy_package_without_tests(source, root, "github-devloop-ops")
@@ -185,7 +193,7 @@ local function fire_raiser_child(body)
 local t = fkst.test
 local core = require("core")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
-local gh_argv = require("testkit.gh_argv_mock")
+local gh_argv = require("testkit_internal.gh_argv_mock")
 gh_argv.install(t, core)
 
 local function opts(name)

@@ -1,5 +1,5 @@
 local core = require("core")
-local env = require("workflow.env")
+local env = require("workflow_internal.env")
 local error_facts = require("contract.error_facts")
 local claim_identity = require("forge.github.claim_identity")
 local ports_lib = require("forge.ports")

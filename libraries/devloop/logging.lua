@@ -3,7 +3,7 @@ local parsers_misc = require("devloop.parsers.misc")
 local C = {}
 local S = {}
 local error_facts = require("contract.error_facts")
-local logging = require("workflow.logging")
+local logging = require("workflow_internal.logging")
 local config = require("devloop.config")
 
 -- Structured lifecycle logging as a self-contained module. Methods are module-local C functions

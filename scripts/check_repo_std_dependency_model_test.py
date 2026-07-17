@@ -48,6 +48,41 @@ def inventory_line(path: str, module: str) -> str:
     return f'{{"path":"{path}","module":"{module}"}}\n'
 
 
+def host_surface_manifest(
+    path: Path,
+    name: str,
+    deps: list[str],
+    exports: list[str],
+    *,
+    publishable: bool = True,
+    exact: bool = True,
+) -> None:
+    quoted_deps = ", ".join(f'"{item}"' for item in deps)
+    quoted_exports = ", ".join(f'"{item}"' for item in exports)
+    write(
+        path,
+        f'''kind = "library"
+name = "{name}"
+
+[lib_deps]
+libraries = [{quoted_deps}]
+
+[library]
+name = "{name}"
+stable_id = "fkst.library.{name}"
+version = "workspace"
+publishable = {str(publishable).lower()}
+
+[exports]
+public = [{quoted_exports}]
+exact = {str(exact).lower()}
+
+[visibility]
+public = true
+''',
+    )
+
+
 class LibraryDependencyModelGuardTest(unittest.TestCase):
     def seed_contract(self, root: Path) -> None:
         manifest(root / "libraries" / "contract" / "fkst.toml", "contract", [], public=True)
@@ -89,6 +124,59 @@ class LibraryDependencyModelGuardTest(unittest.TestCase):
         warnings: list[str] = []
         check_repo.check_std_dependency_model(root, violations, warnings)
         return violations, warnings
+
+    def seed_host_surfaces(self, root: Path) -> None:
+        host_surface_manifest(
+            root / "libraries" / "workflow" / "fkst.toml",
+            "workflow",
+            ["contract"],
+            ["workflow.dead_letter", "workflow.saga"],
+        )
+        host_surface_manifest(
+            root / "libraries" / "testkit" / "fkst.toml",
+            "testkit",
+            [],
+            ["testkit.graph"],
+        )
+
+    def test_host_surfaces_are_publishable_and_exact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.seed_host_surfaces(root)
+
+            violations, _warnings = self.run_guard(root)
+
+        self.assertEqual(violations, [])
+
+    def test_host_surfaces_reject_private_or_broad_exports(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            host_surface_manifest(
+                root / "libraries" / "workflow" / "fkst.toml",
+                "workflow",
+                ["contract"],
+                ["workflow.*"],
+                exact=False,
+            )
+            host_surface_manifest(
+                root / "libraries" / "testkit" / "fkst.toml",
+                "testkit",
+                [],
+                ["testkit.graph"],
+                publishable=False,
+            )
+
+            violations, _warnings = self.run_guard(root)
+
+        self.assertIn(
+            "G-LIB-DEP: workflow host surface exports must be exactly "
+            "['workflow.dead_letter', 'workflow.saga'] with exact = true",
+            violations,
+        )
+        self.assertIn(
+            "G-LIB-DEP: testkit host surface must set [library].publishable = true",
+            violations,
+        )
 
 
     def test_devloop_visibility_excludes_non_family_packages(self) -> None:

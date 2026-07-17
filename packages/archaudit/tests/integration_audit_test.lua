@@ -1,6 +1,6 @@
 local core = require("core")
 local audit_main = require("departments.audit.main")
-local env_lib = require("workflow.env")
+local env_lib = require("workflow_internal.env")
 local helper = require("tests.audit_test_helpers")
 local t = fkst.test
 

@@ -1,5 +1,5 @@
 local core = require("core")
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 local t = fkst.test
 
 local repo = "owner/x"

@@ -1,5 +1,5 @@
 local blueprint = require("core.blueprint")
-local workflow_codex = require("workflow.codex")
+local workflow_codex = require("workflow_internal.codex")
 
 local M = {}
 

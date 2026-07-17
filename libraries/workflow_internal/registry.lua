@@ -1,4 +1,4 @@
--- workflow.registry: sorted/unique indexed registry builders for workflow-sized registries.
+-- workflow_internal.registry: sorted/unique indexed registry builders for workflow-sized registries.
 local S = {}
 
 local function index_name(index_entry)

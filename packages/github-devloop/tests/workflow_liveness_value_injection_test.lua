@@ -1,7 +1,7 @@
 local t = fkst.test
 
 local function install_shared(model, resolved)
-  return require("workflow.liveness.shared").install(model, resolved)
+  return require("workflow_internal.liveness.shared").install(model, resolved)
 end
 
 return {

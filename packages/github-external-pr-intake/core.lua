@@ -1,8 +1,8 @@
-local env = require("workflow.env")
+local env = require("workflow_internal.env")
 local error_facts = require("contract.error_facts")
 local content_filter = require("forge.github.content_filter")
 local external_pr_bridge = require("contract.external_pr_bridge")
-local logging = require("workflow.logging")
+local logging = require("workflow_internal.logging")
 local strings = require("contract.strings")
 local forge_strings = require("forge.strings")
 
