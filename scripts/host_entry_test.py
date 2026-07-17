@@ -431,6 +431,142 @@ class HostEntryTest(unittest.TestCase):
         finally:
             h.close()
 
+    def test_host_test_runs_host_run_graph_tests_with_configured_platform_roots(self) -> None:
+        h = HostEntryHarness()
+        fake_bin = h.root / "fake-framework"
+        engine_log = h.root / "engine-log"
+        fake_bin.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "{ printf 'CMD\\n'; for arg in \"$@\"; do printf '%s\\n' \"$arg\"; done; printf 'END\\n'; } >> "
+            + shell_quote(engine_log)
+            + "\n"
+            "if [ \"${1:-}\" = \"manifest\" ]; then\n"
+            "  manifest=''\n"
+            "  while [ \"$#\" -gt 0 ]; do\n"
+            "    if [ \"${1:-}\" = \"--manifest\" ]; then shift; manifest=\"${1:-}\"; fi\n"
+            "    shift || true\n"
+            "  done\n"
+            "  case \"$manifest\" in\n"
+            "    */site-board/fkst.toml) printf 'idle-detector\\n'; exit 0 ;;\n"
+            "    *) exit 10 ;;\n"
+            "  esac\n"
+            "fi\n"
+            "if [ \"${1:-}\" = \"--self-test\" ]; then\n"
+            "  coverage=''\n"
+            "  while [ \"$#\" -gt 0 ]; do\n"
+            "    if [ \"${1:-}\" = \"--coverage\" ]; then shift; coverage=\"${1:-}\"; fi\n"
+            "    shift || true\n"
+            "  done\n"
+            "  if [ -n \"$coverage\" ]; then mkdir -p \"$coverage\"; printf '{\"files\":[]}\\n' > \"$coverage/coverage.json\"; fi\n"
+            "  printf '0 passed, 0 failed\\n'\n"
+            "  exit 0\n"
+            "fi\n"
+            "if [ \"${1:-}\" = \"conformance\" ]; then\n"
+            "  printf '%s\\n' '{\"ok\":true}'\n"
+            "  exit 0\n"
+            "fi\n"
+            "if [ \"${1:-}\" = \"test\" ]; then\n"
+            "  report=''\n"
+            "  roots=()\n"
+            "  while [ \"$#\" -gt 0 ]; do\n"
+            "    if [ \"${1:-}\" = \"--report-json\" ]; then shift; report=\"${1:-}\"; fi\n"
+            "    if [ \"${1:-}\" = \"--package-root\" ]; then shift; roots+=(\"${1:-}\"); fi\n"
+            "    shift || true\n"
+            "  done\n"
+            "  run_graph_roots=0\n"
+            "  dep_tests=0\n"
+            "  for root in \"${roots[@]}\"; do\n"
+            "    if ls \"$root\"/tests/run_graph*_test.lua >/dev/null 2>&1; then run_graph_roots=$((run_graph_roots + 1)); fi\n"
+            "  done\n"
+            "  if [ \"$run_graph_roots\" -gt 0 ] && [ \"${#roots[@]}\" -lt 2 ]; then\n"
+            "    printf 'FAIL host run_graph test executed without platform roots\\n'\n"
+            "    exit 1\n"
+            "  fi\n"
+            "  if [ \"$run_graph_roots\" -gt 0 ]; then\n"
+            "    for root in \"${roots[@]}\"; do\n"
+            "      if [ \"$(basename \"$root\")\" != \"site-board\" ] && [ -d \"$root/tests\" ]; then dep_tests=$((dep_tests + 1)); fi\n"
+            "    done\n"
+            "    if [ \"$dep_tests\" -ne 0 ]; then\n"
+            "      printf 'FAIL graph dependency tests were not stripped\\n'\n"
+            "      exit 1\n"
+            "    fi\n"
+            "  fi\n"
+            "  if [ -n \"$report\" ]; then printf '%s\\n' '{\"schema\":\"fkst.test.report.v1\",\"summary\":{\"passed\":1,\"failed\":0},\"tests\":[{\"owner_namespace\":\"site-board\",\"file\":\"tests/site_test.lua\",\"name\":\"test_site\",\"status\":\"pass\"}]}' > \"$report\"; fi\n"
+            "  printf '1 passed, 0 failed\\n'\n"
+            "  exit 0\n"
+            "fi\n"
+            "exit 99\n",
+            encoding="utf-8",
+        )
+        fake_bin.chmod(0o755)
+        try:
+            (h.local_packages / "site-board" / "fkst.toml").write_text(
+                'kind = "package.composed"\nname = "site-board"\n\n[code]\nroot = "."\n',
+                encoding="utf-8",
+            )
+            tests = h.local_packages / "site-board" / "tests"
+            tests.mkdir()
+            (tests / "site_test.lua").write_text("return { test_site = function() end }\n", encoding="utf-8")
+            (tests / "run_graph_platform_test.lua").write_text(
+                "return { test_run_graph_platform = function() end }\n",
+                encoding="utf-8",
+            )
+            platform_tests = h.platform / "packages" / "idle-detector" / "tests"
+            platform_tests.mkdir()
+            (platform_tests / "platform_test.lua").write_text(
+                "return { test_platform = function() end }\n",
+                encoding="utf-8",
+            )
+            (h.host / ".fkst" / "compose" / "package-roots").write_text(
+                ".fkst/local-packages/site-board\nfkst-packages:packages/idle-detector\n",
+                encoding="utf-8",
+            )
+
+            result = h.run_helper(
+                textwrap.dedent(
+                    f"""\
+                    set -euo pipefail
+                    source scripts/run.sh
+                    resolve_bin() {{ BIN={shell_quote(fake_bin)}; export BIN; }}
+                    ensure_fresh_bin() {{ :; }}
+                    cmd_host --host-root {shell_quote(h.host)} --platform-root {shell_quote(h.platform)} -- test
+                    """
+                )
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            blocks: list[list[str]] = []
+            current: list[str] | None = None
+            for line in engine_log.read_text(encoding="utf-8").splitlines():
+                if line == "CMD":
+                    current = []
+                elif line == "END":
+                    self.assertIsNotNone(current)
+                    blocks.append(current or [])
+                    current = None
+                elif current is not None:
+                    current.append(line)
+
+            tests_blocks = [block for block in blocks if block and block[0] == "test"]
+            self.assertEqual(len(tests_blocks), 2, blocks)
+            normal_roots = [
+                tests_blocks[0][index + 1]
+                for index, value in enumerate(tests_blocks[0])
+                if value == "--package-root"
+            ]
+            graph_roots = [
+                tests_blocks[1][index + 1]
+                for index, value in enumerate(tests_blocks[1])
+                if value == "--package-root"
+            ]
+            self.assertEqual(len(normal_roots), 1)
+            self.assertEqual(sorted(Path(root).name for root in graph_roots), ["idle-detector", "site-board"])
+            self.assertNotIn(str(h.platform / "packages" / "idle-detector"), tests_blocks[0])
+            self.assertNotIn(str(h.platform / "packages" / "idle-detector"), tests_blocks[1])
+        finally:
+            h.close()
+
     def test_host_test_runs_platform_unit_tests_when_host_is_platform(self) -> None:
         h = HostEntryHarness()
         fake_bin = h.root / "fake-framework"
