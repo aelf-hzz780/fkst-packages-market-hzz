@@ -82,6 +82,7 @@ def make_fake_bin(path: Path) -> None:
                 "FKST_DEVLOOP_INTEGRATION_BRANCH",
                 "FKST_DEVLOOP_ROLLUP_MERGE",
                 "FKST_DEVLOOP_MANAGED_BOT_LOGINS",
+                "FKST_DEVLOOP_LOCAL_TEST_COMMAND",
                 "FKST_GITHUB_PROXY_POLL_LABEL_PREFIX",
                 "FKST_RUNTIME_ROOT",
                 "FKST_DURABLE_ROOT",
@@ -343,6 +344,7 @@ class DogfoodLayout:
             "CAPTURE_FILE": str(self.capture),
             "FKST_NO_AUTOBUILD": "1",
             "FKST_GITHUB_WRITE": "0",
+            "FKST_DEVLOOP_LOCAL_TEST_COMMAND": "true",
             "DUR_PACKAGES": str(self.dogfood_root / "stable-durable-packages"),
             "DUR_SUBSTRATE": str(self.dogfood_root / "stable-durable-substrate"),
             "DUR_WEBSITE": str(self.dogfood_root / "stable-durable-website"),
@@ -440,6 +442,7 @@ class HostRunEquivalenceTest(unittest.TestCase):
                     self.assertEqual(new_record, golden[target])
                     env = new_record["env"]  # type: ignore[index]
                     self.assertEqual(env["FKST_GITHUB_WRITE"], "1")  # type: ignore[index]
+                    self.assertEqual(env["FKST_DEVLOOP_LOCAL_TEST_COMMAND"], "true")  # type: ignore[index]
                     self.assertEqual(
                         env["FKST_RUNTIME_ROOT"],  # type: ignore[index]
                         f"$ROOT/dogfood/dogfood-rt-{target}.{FIXED_TS}",

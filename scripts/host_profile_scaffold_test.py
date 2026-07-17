@@ -65,6 +65,16 @@ class HostProfileScaffoldTest(unittest.TestCase):
         self.assertIn("user/global-host-profiles.md", docs_index)
         self.assertIn("docs/user/global-host-profiles.md", readme)
 
+    def test_devloop_local_iteration_gate_is_documented_as_a_host_contract(self) -> None:
+        doc = self.read("docs/user/global-host-profiles.md")
+        scaffold = self.read("docs/user/host-profile.env.example")
+
+        self.assertIn("`FKST_DEVLOOP_LOCAL_TEST_COMMAND`", doc)
+        self.assertIn("scripts/run.sh test-affected", doc)
+        self.assertIn("local and CI gate", doc)
+        self.assertIn("FKST_DEVLOOP_LOCAL_TEST_COMMAND", scaffold)
+        self.assertIn("make preflight", scaffold)
+
 
 if __name__ == "__main__":
     unittest.main()

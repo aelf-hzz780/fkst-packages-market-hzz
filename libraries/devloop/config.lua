@@ -30,6 +30,7 @@ local allowed_env = {
   FKST_DEVLOOP_CONFLICT_LOG_CMD = true,
   FKST_DEVLOOP_BOARD_CMD = true,
   FKST_DEVLOOP_TEST_COMMAND = true,
+  FKST_DEVLOOP_LOCAL_TEST_COMMAND = true,
   FKST_OUTPUT_LANG = true,
   FKST_DEBUG_STAMP = true,
 }
@@ -195,8 +196,12 @@ function C.test_command(exec)
   return command
 end
 
-function C.local_iteration_test_command(_exec)
-  return "scripts/run.sh test-affected"
+function C.local_iteration_test_command(exec)
+  local command = C.read_env("FKST_DEVLOOP_LOCAL_TEST_COMMAND", exec)
+  if command == nil then
+    return "scripts/run.sh test-affected"
+  end
+  return command
 end
 
 local function current_checkout_branch(exec)

@@ -42,6 +42,7 @@
     "env": {
       "BIN": "$ROOT/fake-fkst-framework",
       "FKST_DEVLOOP_INTEGRATION_BRANCH": "integration-test",
+      "FKST_DEVLOOP_LOCAL_TEST_COMMAND": "true",
       "FKST_DEVLOOP_MANAGED_BOT_LOGINS": "test-bot,peer-bot",
       "FKST_DEVLOOP_ROLLUP_MERGE": "auto",
       "FKST_DEVLOOP_UPSTREAM_BRANCH": "dev",
@@ -97,6 +98,7 @@
     "env": {
       "BIN": "$ROOT/fake-fkst-framework",
       "FKST_DEVLOOP_INTEGRATION_BRANCH": "integration-test",
+      "FKST_DEVLOOP_LOCAL_TEST_COMMAND": "true",
       "FKST_DEVLOOP_MANAGED_BOT_LOGINS": "test-bot,peer-bot",
       "FKST_DEVLOOP_ROLLUP_MERGE": "auto",
       "FKST_DEVLOOP_UPSTREAM_BRANCH": "dev",
@@ -148,6 +150,7 @@
     "env": {
       "BIN": "$ROOT/fake-fkst-framework",
       "FKST_DEVLOOP_INTEGRATION_BRANCH": "integration-test",
+      "FKST_DEVLOOP_LOCAL_TEST_COMMAND": "true",
       "FKST_DEVLOOP_MANAGED_BOT_LOGINS": "test-bot,peer-bot",
       "FKST_DEVLOOP_ROLLUP_MERGE": "auto",
       "FKST_DEVLOOP_UPSTREAM_BRANCH": "dev",

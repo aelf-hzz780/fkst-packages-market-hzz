@@ -102,7 +102,7 @@ end
 local function repair_input_instruction(fix)
   if type(fix) == "table" and fix.repair_input == "ci-failure" then
     return "This fix round is for terminal own-CI failure key " .. devloop_base.neutralize_untrusted_prompt_text(fix.ci_failure_key or "")
-      .. "; reproduce with `scripts/run.sh test` or the scoped local iteration command, then fix the failing own-CI test."
+      .. "; reproduce with the configured local iteration command, then fix the failing own-CI test."
   end
   return "This fix round is for review-feedback; address the named review blocking gap."
 end

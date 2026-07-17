@@ -48,7 +48,7 @@ class RunScriptContractTest(unittest.TestCase):
             "check_repo_test_graphql.py", "check_repo_interface_test.py", "lua_coverage_to_lcov_test.py", "check_repo_test.py", "check_repo_github_content_ingress_test.py", "check_repo_error_class_test.py", "check_repo_dependency_cycle_test.py",
             "check_repo_std_dependency_model_test.py", "check_repo_devloop_installer_test.py", "check_repo_saga_head_test.py",
             "check_repo_namespaced_queue_test.py", "check_repo_shell_out_to_self_test.py", "check_repo_fkst_layout_test.py",
-            "bin_cache_test.py", "bin_bootstrap_test.py", "host_entry_test.py", "host_run_test.py", "host_run_equivalence_test.py",
+            "bin_cache_test.py", "bin_bootstrap_test.py", "host_entry_test.py", "host_run_test.py", "host_run_local_iteration_test.py", "host_run_equivalence_test.py",
             "run_sh_coverage_test.py", "run_sh_test_affected_test.py", "board_test.py", "dogfood_board_test.py", "doctor_test.py", "ratchet_migration_slicer_test.py",
             "competence_gate_test.py", "test_parallel_test.py",
         )
