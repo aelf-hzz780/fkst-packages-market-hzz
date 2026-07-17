@@ -61,6 +61,33 @@ class LocalIterationCommandHarness:
             check=False,
         )
 
+    def validate_profile(self, profile: Path, packages: str = "github-proxy github-devloop") -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env.pop("FKST_DEVLOOP_LOCAL_TEST_COMMAND", None)
+        body = textwrap.dedent(
+            """\
+            set -euo pipefail
+            source "$1"
+            /bin/bash -c '
+                set -euo pipefail
+                source scripts/host_run.sh
+                HOST_RUN_PROJECT_ROOT="$1"
+                HOST_RUN_PLATFORM_PACKAGES="$2"
+                HOST_RUN_HOST_PACKAGES=""
+                host_run_validate_local_iteration_test_command
+              ' host-profile-child "$2" "$3"
+            """
+        )
+        return subprocess.run(
+            ["/bin/bash", "-c", body, "host-profile-test", str(profile), str(self.root), packages],
+            cwd=REPO_ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
 
 class HostRunLocalIterationTest(unittest.TestCase):
     def test_activation_validates_before_restarting_the_existing_supervisor(self) -> None:
@@ -104,6 +131,29 @@ class HostRunLocalIterationTest(unittest.TestCase):
         try:
             h.write_executable("tools/preflight")
             result = h.validate("tools/preflight --scope changed")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("local_iteration_test_command=tools/preflight --scope changed", result.stdout)
+        finally:
+            h.close()
+
+    def test_scaffolded_command_is_inherited_by_child_validator(self) -> None:
+        h = LocalIterationCommandHarness()
+        try:
+            h.write_executable("tools/preflight")
+            scaffold = (REPO_ROOT / "docs" / "user" / "host-profile.env.example").read_text(encoding="utf-8")
+            profile_line = next(
+                line.removeprefix("# ")
+                for line in scaffold.splitlines()
+                if line.startswith("# ") and "FKST_DEVLOOP_LOCAL_TEST_COMMAND=" in line
+            )
+            profile = h.root / "host.env"
+            profile.write_text(
+                profile_line.replace("make preflight", "tools/preflight --scope changed") + "\n",
+                encoding="utf-8",
+            )
+
+            result = h.validate_profile(profile)
+
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("local_iteration_test_command=tools/preflight --scope changed", result.stdout)
         finally:
