@@ -48,6 +48,12 @@ local function result_summary(result)
     .. " error=" .. tostring(result and result.error)
 end
 
+local function mock_write_env_many(value, times)
+  for _ = 1, times do
+    mock_write_env(value)
+  end
+end
+
 return {
   test_net_empty_pr_after_fix_marks_closed_unmerged_without_review_proposal = function()
     local event = reviewing()
@@ -123,8 +129,15 @@ return {
       fix_comment.payload.body,
     })
     mock_pr_origin({ origin_marker(impl_version) }, branch, net_empty_head, "OPEN", "dev")
+    mock_write_env_many("1", 4)
+    t.mock_command("gh pr close '7' --repo 'owner/repo'", {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
     local re_review = run_review_pr(reviewing_raise.payload, opts("empty-pr-churn-net-empty-review", {
       FKST_TEST_PR_EMPTY_DIFF_NAME_ONLY = "1",
+      FKST_GITHUB_WRITE = "1",
     }))
     if re_review.exit_code ~= 0 then
       error("net-empty review step failed: " .. result_summary(re_review))
@@ -148,5 +161,6 @@ return {
     end
     t.eq(terminal.payload.handoff.kind, "github-devloop.closed_unmerged")
     t.is_true(count_calls("gh pr diff '7' --repo 'owner/repo' --name-only") > 0)
+    t.eq(count_calls("gh pr close '7' --repo 'owner/repo'"), 1)
   end,
 }
