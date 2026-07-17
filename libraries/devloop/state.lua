@@ -7,6 +7,7 @@ local C = {}
 local devloop_base = require("devloop.base")
 local transition_version = require("contract.transition_version")
 local m_builders = require("devloop.markers.builders")
+local issue_observation_facts = require("devloop.restart.issue_observation_facts")
 
 local label_by_state = { thinking = "fkst-dev:thinking", dependency_wait = "fkst-dev:ready", ready = "fkst-dev:ready", implementing = "fkst-dev:implementing", ["awaiting-pr"] = "fkst-dev:awaiting-pr", ["pr-open"] = "fkst-dev:pr-open", reviewing = "fkst-dev:reviewing", ["merge-ready"] = "fkst-dev:merge-ready", merging = "fkst-dev:merging", merged = "fkst-dev:merged", ["closed-unmerged"] = "fkst-dev:blocked", fixing = "fkst-dev:fixing", ["review-meta"] = "fkst-dev:review-meta", ["impl-failed"] = "fkst-dev:impl-failed", declined = "fkst-dev:declined", blocked = "fkst-dev:blocked" }
 local state_labels = {}
@@ -328,6 +329,12 @@ end
 
 function C.current_state(comments, proposal_id)
   return derive_current_marker(comments, proposal_id)
+end
+
+function C.current_issue_observation_is_terminal(comments, proposal_id)
+  local current = derive_current_marker(comments, proposal_id)
+  local row = current and issue_observation_facts.transition_row(current.state) or nil
+  return row ~= nil and row.terminal == true
 end
 
 function C.is_current_state(comments, proposal_id, state, version)
