@@ -113,6 +113,7 @@
 {"path":"packages/github-devloop-pr/core/merge_executor.lua","owner":"pr","reason":"github-devloop-pr owns shared PR merge execution after extraction."}
 {"path":"packages/github-devloop-pr/core/merge_queue_tick.lua","owner":"pr","reason":"github-devloop-pr owns merge-queue tick redrive and chaining after extraction."}
 {"path":"packages/github-devloop-pr/core/merge_runtime_files.lua","owner":"pr","reason":"github-devloop-pr owns PR merge runtime file paths after extraction."}
+{"path":"packages/github-devloop-pr/core/no_legitimate_diff.lua","owner":"pr","reason":"github-devloop-pr owns PR-child effective-diff admission and the closed-unmerged terminal handoff."}
 {"path":"packages/github-devloop-pr/core/pr_label_requests.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/core/pr_review_replayer.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/core/restart/canonicalization_inventory.lua","owner":"pr","reason":"authored canonicalization edges belong to the PR saga authority."}

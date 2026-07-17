@@ -15,12 +15,14 @@ local v_validate_proposal = require("devloop.validators.validate_proposal")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
 local devloop_commands = require("devloop.commands")
+local no_legitimate_diff = require("core.no_legitimate_diff")
 -- Preserve existing body line coordinates for the coverage ratchet.
 
 local spec = {
   consumes = { "devloop_reviewing" },
   produces = {
     "consensus.proposal",
+    "github-proxy.github_pr_comment_request",
   },
   stall_window = "30s",
   retry = { max_attempts = 12, base = "5s", cap = "30s" },
@@ -133,8 +135,8 @@ return saga.department(spec, { done = function() return false end, act = functio
       devloop_logging.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "skip-stale(pr-closed)", "re-derived PR is not open")
       return
     end
-
     local pr_source_ref = entity_lib.pr_source_ref(repo, reviewing.pr_number)
+
     local current_issue = {
       title = "PR #" .. tostring(reviewing.pr_number),
       body = "(PR-only review context; issue backing is absent)",
@@ -163,6 +165,11 @@ return saga.department(spec, { done = function() return false end, act = functio
     }) }
     local content_fetch = context_fetch[1]
     local high_risk = context_fetch[2]
+    local risk = context_fetch[3]
+    if no_legitimate_diff.risk_is_empty_diff(risk) then
+      no_legitimate_diff.raise_closed_unmerged("review_pr", core, repo, reviewing.pr_number, reviewing.proposal_id, state, pr_source_ref)
+      return
+    end
     local proposal = payloads_builders.build_board_pr_review_proposal(core, repo, issue_number, reviewing.pr_number, reviewing.version, current_pr.head_sha, current_issue, pr_source_ref, event.ts, current_pr.comments, content_fetch, high_risk)
     if reviewing.review_delivery_dedup_key ~= nil then
       if devloop_base.pr_review_proposal_id_from_redrive_delivery_dedup_key(
