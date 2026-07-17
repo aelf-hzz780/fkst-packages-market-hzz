@@ -394,6 +394,61 @@ host_run_validate_shape() {
   fi
 }
 
+host_run_validate_local_iteration_test_command_for() {
+  local project_root="$1" package_names="$2" name command executable candidate
+  local needs_local_gate=0
+  for name in $package_names; do
+    case "$name" in
+      github-devloop|github-devloop-pr) needs_local_gate=1 ;;
+    esac
+  done
+  [ "$needs_local_gate" -eq 1 ] || return 0
+
+  command="${FKST_DEVLOOP_LOCAL_TEST_COMMAND:-scripts/run.sh test-affected}"
+  command="${command#"${command%%[![:space:]]*}"}"
+  command="${command%"${command##*[![:space:]]}"}"
+  case "$command" in
+    ""|*$'\n'*|*';'*|*'&'*|*'|'*|*'<'*|*'>'*|*'`'*|*'$('* )
+      echo "error: FKST_DEVLOOP_LOCAL_TEST_COMMAND must be one executable invocation; put multi-step logic in a repository-owned executable or task target" >&2
+      return 1
+      ;;
+  esac
+  if ! /bin/bash -n -c "$command" >/dev/null 2>&1; then
+    echo "error: FKST_DEVLOOP_LOCAL_TEST_COMMAND has invalid shell syntax" >&2
+    return 1
+  fi
+
+  executable="${command%%[[:space:]]*}"
+  case "$executable" in
+    ""|*[!A-Za-z0-9_./+-]*)
+      echo "error: FKST_DEVLOOP_LOCAL_TEST_COMMAND must start with an unquoted executable name or path" >&2
+      return 1
+      ;;
+    /*) candidate="$executable" ;;
+    */*) candidate="$project_root/$executable" ;;
+    *)
+      if ! (cd "$project_root" && command -v "$executable" >/dev/null 2>&1); then
+        echo "error: local iteration test command is not runnable from $project_root: $command; set FKST_DEVLOOP_LOCAL_TEST_COMMAND to this repository's local CI-equivalent gate" >&2
+        return 1
+      fi
+      candidate=""
+      ;;
+  esac
+  if [ -n "$candidate" ] && { [ ! -f "$candidate" ] || [ ! -x "$candidate" ]; }; then
+    echo "error: local iteration test command is not runnable from $project_root: $command; set FKST_DEVLOOP_LOCAL_TEST_COMMAND to this repository's local CI-equivalent gate" >&2
+    return 1
+  fi
+
+  export FKST_DEVLOOP_LOCAL_TEST_COMMAND="$command"
+  echo "local_iteration_test_command=$command"
+}
+
+host_run_validate_local_iteration_test_command() {
+  host_run_validate_local_iteration_test_command_for \
+    "$HOST_RUN_PROJECT_ROOT" \
+    "$HOST_RUN_PLATFORM_PACKAGES $HOST_RUN_HOST_PACKAGES"
+}
+
 host_run_host_package_base() {
   if host_run_same_path "$HOST_RUN_PROJECT_ROOT" "$HOST_RUN_PLATFORM_ROOT"; then
     printf '%s/packages\n' "$HOST_RUN_PROJECT_ROOT"
@@ -560,6 +615,7 @@ host_run_supervise_contract() {
     esac
   fi
 
+  host_run_validate_local_iteration_test_command || return $?
   host_run_restart_prior || return $?
   export FKST_RUNTIME_ROOT="$HOST_RUN_RUNTIME_ROOT"
   export FKST_DURABLE_ROOT="$HOST_RUN_DURABLE_ROOT"
