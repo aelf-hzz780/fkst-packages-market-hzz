@@ -7,7 +7,7 @@ local conv_reconcile = require("devloop.convergence.reconcile")
 local decompose_lib = require("devloop.decompose")
 local graph = require("testkit.graph")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 local h = require("tests.devloop_helpers")
 
 local t = h.t

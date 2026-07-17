@@ -1,5 +1,5 @@
 local M = {}
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 
 local bundle_json = '{"title":"Implement decision recorder","body":"Full issue body","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[],"author":{"login":"fkst-test-bot"}}\n'
 local pr_context_json = '{"title":"PR title","body":"PR body","headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-04T01:02:03Z","comments":[],"labels":[],"author":{"login":"fkst-test-bot"}}\n'
@@ -21,12 +21,12 @@ end
 
 function M.new(deps)
   deps = deps or {}
-  local entity_lib = deps.entity_lib or error("testkit.devloop_helpers_fixtures: deps.entity_lib is required")
-  local base = deps.base or error("testkit.devloop_helpers_fixtures: deps.base is required")
-  local pr = deps.pr or error("testkit.devloop_helpers_fixtures: deps.pr is required")
-  local worktree = deps.worktree or error("testkit.devloop_helpers_fixtures: deps.worktree is required")
+  local entity_lib = deps.entity_lib or error("testkit_internal.devloop_helpers_fixtures: deps.entity_lib is required")
+  local base = deps.base or error("testkit_internal.devloop_helpers_fixtures: deps.base is required")
+  local pr = deps.pr or error("testkit_internal.devloop_helpers_fixtures: deps.pr is required")
+  local worktree = deps.worktree or error("testkit_internal.devloop_helpers_fixtures: deps.worktree is required")
   local entity_read_mocks = deps.entity_read_mocks
-    or error("testkit.devloop_helpers_fixtures: deps.entity_read_mocks is required")
+    or error("testkit_internal.devloop_helpers_fixtures: deps.entity_read_mocks is required")
   local mode = deps.mode or "standard"
   local mock_review_result_pr_name_only = deps.mock_review_result_pr_name_only == true
   local hydrate_handoff_state_comment = deps.hydrate_handoff_state_comment == true

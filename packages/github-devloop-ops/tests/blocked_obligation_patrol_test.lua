@@ -2,7 +2,7 @@ local h = require("tests.devloop_ops_helpers")
 local t = h.t
 local core = h.core
 local conv_reconcile = require("devloop.convergence.reconcile")
-local testing = require("testkit.testing")
+local testing = require("testkit_internal.testing")
 
 local repo = "owner/repo"
 local issue_number = 42

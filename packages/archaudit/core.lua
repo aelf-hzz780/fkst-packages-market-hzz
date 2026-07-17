@@ -228,9 +228,9 @@ function M.producer_liveness_restart_rows(contracts)
 end
 
 local function liveness_model(rows)
-  local workflow_liveness_shared = require("workflow.liveness.shared")
-  local workflow_liveness_contract = require("workflow.liveness.contract")
-  local restart_liveness_contract = require("workflow.restart_liveness_contract")
+  local workflow_liveness_shared = require("workflow_internal.liveness.shared")
+  local workflow_liveness_contract = require("workflow_internal.liveness.contract")
+  local restart_liveness_contract = require("workflow_internal.restart_liveness_contract")
   local model = {
     restart_package_name = "archaudit",
     restart_lifecycle_states = {},

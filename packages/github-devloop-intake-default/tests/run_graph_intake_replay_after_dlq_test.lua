@@ -7,7 +7,7 @@ local core = require("core")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local m_builders = require("devloop.markers.builders")
 local m_state = require("devloop.state")
-local gh_argv = require("testkit.gh_argv_mock")
+local gh_argv = require("testkit_internal.gh_argv_mock")
 
 gh_argv.install(t, core)
 

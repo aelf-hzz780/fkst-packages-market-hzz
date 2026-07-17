@@ -100,17 +100,18 @@ cross-package composition goes through event queues.
 
 Shared repo-root code is split by positive library boundary. `libraries/contract/` contains only
 publishable value/protocol primitives (`contract.source_ref`, `contract.payload`,
-`contract.error_facts`, and scalar `contract.strings`). Runtime orchestration helpers live in
-`libraries/workflow/`, test and conformance tooling in `libraries/testkit/`, forge-facing GitHub/Git
-adapters in `libraries/forge/`, and the github-devloop product kernel in `libraries/devloop/`.
-Packages declare direct `lib_deps` such as `["contract", "workflow", "testkit"]`,
-`["contract", "workflow", "testkit", "forge"]`, or
-`["contract", "workflow", "testkit", "forge", "devloop"]` in their `fkst.toml`; the engine's scoped
-resolver grants access to modules from those manifest dependencies rather than from per-package
-filesystem symlinks. New and migrated `gh`/`git` access goes through `forge.github`/`forge.git`
+`contract.error_facts`, and scalar `contract.strings`). The publishable host authoring surface is
+limited to `workflow.saga`, `workflow.dead_letter`, and `testkit.graph`. Repo-private orchestration
+and test helpers live in `libraries/workflow_internal/` and `libraries/testkit_internal/`;
+forge-facing GitHub/Git adapters live in `libraries/forge/`, and the github-devloop product kernel
+lives in `libraries/devloop/`. Packages declare only the direct libraries they require in
+`fkst.toml`; the engine's scoped resolver grants access to those modules rather than from
+per-package filesystem symlinks. New and migrated `gh`/`git` access goes through
+`forge.github`/`forge.git`
 (production wiring via `forge.ports`); remaining raw call sites are migration debt in
-`migration/gh-git-adapter.allowlist` that the G-ADAPTER ratchet shrinks. Tests use
-`testkit.testing` with `forge.github_fake` / `forge.git_fake`.
+`migration/gh-git-adapter.allowlist` that the G-ADAPTER ratchet shrinks. Platform-internal tests use
+`testkit_internal.testing` with `forge.github_fake` / `forge.git_fake`; host integration tests use
+the publishable `testkit.graph` surface.
 
 Runtime package roots live only under `.fkst/`. In this library repository, `.fkst/local-packages`
 is a regenerated relative symlink to `packages/` and represents this repo's own packages.
@@ -223,9 +224,9 @@ selected repository-shape checks. Engine tests remain the authority for real pac
 
 Repository-shape guards include G9, which forbids peer cross-package `require` and keeps sharing on
 workspace libraries; G10, which shrinks the saga-handler allowlist toward `workflow.saga.department`;
-G-LIB-DEP, which locks the library dependency DAG and contract publishable surface; and G-ADAPTER,
+G-LIB-DEP, which locks the library dependency DAG and exact publishable host surfaces; and G-ADAPTER,
 which shrinks the `gh`/`git` command-construction allowlist toward `forge.github` / `forge.git`.
-Ports-using `gh`/`git` business tests use injected fakes through `testkit.testing`;
+Ports-using `gh`/`git` business tests use injected fakes through `testkit_internal.testing`;
 existing/adapter-contract tests may still use `fkst.test.mock_command` while the migration proceeds. Other external CLIs such
 as `codex` still use the engine command mock; no fake `gh`/`git`/`codex` binaries are generated,
 and unmocked external commands fail closed.

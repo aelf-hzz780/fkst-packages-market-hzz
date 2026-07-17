@@ -1,6 +1,6 @@
 local t = fkst.test
 local core = require("core")
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 
 local raw_mock_command = t.mock_command
 local raw_command_calls = t.command_calls

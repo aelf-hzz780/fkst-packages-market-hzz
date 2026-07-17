@@ -1,5 +1,5 @@
 local identity = require("contract.convergence_identity")
-local workflow_codex = require("workflow.codex")
+local workflow_codex = require("workflow_internal.codex")
 local t = fkst.test
 require("tests.cache_seed_helpers")
 

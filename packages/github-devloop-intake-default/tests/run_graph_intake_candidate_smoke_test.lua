@@ -5,7 +5,7 @@ local t = fkst.test
 local core = require("core")
 local h = require("tests.devloop_base_helpers")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 
 local function encode_labels_json(labels)
   local rendered = {}

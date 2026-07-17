@@ -9,10 +9,10 @@ local github_commands = require("forge.github").new(function() end)
 local h = require("tests.devloop_helpers")
 local m_builders = require("devloop.markers.builders")
 local liveness_scan = require("devloop.liveness_scan")
-local observation_support = require("testkit.old_behavior_observation_support")
+local observation_support = require("testkit_internal.old_behavior_observation_support")
 local replay_fields = require("devloop.replay_fields")
 local replayer = require("devloop.replayer")
-local testing = require("testkit.testing")
+local testing = require("testkit_internal.testing")
 local transition_version = require("contract.transition_version")
 
 local t = h.t

@@ -3,7 +3,7 @@ local graph = require("testkit.graph")
 local payloads_builders = require("devloop.payloads.builders")
 local t = fkst.test
 local core = require("core")
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 
 local function json_string(value)
   return tostring(value or "")

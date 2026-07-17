@@ -1,6 +1,6 @@
-local env = require("workflow.env")
+local env = require("workflow_internal.env")
 local error_facts = require("contract.error_facts")
-local logging = require("workflow.logging")
+local logging = require("workflow_internal.logging")
 local strings = require("contract.strings")
 local forge_strings = require("forge.strings")
 

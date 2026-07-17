@@ -5,18 +5,20 @@ name = "testkit"
 root = "."
 
 [lib_deps]
-libraries = ["contract", "workflow", "forge"]
+libraries = []
 
 [dependency_constraints]
-allowed_lib_deps = ["contract", "workflow", "forge"]
+allowed_lib_deps = []
 
 [library]
 name = "testkit"
+publishable = true
 stable_id = "fkst.library.testkit"
 version = "workspace"
 
 [exports]
-public = ["testkit.*"]
+exact = true
+public = ["testkit.graph"]
 
 [visibility]
-public = false
+public = true

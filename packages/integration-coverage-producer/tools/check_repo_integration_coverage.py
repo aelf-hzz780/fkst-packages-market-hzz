@@ -16,7 +16,7 @@ ALLOWLIST = "migration/integration-edge-coverage.allowlist"
 EXCLUSIONS = "migration/integration-edge-coverage.exclusions"
 HOST_ALLOWLIST = ".fkst/conformance/integration-edge-coverage.allowlist"
 HOST_EXCLUSIONS = ".fkst/conformance/integration-edge-coverage.exclusions"
-LOCAL_SPEC_RE = re.compile(r"\blocal\s+spec\s*=\s*\{")
+DEPARTMENT_SPEC_RE = re.compile(r"(?:\blocal\s+spec|\bM\s*\.\s*spec)\s*=\s*\{")
 FIELD_RE_TEMPLATE = r"\b{field}\s*=\s*\{{"
 STRING_RE = re.compile(r"(?P<quote>[\"'])(?P<value>[A-Za-z0-9_.-]+)(?P=quote)")
 STRING_LITERAL_RE = re.compile(r"(?P<quote>[\"'])(?P<value>[^\"'\\]*(?:\\.[^\"'\\]*)*)(?P=quote)")
@@ -241,7 +241,7 @@ def department_specs(root: Path, platform_root: Path | None = None) -> set[Depar
         for path in sorted(package.glob("departments/*/main.lua")):
             source = path.read_text(encoding="utf-8")
             masked = strip_lua_comments_and_strings(source)
-            spec_span = table_span(LOCAL_SPEC_RE, masked)
+            spec_span = table_span(DEPARTMENT_SPEC_RE, masked)
             if spec_span is None:
                 continue
             specs.add(

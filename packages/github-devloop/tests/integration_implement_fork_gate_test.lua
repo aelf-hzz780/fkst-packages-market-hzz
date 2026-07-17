@@ -16,7 +16,7 @@ local mock_git_status = h.mock_git_status
 local mock_git_commit = h.mock_git_commit
 local count_calls = h.count_calls
 local find_raise = h.find_raise
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 
 local original_issue = 1663
 local canonical_issue = 1715

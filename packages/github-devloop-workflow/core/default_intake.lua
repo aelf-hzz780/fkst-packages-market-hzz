@@ -14,7 +14,7 @@ local requests_labels = require("devloop.requests.labels")
 local requests_lifecycle = require("devloop.requests.lifecycle")
 local v_execution_request = require("devloop.validators.execution_request")
 local v_intake_candidate = require("devloop.validators.intake_candidate")
-local workflow_codex = require("workflow.codex")
+local workflow_codex = require("workflow_internal.codex")
 
 local M = {}
 

@@ -2,7 +2,7 @@ local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local C = {}
 local forge_validators = require("devloop.forge_validators")
-local env = require("workflow.env")
+local env = require("workflow_internal.env")
 
 local seconds_per_minute = 60
 local liveness_poll_interval_minutes = 5

@@ -12,14 +12,13 @@ allowed_lib_deps = ["contract"]
 
 [library]
 name = "workflow"
+publishable = true
 stable_id = "fkst.library.workflow"
 version = "workspace"
 
 [exports]
-public = ["workflow.*"]
+exact = true
+public = ["workflow.dead_letter", "workflow.saga"]
 
 [visibility]
-public = false
-
-[conformance]
-pack = "conformance/pack.toml"
+public = true

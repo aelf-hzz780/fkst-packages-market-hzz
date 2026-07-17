@@ -1,7 +1,7 @@
 local h = require("tests.devloop_ops_helpers")
 local t = h.t
 local core = h.core
-local gh_argv = require("testkit.gh_argv_mock")
+local gh_argv = require("testkit_internal.gh_argv_mock")
 local conflict_telemetry = require("devloop.conflict_telemetry")
 
 local function opts(name, extra)

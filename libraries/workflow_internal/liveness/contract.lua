@@ -1,5 +1,5 @@
 local S = {}
-local restart_liveness_contract = require("workflow.restart_liveness_contract")
+local restart_liveness_contract = require("workflow_internal.restart_liveness_contract")
 
 function S.install(M, shared, resolved)
 resolved = resolved or {}

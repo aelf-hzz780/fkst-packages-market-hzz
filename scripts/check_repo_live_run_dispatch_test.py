@@ -36,13 +36,13 @@ class LiveRunDispatchRatchetTest(unittest.TestCase):
         entries = live_run_dispatch.parse_allowlist_lines([
             "# comment",
             "packages/example/departments/decide/main.lua:42",
-            "libraries/workflow/codex.lua:7 # trailing",
+            "libraries/workflow_internal/codex.lua:7 # trailing",
             "",
         ])
 
         self.assertEqual(entries, {
             "packages/example/departments/decide/main.lua:42",
-            "libraries/workflow/codex.lua:7",
+            "libraries/workflow_internal/codex.lua:7",
         })
 
     def test_rejects_invalid_allowlist_entries(self) -> None:
@@ -57,12 +57,12 @@ class LiveRunDispatchRatchetTest(unittest.TestCase):
                 messages = live_run_dispatch.repository_messages(root, enforce_base=True)
 
         self.assertEqual(messages, [
-            "packages/example/departments/decide/main.lua:42 grows migration/live-run-dispatch.allowlist relative to dev; migrate the dispatch to workflow.codex.dispatch instead"
+            "packages/example/departments/decide/main.lua:42 grows migration/live-run-dispatch.allowlist relative to dev; migrate the dispatch to workflow_internal.codex.dispatch instead"
         ])
 
     def test_scans_raw_identity_spawn_and_allows_canonical_wrapper_only(self) -> None:
         sources = {
-            "libraries/workflow/codex.lua": """
+            "libraries/workflow_internal/codex.lua": """
 function M.dispatch(identity, opts)
   opts.role = identity.role
   opts.proposal_id = identity.proposal_id
@@ -86,7 +86,7 @@ end
         self.assertEqual(
             live_run_dispatch.ratchet_messages(sites, allowlist=set(), base_allowlist=None),
             [
-                "packages/example/departments/decide/main.lua:7 raw identity-carrying spawn_codex is forbidden outside workflow.codex.dispatch"
+                "packages/example/departments/decide/main.lua:7 raw identity-carrying spawn_codex is forbidden outside workflow_internal.codex.dispatch"
             ],
         )
 
@@ -98,7 +98,7 @@ end
             worktree.mkdir(parents=True)
             installed.mkdir(parents=True)
             (worktree / "main.lua").write_text(
-                "local workflow_codex = require('workflow.codex')\n"
+                "local workflow_codex = require('workflow_internal.codex')\n"
                 "local identity = require('contract.convergence_identity').from_parts('consensus', 'p', 'd', { angle_lane = 'worker' })\n"
                 "return workflow_codex.dispatch(identity, { prompt = 'ok' })\n",
                 encoding="utf-8",
@@ -138,7 +138,7 @@ end
         self.assertEqual(
             messages,
             [
-                "packages/example/departments/decide/main.lua:2 raw identity-carrying spawn_codex is forbidden outside workflow.codex.dispatch"
+                "packages/example/departments/decide/main.lua:2 raw identity-carrying spawn_codex is forbidden outside workflow_internal.codex.dispatch"
             ],
         )
 

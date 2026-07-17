@@ -1,6 +1,6 @@
 local t = fkst.test
 local core = require("core")
-local gh_argv = require("testkit.gh_argv_mock")
+local gh_argv = require("testkit_internal.gh_argv_mock")
 gh_argv.install(t, core)
 
 local function opts(name, extra)

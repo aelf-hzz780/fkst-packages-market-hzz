@@ -1,5 +1,5 @@
 local t = fkst.test
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 
 local function run_department_with_logs(path, event, opts)
   local result = t.run_department(path, event, opts)

@@ -1,7 +1,7 @@
 local M = {}
 local angle_answers = require("angle_answers")
-local codex = require("workflow.codex")
-local env = require("workflow.env")
+local codex = require("workflow_internal.codex")
+local env = require("workflow_internal.env")
 local error_facts = require("contract.error_facts")
 local strings = require("contract.strings")
 

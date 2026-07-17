@@ -1,4 +1,4 @@
-local conformance = require("testkit.saga_conformance")
+local conformance = require("testkit_internal.saga_conformance")
 local forge_conformance = require("forge.saga_conformance")
 local t = fkst.test
 

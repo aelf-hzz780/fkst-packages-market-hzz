@@ -1,4 +1,4 @@
-local env = require("workflow.env")
+local env = require("workflow_internal.env")
 local error_facts = require("contract.error_facts")
 local ports_lib = require("forge.ports")
 local ref_detect_caps = require("ref_detect_caps")

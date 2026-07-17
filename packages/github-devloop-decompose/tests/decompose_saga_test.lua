@@ -1,14 +1,14 @@
 local h = require("tests.devloop_helpers")
-local saga_conformance = require("testkit.saga_conformance")
+local saga_conformance = require("testkit_internal.saga_conformance")
 local forge_saga_conformance = require("forge.saga_conformance")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local t = h.t
 local core = h.core
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
-local gh_argv = require("testkit.gh_argv_mock")
+local gh_argv = require("testkit_internal.gh_argv_mock")
 local decompose_lib = require("devloop.decompose")
 local m_builders = require("devloop.markers.builders")
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 
 local two_issue_json = [[{"issues":[{"title":"Extract retry helper","body":"Smaller scope: implement retry helper.\nNon-goals: no workflow rewrite.\nAcceptance: helper tests pass."},{"title":"Wire retry helper","body":"Smaller scope: wire one caller.\nNon-goals: no unrelated states.\nAcceptance: integration test passes."}]}]]
 local first_delivery_facts = nil

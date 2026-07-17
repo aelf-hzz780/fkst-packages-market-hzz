@@ -10,9 +10,9 @@ local execution_start = require("devloop.execution_start")
 local graph = require("testkit.graph")
 local marker = require("core.marker")
 local payloads_builders = require("devloop.payloads.builders")
-local testing = require("testkit.testing")
+local testing = require("testkit_internal.testing")
 local t = fkst.test
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 
 local candidate_queue = "github-devloop-intake.devloop_intake_candidate"
 

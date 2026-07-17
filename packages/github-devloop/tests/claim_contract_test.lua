@@ -4,8 +4,8 @@ local h = require("tests.devloop_core_helpers")
 local core = h.core
 local forks = require("devloop.forks")
 local t = h.t
-local gh_argv = require("testkit.gh_argv_mock")
-local author_policy = require("testkit.github_author_policy")
+local gh_argv = require("testkit_internal.gh_argv_mock")
+local author_policy = require("testkit_internal.github_author_policy")
 
 local function mock_bot(login, write_mode, write_reads)
   t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {

@@ -1,5 +1,5 @@
 local core = require("core")
-local env = require("workflow.env")
+local env = require("workflow_internal.env")
 local ports_lib = require("forge.ports")
 local saga = require("workflow.saga")
 

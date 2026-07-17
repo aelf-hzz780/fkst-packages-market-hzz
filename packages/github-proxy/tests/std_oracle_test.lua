@@ -1,4 +1,4 @@
-local oracle = require("workflow.oracle")
+local oracle = require("workflow_internal.oracle")
 
 return {
   test_effect_set_unions_writes_and_raises = function()
