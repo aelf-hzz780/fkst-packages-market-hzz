@@ -60,8 +60,25 @@ The profile schema is the existing host-run environment surface:
 | `FKST_GITHUB_BOT_LOGIN` | package-dependent | This host's bot login and device identity. |
 | `FKST_DEVLOOP_INTEGRATION_BRANCH` | `github-devloop` | Per-device integration branch. |
 | `FKST_DEVLOOP_INTAKE_MILESTONE_NUMBERS` | optional | Comma-separated GitHub milestone numbers eligible for an initial issue claim. |
+| `FKST_DEVLOOP_LOCAL_TEST_COMMAND` | `github-devloop` | Repository-root local verification gate run by implement/fix workers before handoff. |
 
 `FKST_GITHUB_WRITE=1` is intentionally commented in the scaffold. Unset means dry-run.
+
+## Local iteration gate
+
+A `github-devloop` deployment must provide a runnable local iteration gate. When
+`FKST_DEVLOOP_LOCAL_TEST_COMMAND` is unset, the default is `scripts/run.sh test-affected` in the
+deployed repository. Repositories without that executable must configure their own gate, for example
+`make preflight`, `just preflight`, or `npm test`.
+
+The configured target should be the repository's canonical local and CI gate, including any base
+freshness or conflict checks required for a born-green pull request. It must be one direct executable
+invocation. Put multiple steps in a repository-owned executable, Make target, or task-runner target
+instead of shell control operators in the environment value.
+
+Host activation validates the command from `FKST_HOST_ROOT` before replacing an existing supervisor.
+Activation fails closed when the direct executable is missing, non-executable, or the command shape is
+not safely preflightable; it does not execute the test suite during activation.
 
 ## Launch
 

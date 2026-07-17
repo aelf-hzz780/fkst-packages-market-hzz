@@ -143,15 +143,15 @@ return {
     t.is_nil(prompt:find("gh pr", 1, true))
     t.is_nil(prompt:find("gh api", 1, true))
     t.is_true(prompt:find("run the local iteration command from the repository root", 1, true) ~= nil)
-    t.is_true(prompt:find("local verification is scoped to your change for fast feedback", 1, true) ~= nil)
-    t.is_true(prompt:find("CI runs the full `scripts/run.sh test`", 1, true) ~= nil)
+    t.is_true(prompt:find("configured command is this deployment's local verification gate", 1, true) ~= nil)
+    t.is_true(prompt:find("CI remains the comprehensive gate", 1, true) ~= nil)
     t.is_true(prompt:find("comprehensive gate", 1, true) ~= nil)
-    t.is_true(prompt:find("scripts/run.sh test <pkg>", 1, true) ~= nil)
+    t.is_nil(prompt:find("scripts/run.sh test <pkg>", 1, true))
     t.is_true(prompt:find("failing test as the primary signal to fix", 1, true) ~= nil)
     t.is_nil(prompt:find("rerun `scripts/run.sh test` until it exits 0", 1, true))
     t.is_true(prompt:find("Do not finish with failing tests.", 1, true) ~= nil)
     t.is_true(prompt:find("rollup-red feedback", 1, true) ~= nil)
-    t.is_true(prompt:find("engine BIN is unreachable", 1, true) ~= nil)
+    t.is_true(prompt:find("required local tool or dependency is unavailable", 1, true) ~= nil)
     t.is_true(prompt:find("current target branch has already been merged", 1, true) ~= nil)
     t.is_true(prompt:find("Target branch merge context: sync_clean", 1, true) ~= nil)
 
@@ -174,9 +174,14 @@ return {
     t.is_true(conflict_prompt:find("packages/github-devloop/core.lua", 1, true) ~= nil)
   end,
 
-  test_fix_prompt_ignores_full_suite_host_fact_for_local_iteration = function()
+  test_fix_prompt_uses_local_iteration_host_fact = function()
     t.mock_command('printf %s "$FKST_DEVLOOP_TEST_COMMAND"', {
       stdout = "cargo build && cargo test",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command('printf %s "$FKST_DEVLOOP_LOCAL_TEST_COMMAND"', {
+      stdout = "make preflight",
       stderr = "",
       exit_code = 0,
     })
@@ -187,9 +192,10 @@ return {
       title = "Fix parser",
     }, "Review says tests are red.", fix.framing)
     t.is_nil(prompt:find("cargo build && cargo test", 1, true))
+    t.is_true(prompt:find("`make preflight`", 1, true) ~= nil)
     t.is_true(prompt:find("run the local iteration command from the repository root", 1, true) ~= nil)
-    t.is_true(prompt:find("scripts/run.sh test <pkg>", 1, true) ~= nil)
-    t.is_true(prompt:find("CI runs the full `scripts/run.sh test`", 1, true) ~= nil)
+    t.is_true(prompt:find("CI remains the comprehensive gate", 1, true) ~= nil)
+    t.is_nil(prompt:find("scripts/run.sh test <pkg>", 1, true))
   end,
 
   test_review_meta_action_parser_fails_closed_like_meta_parser = function()
