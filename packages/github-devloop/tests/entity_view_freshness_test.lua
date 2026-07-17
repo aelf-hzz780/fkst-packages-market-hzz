@@ -2,9 +2,9 @@ local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
 local seam = require("tests.entity_read_mock_helpers")
-local gh_argv = require("testkit.gh_argv_mock")
+local gh_argv = require("testkit_internal.gh_argv_mock")
 local devloop_entity_view = require("devloop.github_proxy_entity_view")
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 
 local function count_calls(needle)
   return gh_argv.count_calls(t, needle)

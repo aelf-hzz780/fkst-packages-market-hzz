@@ -5,7 +5,7 @@ local core = h.core
 local opts = h.opts
 local find_raise = h.find_raise
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 
 local function mock_repo_env()
   h.mock_bot_env()

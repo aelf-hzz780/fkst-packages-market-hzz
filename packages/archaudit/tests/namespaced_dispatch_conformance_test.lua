@@ -1,4 +1,4 @@
-local conformance = require("testkit.namespaced_dispatch_conformance")
+local conformance = require("testkit_internal.namespaced_dispatch_conformance")
 local helper = require("tests.fire_raiser_helpers")
 local t = fkst.test
 

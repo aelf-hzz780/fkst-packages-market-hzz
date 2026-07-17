@@ -20,6 +20,7 @@ local high_risk_patterns = {
   "^%.github/",
   "^packages/[^/]+/raisers/[^/]+%.lua$",
   "^libraries/workflow/.+%.lua$",
+  "^libraries/workflow_internal/.+%.lua$",
   "^libraries/devloop/claims%.lua$",
   "^libraries/devloop/config%.lua$",
   -- forge is the gh/git/merge egress + auth authority surface; classify the whole

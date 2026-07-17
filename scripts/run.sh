@@ -296,6 +296,7 @@ cmd_check() {
   if [ "$fail" -eq 0 ]; then
     resolve_bin
     "$BIN" deps --project-root "$ROOT" || fail=1
+    python3 -B "$ROOT/scripts/check_host_library_surfaces.py" --bin "$BIN" --source-root "$ROOT" || fail=1
   fi
   return "$fail"
 }

@@ -1,7 +1,7 @@
 local parsers_misc = require("devloop.parsers.misc")
 local conv_rounds = require("devloop.convergence.rounds")
 local S = {}
-local registry = require("workflow.registry")
+local registry = require("workflow_internal.registry")
 local transition_version = require("contract.transition_version")
 
 local source_ref_derivations = {

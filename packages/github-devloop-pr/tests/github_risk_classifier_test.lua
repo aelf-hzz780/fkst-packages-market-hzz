@@ -7,7 +7,7 @@ return {
     t.eq(github_risk.github_high_risk_path("packages/github-devloop-pr/raisers/merge_scan.lua"), true)
     t.eq(github_risk.github_high_risk_path("packages/github-devloop/raisers/sync.lua"), true)
     t.eq(github_risk.github_high_risk_path("libraries/workflow/saga.lua"), true)
-    t.eq(github_risk.github_high_risk_path("libraries/workflow/liveness/contract.lua"), true)
+    t.eq(github_risk.github_high_risk_path("libraries/workflow_internal/liveness/contract.lua"), true)
     t.eq(github_risk.github_high_risk_path("libraries/devloop/claims.lua"), true)
     t.eq(github_risk.github_high_risk_path("libraries/devloop/config.lua"), true)
     t.eq(github_risk.github_high_risk_path("libraries/forge/github/exec.lua"), true)

@@ -1,7 +1,7 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
-local gh_argv = require("testkit.gh_argv_mock")
+local gh_argv = require("testkit_internal.gh_argv_mock")
 local rollup_health = require("core.rollup_health")
 local zh_summary = string.char(228, 184, 173, 230, 150, 135, 230, 145, 152, 232, 166, 129)
 

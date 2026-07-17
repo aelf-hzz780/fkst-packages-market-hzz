@@ -1,6 +1,6 @@
 local M = {}
 
-local gh_argv = require("testkit.gh_argv_mock")
+local gh_argv = require("testkit_internal.gh_argv_mock")
 
 local default_runtime_root = "/tmp/fkst-packages-test/github-devloop/runtime"
 local default_repo = "owner/repo"
@@ -9,9 +9,9 @@ local default_ready_version = "ready/consensus-github-devloop/issue/owner/repo/4
 
 function M.new(deps)
   deps = deps or {}
-  local devloop_base = deps.devloop_base or error("testkit.devloop_worktree_fixtures: deps.devloop_base is required")
-  local base_ids = deps.base_ids or error("testkit.devloop_worktree_fixtures: deps.base_ids is required")
-  local base = deps.base or error("testkit.devloop_worktree_fixtures: deps.base is required")
+  local devloop_base = deps.devloop_base or error("testkit_internal.devloop_worktree_fixtures: deps.devloop_base is required")
+  local base_ids = deps.base_ids or error("testkit_internal.devloop_worktree_fixtures: deps.base_ids is required")
+  local base = deps.base or error("testkit_internal.devloop_worktree_fixtures: deps.base is required")
   local t = base.t
   local enable_substrate_pin_refresh = deps.enable_substrate_pin_refresh == true
   local include_head_ref_push = deps.include_head_ref_push == true

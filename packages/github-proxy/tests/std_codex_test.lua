@@ -1,4 +1,4 @@
-local codex = require("workflow.codex")
+local codex = require("workflow_internal.codex")
 local t = fkst.test
 
 return {

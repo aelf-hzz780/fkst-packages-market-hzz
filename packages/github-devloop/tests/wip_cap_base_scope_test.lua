@@ -3,7 +3,7 @@ local h = require("tests.devloop_core_helpers")
 local m_builders = require("devloop.markers.builders")
 local m_mgw = require("devloop.merge_gate_wait")
 local m_mq = require("devloop.merge_queue")
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 local core = h.core
 local t = h.t
 

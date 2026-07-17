@@ -6,8 +6,8 @@ local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local h = require("tests.devloop_helpers")
 local m_builders = require("devloop.markers.builders")
 local m_facts = require("devloop.markers.facts")
-local observation_support = require("testkit.old_behavior_observation_support")
-local testing = require("testkit.testing")
+local observation_support = require("testkit_internal.old_behavior_observation_support")
+local testing = require("testkit_internal.testing")
 
 local t = h.t
 local core = h.core

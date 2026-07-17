@@ -4,7 +4,7 @@ local convergence_identity = require("contract.convergence_identity")
 local rebuttal = require("departments.decide.rebuttal")
 local result_memo = require("departments.decide.result_memo")
 local synthesis = require("departments.decide.synthesis")
-local workflow_codex = require("workflow.codex")
+local workflow_codex = require("workflow_internal.codex")
 local saga = require("workflow.saga")
 
 local aggregate = core.aggregate

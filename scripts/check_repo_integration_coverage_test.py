@@ -77,6 +77,35 @@ class IntegrationCoverageRatchetTest(unittest.TestCase):
         self.assertIn("consensus.consensus_reached -> autochrono.reply", edges)
         self.assertNotIn("autochrono.issue -> autochrono.propose", edges)
 
+    def test_cross_package_edges_include_free_form_m_spec_consumers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(
+                root / "packages" / "idle-detector" / "departments" / "emit" / "main.lua",
+                """\
+                local spec = {
+                  consumes = { "tick" },
+                  produces = { "system_idle" },
+                }
+                return { spec = spec }
+                """,
+            )
+            write(
+                root / "packages" / "ai-employee-board" / "departments" / "observe" / "main.lua",
+                """\
+                local M = {}
+                M.spec = {
+                  consumes = { "idle-detector.system_idle" },
+                  produces = {},
+                }
+                return M
+                """,
+            )
+
+            edges = integration_coverage.cross_package_edges(root)
+
+        self.assertIn("idle-detector.system_idle -> ai-employee-board.observe", edges)
+
     def test_observed_edges_are_static_assert_covers_strings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

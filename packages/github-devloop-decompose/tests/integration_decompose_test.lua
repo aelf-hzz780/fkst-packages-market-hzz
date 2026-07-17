@@ -14,7 +14,7 @@ local count_calls = h.count_calls
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local decompose_lib = require("devloop.decompose")
 local m_builders = require("devloop.markers.builders")
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 
 local blocked_comments
 

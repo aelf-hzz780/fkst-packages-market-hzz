@@ -1,5 +1,5 @@
 local core = require("core")
-local codex = require("workflow.codex")
+local codex = require("workflow_internal.codex")
 local env_port = require("departments.audit.env_port")
 local observe_port = require("departments.audit.observe_port")
 local saga = require("workflow.saga")

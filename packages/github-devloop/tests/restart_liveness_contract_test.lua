@@ -165,7 +165,7 @@ local function install_generic_restart_liveness_model(row)
       return {}
     end,
   }
-  require("workflow.restart_liveness_contract").install(model, {
+  require("workflow_internal.restart_liveness_contract").install(model, {
     workflow_ports = {
       dependency_release_marker = core.dependency_release_marker,
       restart_transition_table = function(...)

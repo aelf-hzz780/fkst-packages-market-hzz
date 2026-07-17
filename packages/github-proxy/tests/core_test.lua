@@ -1,6 +1,6 @@
 local core = require("core")
 local error_facts = require("contract.error_facts")
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 local t = fkst.test
 
 local raw_mock_command = t.mock_command

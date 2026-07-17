@@ -83,8 +83,8 @@ function S.install(M, resolved)
   end
   policy.restart_package_name = M.restart_package_name
   policy.restart_source_root = M.restart_source_root
-  local shared = require("workflow.liveness.shared").install(M, policy)
-  require("workflow.liveness.contract").install(M, shared, {
+  local shared = require("workflow_internal.liveness.shared").install(M, policy)
+  require("workflow_internal.liveness.contract").install(M, shared, {
     pr_recovery = {
       allowed = {
         not_mergeable = {

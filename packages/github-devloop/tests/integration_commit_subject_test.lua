@@ -10,7 +10,7 @@ local mock_implement_codex = h.mock_implement_codex
 local mock_git_status = h.mock_git_status
 local mock_git_commit = h.mock_git_commit
 local run_implement = h.run_implement
-local gh_argv = require("testkit.gh_argv_mock")
+local gh_argv = require("testkit_internal.gh_argv_mock")
 
 local function has_commit_subject(subject)
   for _, call in ipairs(t.command_calls()) do

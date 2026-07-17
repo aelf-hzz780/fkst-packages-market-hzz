@@ -16,8 +16,8 @@ local requests_labels = require("devloop.requests.labels")
 local select_request = require("core.select_request")
 local strings = require("contract.strings")
 local v_execution_request = require("devloop.validators.execution_request")
-local workflow_codex = require("workflow.codex")
-local workflow_env = require("workflow.env")
+local workflow_codex = require("workflow_internal.codex")
+local workflow_env = require("workflow_internal.env")
 local workflow_select_prompt = require("prompts.workflow_select")
 
 local M = {}

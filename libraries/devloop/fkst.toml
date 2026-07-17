@@ -5,10 +5,10 @@ name = "devloop"
 root = "."
 
 [lib_deps]
-libraries = ["contract", "workflow", "forge"]
+libraries = ["contract", "workflow_internal", "forge"]
 
 [dependency_constraints]
-allowed_lib_deps = ["contract", "workflow", "forge"]
+allowed_lib_deps = ["contract", "workflow_internal", "forge"]
 
 [library]
 name = "devloop"

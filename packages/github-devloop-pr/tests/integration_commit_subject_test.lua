@@ -16,7 +16,7 @@ local mock_git_push = h.mock_git_push
 local mock_write_env = h.mock_write_env
 local mock_bot_env = h.mock_bot_env
 local run_fix = h.run_fix
-local gh_argv = require("testkit.gh_argv_mock")
+local gh_argv = require("testkit_internal.gh_argv_mock")
 local m_builders = require("devloop.markers.builders")
 
 local function has_commit_subject(subject)

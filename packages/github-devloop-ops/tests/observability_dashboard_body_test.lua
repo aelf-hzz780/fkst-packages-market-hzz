@@ -4,7 +4,7 @@ local t = h.t
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local autonomy_ledger = require("devloop.autonomy_ledger")
 local m_builders = require("devloop.markers.builders")
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 require("departments.observability.main")
 
 local old_dashboard_body_cap = 12000

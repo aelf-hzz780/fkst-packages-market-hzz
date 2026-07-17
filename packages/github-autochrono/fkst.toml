@@ -6,7 +6,7 @@ persistence_class = "composed_judgment_pipeline"
 root = "."
 
 [lib_deps]
-libraries = ["contract", "workflow", "testkit"]
+libraries = ["contract", "workflow", "testkit", "testkit_internal"]
 
 [event_deps]
 packages = ["github-proxy", "autochrono"]

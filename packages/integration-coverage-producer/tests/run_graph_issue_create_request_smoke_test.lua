@@ -1,6 +1,6 @@
 local graph = require("testkit.graph")
 local t = fkst.test
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 
 local edge_id = "github-proxy.github_issue_create_request -> github-proxy.github_issue_create"
 

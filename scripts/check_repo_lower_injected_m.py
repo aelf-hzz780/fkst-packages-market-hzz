@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """G-LOWER-INJECTED-M: shrink-only ratchet for lower-library injected-M coupling.
 
-The harmful shape is lower libraries (`libraries/workflow`, `libraries/forge`) using
+The harmful shape is lower libraries (`libraries/workflow_internal`, `libraries/forge`) using
 the composed package facade `M` that was injected as a function parameter. That
 late-bound table lets lower libraries read product/devloop behavior without a typed
 dependency. The dissolution target is zero injected-M member references in those
@@ -45,6 +45,10 @@ from pathlib import Path
 
 INVENTORY = "migration/lower-injected-m.inventory"
 LIBRARIES = ("workflow", "forge")
+LIBRARY_DIRECTORIES = {
+    "workflow": ("workflow", "workflow_internal"),
+    "forge": ("forge",),
+}
 COUNT_KEYS = (
     "workflow_injected_m_reads",
     "workflow_injected_m_unique_symbols",
@@ -261,12 +265,13 @@ def _lua_files(base: Path) -> list[Path]:
 def measure(root: Path) -> dict:
     symbols: dict[str, Counter[str]] = {library: Counter() for library in LIBRARIES}
     for library in LIBRARIES:
-        base = root / "libraries" / library
-        if not base.is_dir():
-            continue
-        for path in _lua_files(base):
-            text = path.read_text(encoding="utf-8", errors="replace")
-            symbols[library].update(injected_m_symbols(text))
+        for directory in LIBRARY_DIRECTORIES[library]:
+            base = root / "libraries" / directory
+            if not base.is_dir():
+                continue
+            for path in _lua_files(base):
+                text = path.read_text(encoding="utf-8", errors="replace")
+                symbols[library].update(injected_m_symbols(text))
 
     workflow_total = sum(symbols["workflow"].values())
     forge_total = sum(symbols["forge"].values())
@@ -373,7 +378,11 @@ def ratchet_messages(current: dict, baseline: dict | None, manifest: dict, symbo
 
 def repository_messages(root: Path):
     """No-op in repositories without the lower libraries governed by this ratchet."""
-    if not any((root / "libraries" / library).is_dir() for library in LIBRARIES):
+    if not any(
+        (root / "libraries" / directory).is_dir()
+        for directories in LIBRARY_DIRECTORIES.values()
+        for directory in directories
+    ):
         return
     current = measure(root)
     baseline, manifest = load_inventory(root)

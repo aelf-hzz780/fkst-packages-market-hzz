@@ -4,7 +4,7 @@ local t = h.t
 local sweep_bounds = require("devloop.sweep_bounds")
 local github_adapter = require("forge.github")
 local github = require("devloop.github_factory").production_handle
-local author_policy = require("testkit.github_author_policy")
+local author_policy = require("testkit_internal.github_author_policy")
 
 local function assert_argv_equal(actual, expected)
   t.eq(#actual, #expected)
