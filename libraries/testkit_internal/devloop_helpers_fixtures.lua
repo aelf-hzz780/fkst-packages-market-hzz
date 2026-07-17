@@ -29,6 +29,7 @@ function M.new(deps)
     or error("testkit_internal.devloop_helpers_fixtures: deps.entity_read_mocks is required")
   local mode = deps.mode or "standard"
   local mock_review_result_pr_name_only = deps.mock_review_result_pr_name_only == true
+  local payloads_predicates = deps.payloads_predicates
   local hydrate_handoff_state_comment = deps.hydrate_handoff_state_comment == true
   local include_ready_causal_raise = deps.include_ready_causal_raise ~= false
 
@@ -106,9 +107,27 @@ function M.new(deps)
     })
   end
 
+  local function review_result_can_read_pr_risk(payload)
+    if type(payload) ~= "table" then
+      return true
+    end
+    if payload.decision ~= "reject" then
+      return true
+    end
+    return payloads_predicates ~= nil
+      and (
+        payloads_predicates.is_gate_owned_review_gap(payload.blocking_gap)
+        or payloads_predicates.is_out_of_contract_review_gap(payload.blocking_gap)
+      )
+  end
+
   local function mock_context_bundle(payload, run_opts)
     local repo, issue_number = issue_identity_from_payload(payload)
     local ok = { stdout = "", stderr = "", exit_code = 0 }
+    local empty_diff_name_only = run_opts
+      and run_opts.env
+      and run_opts.env.FKST_TEST_PR_EMPTY_DIFF_NAME_ONLY == "1"
+    empty_diff_name_only = empty_diff_name_only or (payload and payload._test_empty_diff_name_only == true)
     author_policy.mock_env(helpers.t, run_opts, {
       configure_trusted_bot_login = helpers.mock_author_policy_configure,
       times = 8,
@@ -150,12 +169,12 @@ function M.new(deps)
       stdout = pr_context_json,
     })
     helpers.t.mock_command("gh pr diff", {
-      stdout = "diff --git a/file.lua b/file.lua\n+return true\n",
+      stdout = empty_diff_name_only and "" or "diff --git a/file.lua b/file.lua\n+return true\n",
       stderr = "",
       exit_code = 0,
     })
     helpers.t.mock_command("gh pr diff '7' --repo '" .. repo .. "' --name-only", {
-      stdout = "file.lua\n",
+      stdout = empty_diff_name_only and "\n" or "file.lua\n",
       stderr = "",
       exit_code = 0,
     })
@@ -228,9 +247,9 @@ function M.new(deps)
     local base_run = helpers[name]
     local add_missing_review_worktree = name == "run_review_pr" or name == "run_review_loop"
     helpers[name] = function(...)
-      local payload = ...
+      local payload, run_opts = ...
       local repo, issue_number = issue_identity_from_payload(payload)
-      mock_context_bundle(payload)
+      mock_context_bundle(payload, run_opts)
       mock_default_issue_claim(repo, issue_number)
       if add_missing_review_worktree then
         helpers.t.mock_command("/worktrees/devloop-", {
@@ -251,8 +270,9 @@ function M.new(deps)
 
   local base_run_review_result = helpers.run_review_result
   helpers.run_review_result = function(...)
+    local payload = ...
     mock_default_issue_claim()
-    if mock_review_result_pr_name_only then
+    if mock_review_result_pr_name_only and review_result_can_read_pr_risk(payload) then
       helpers.t.mock_command("gh pr diff '7' --repo 'owner/repo' --name-only", {
         stdout = "file.lua\n",
         stderr = "",
