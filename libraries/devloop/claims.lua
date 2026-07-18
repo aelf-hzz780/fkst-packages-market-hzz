@@ -259,10 +259,6 @@ local function pr_base_branch(row)
   return nil
 end
 
-local function is_integration_topology_branch(branch)
-  return type(branch) == "string" and branch:find("integration%-", 1, false) == 1
-end
-
 function C.repo_scoped_observed_managed_bot_logins(repo, trusted_author_policy, owner, github_handle)
   local logins = {}
   if type(trusted_author_policy) ~= "table" or repo == nil or tostring(repo) == "" then
@@ -280,7 +276,8 @@ function C.repo_scoped_observed_managed_bot_logins(repo, trusted_author_policy, 
 
   local ok_config, branches = pcall(config.branch_config)
   local upstream = ok_config and branches and branches.upstream or nil
-  if upstream == nil or tostring(upstream) == "" then
+  local integration = ok_config and branches and branches.integration or nil
+  if upstream == nil or tostring(upstream) == "" or integration == nil or tostring(integration) == "" then
     return logins
   end
   local ok_prs, prs = pcall(function()
@@ -291,7 +288,7 @@ function C.repo_scoped_observed_managed_bot_logins(repo, trusted_author_policy, 
   end
   for _, row in ipairs(decode_json_array(prs) or {}) do
     add_state_marker_comment_candidates(logins, issue_row_comments(row), trusted_author_policy, owner)
-    if pr_base_branch(row) == tostring(upstream) and is_integration_topology_branch(pr_head_branch(row)) then
+    if pr_base_branch(row) == tostring(upstream) and pr_head_branch(row) == tostring(integration) then
       add_authorized_candidate(logins, github_actor_login(row), trusted_author_policy, owner)
     end
   end

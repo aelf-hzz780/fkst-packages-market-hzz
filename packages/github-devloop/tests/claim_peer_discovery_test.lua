@@ -213,7 +213,9 @@ return {
     mock_bot("fkst-test-bot")
     mock_authorized_login("rollup-peer")
     mock_repo_peer_scan({}, {
-      pr_row({ author_login = "rollup-peer[bot]", head = "integration-rollup-peer", base = "dev" }),
+      pr_row({ author_login = "rollup-peer[bot]", head = "integration/dev", base = "dev" }),
+    }, {
+      integration = "integration/dev",
     })
 
     local admission, detail, inputs = admission_for(current_issue("rollup-peer", {}), repo)
@@ -295,6 +297,7 @@ return {
       }),
     }, {
       pr_row({ author_login = "peer-bot", head = "integration-peer-bot", base = "release" }),
+      pr_row({ author_login = "peer-bot", head = "integration-peer-bot", base = "dev" }),
       pr_row({ author_login = "peer-bot", head = "feature/peer-bot", base = "dev" }),
       pr_row({ author_login = false, head = "integration-peer-bot", base = "dev" }),
       pr_row({ author_login = "peer-bot", user_login = "other-bot", head = "integration-peer-bot", base = "dev" }),
