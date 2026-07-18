@@ -117,9 +117,60 @@ function C.is_managed_bot_login(login, managed)
 end
 
 local claimed_label = "fkst-dev:claimed"
+local state_marker_literal = "fkst:github-devloop:state:v1"
 
 function C.claimed_label()
   return claimed_label
+end
+
+local function comment_body(comment)
+  if type(comment) == "table" and comment.body ~= nil then
+    return tostring(comment.body)
+  end
+  return nil
+end
+
+local function comment_author_login(comment)
+  if type(comment) ~= "table" then
+    return nil
+  end
+  if comment.author_login ~= nil then
+    return devloop_base.strip_bot_login_suffix(comment.author_login)
+  end
+  if type(comment.author) == "table" and comment.author.login ~= nil then
+    return devloop_base.strip_bot_login_suffix(comment.author.login)
+  end
+  if type(comment.user) == "table" and comment.user.login ~= nil then
+    return devloop_base.strip_bot_login_suffix(comment.user.login)
+  end
+  return nil
+end
+
+function C.observed_state_marker_managed_bot_logins(current, trusted_author_policy, owner)
+  local logins = {}
+  if type(current) ~= "table" or type(current.comments) ~= "table" or type(trusted_author_policy) ~= "table" then
+    return logins
+  end
+  local normalized_owner = devloop_base.strip_bot_login_suffix(owner)
+  for _, comment in ipairs(current.comments) do
+    local body = comment_body(comment)
+    if body ~= nil and body:find(state_marker_literal, 1, true) ~= nil then
+      local login = comment_author_login(comment)
+      if login ~= nil and login ~= "" and login ~= normalized_owner
+        and github_author_policy.is_authorized(trusted_author_policy, login) then
+        logins[login] = true
+      end
+    end
+  end
+  return logins
+end
+
+local function add_observed_state_marker_managed_bot_logins(managed, current, trusted_author_policy, owner)
+  for login, allowed in pairs(C.observed_state_marker_managed_bot_logins(current, trusted_author_policy, owner)) do
+    if allowed == true then
+      managed[login] = true
+    end
+  end
 end
 
 -- assignee (default) ⇒ exactly today's behavior. label ⇒ opt-in GitHub App mode.
@@ -312,6 +363,7 @@ function C.claim_admission_inputs(current)
     managed = C.managed_bot_logins()
     if not C.is_managed_bot_login(author, managed) then
       trusted_author_policy = github_author_policy.from_handle_policy(github)
+      add_observed_state_marker_managed_bot_logins(managed, current, trusted_author_policy, owner)
     end
   end
   return {
