@@ -438,12 +438,16 @@ local function output_obligation_body(fact)
 end
 
 local function output_obligation_issue_request(fact)
+  local labels = {}
+  if fact.reason_class == "state-output-obligation-timeout" then
+    labels = { M._hold_label }
+  end
   return {
     schema = "github-proxy.issue-create.v1",
     repo = fact.source_repo,
     title = output_obligation_title(fact),
     body = output_obligation_body(fact),
-    labels = json.decode("[]"),
+    labels = labels,
     dedup_key = fact.dedup_key,
     parent_comment_target = {
       repo = fact.source_repo,

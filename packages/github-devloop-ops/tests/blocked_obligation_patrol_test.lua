@@ -1,6 +1,7 @@
 local h = require("tests.devloop_ops_helpers")
 local t = h.t
 local core = h.core
+local devloop_base = require("devloop.base")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local testing = require("testkit_internal.testing")
 
@@ -198,6 +199,8 @@ return {
     t.eq(request.parent_comment_target.repo, repo)
     t.eq(request.parent_comment_target.issue_number, issue_number)
     t.eq(request.source_ref.ref, "owner/repo#issue/42")
+    t.eq(devloop_base.is_intake_held(request.labels), true)
+    t.eq(devloop_base.is_opted_in(request.labels), false)
     t.is_true(request.title:find("state-output-obligation-timeout", 1, true) ~= nil)
     t.is_true(request.body:find("`failure_kind`: `OutputObligationFailure`", 1, true) ~= nil)
     t.is_true(request.body:find("`reason_class`: `state-output-obligation-timeout`", 1, true) ~= nil)
@@ -212,6 +215,39 @@ return {
 
     local second = core.blocked_obligation_patrol_once(entity({ created_marker(request.dedup_key, 2030) }))
     t.eq(#second, 0)
+  end,
+
+  test_state_output_obligation_escalation_requests_are_intake_held_under_many_parents = function()
+    local seen_dedup = {}
+    for offset = 0, 4 do
+      local parent_number = 42 + offset
+      local parent_proposal = "github-devloop/issue/owner/repo/" .. tostring(parent_number)
+      local parent_ready_version = "github-devloop/issue/owner/repo/" .. tostring(parent_number) .. "/2026-06-03T01-02-03Z"
+      local parent_blocked_version = conv_reconcile.timeout_reconcile_state_version(parent_ready_version, "ready", 3)
+      local request = core.build_output_obligation_issue_create_request({
+        failure_kind = "OutputObligationFailure",
+        source_repo = repo,
+        issue_number = tostring(parent_number),
+        proposal_id = parent_proposal,
+        terminal_state = "blocked",
+        terminal_version = parent_blocked_version,
+        reason_class = "state-output-obligation-timeout",
+        source_ref = { kind = "external", ref = "owner/repo#issue/" .. tostring(parent_number) },
+        from_state = "ready",
+        from_version = parent_ready_version,
+        attempt = "3",
+        attempt_limit = "3",
+        driving_queue = "github-devloop.devloop_ready",
+        dedup_key = core.output_obligation_failure_dedup_key(repo, parent_proposal, parent_blocked_version, "state-output-obligation-timeout"),
+      })
+
+      t.eq(request.schema, "github-proxy.issue-create.v1")
+      t.eq(devloop_base.is_intake_held(request.labels), true)
+      t.eq(devloop_base.is_opted_in(request.labels), false)
+      t.eq(request.labels[1], core._hold_label)
+      t.eq(seen_dedup[request.dedup_key], nil)
+      seen_dedup[request.dedup_key] = true
+    end
   end,
 
   test_blocked_obligation_patrol_marks_semantic_escalation_issue_body_edge = function()
