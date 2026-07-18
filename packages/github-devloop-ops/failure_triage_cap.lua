@@ -10,6 +10,7 @@ local cap = {
   _max_key_len = base._max_key_len,
   _max_title_len = base._max_title_len,
   _max_body_len = base._max_body_len,
+  _hold_label = base._hold_label,
 }
 require("core.error_facts").install(cap)
 require("core.failure_triage").install(cap)
