@@ -11,6 +11,7 @@ local github_author_policy = require("devloop.github_author_policy")
 local github_view = require("forge.github_view")
 local github_proxy_entity_view = require("devloop.github_proxy_entity_view")
 local devloop_logging = require("devloop.logging")
+local marker_shared = require("devloop.markers.shared")
 local forks_handle = nil
 local devloop_state_handle = nil
 
@@ -117,8 +118,9 @@ function C.is_managed_bot_login(login, managed)
 end
 
 local claimed_label = "fkst-dev:claimed"
-local state_marker_literal = "fkst:github-devloop:state:v1"
+local state_marker_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
 local peer_activity_scan_limit = 100
+local marker_attr = marker_shared.marker_attr
 
 local function decode_json_array(result)
   if type(result) ~= "table" or tonumber(result.exit_code) ~= 0 then
@@ -177,8 +179,10 @@ local function has_state_marker_comment(body)
   if type(body) ~= "string" then
     return false
   end
-  for marker in body:gmatch("<!%-%-.-%-%->") do
-    if marker:find(state_marker_literal, 1, true) ~= nil then
+  for marker in body:gmatch(state_marker_pattern) do
+    if marker_attr(marker, "proposal") ~= nil
+      and devloop_state().is_state(marker_attr(marker, "state"))
+      and marker_attr(marker, "version") ~= nil then
       return true
     end
   end

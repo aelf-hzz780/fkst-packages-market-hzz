@@ -44,7 +44,7 @@ end
 local function state_marker_comment(author_login)
   return {
     author_login = author_login,
-    body = 'github-devloop thinking\n<!-- fkst:github-devloop:state:v1 proposal="x" state="thinking" -->',
+    body = 'github-devloop thinking\n<!-- fkst:github-devloop:state:v1 proposal="x" state="thinking" version="v" -->',
   }
 end
 
@@ -291,6 +291,7 @@ return {
     mock_authorized_login("peer-bot")
     mock_repo_peer_scan({
       issue_row(7, {
+        { author_login = "peer-bot", body = '<!-- fkst:github-devloop:state:v1 -->' },
         { author_login = "peer-bot", body = 'fkst:github-devloop:state:v1 proposal="x" state="thinking"' },
         { author_login = "peer-bot", user_login = "other-bot", body = '<!-- fkst:github-devloop:state:v1 proposal="x" state="thinking" -->' },
         { author_login = false, body = '<!-- fkst:github-devloop:state:v1 proposal="x" state="thinking" -->' },
