@@ -52,6 +52,24 @@ local result = spawn_codex_sync({
 """
         self.assertEqual(self.literal_lines(source), [4])
 
+    def test_detects_workflow_dispatch_numeric_timeout_literal(self) -> None:
+        source = """
+local result = workflow_codex.dispatch(identity, {
+  prompt = prompt,
+  timeout = 2 * 60 * 60,
+  sync = true,
+})
+"""
+        self.assertEqual(self.literal_lines(source), [4])
+
+    def test_detects_numeric_timeout_assignment_before_codex_spawn(self) -> None:
+        source = """
+local opts = workflow_codex.judgment_codex_opts(prompt, ".")
+opts.timeout = 3600
+return spawn_codex_sync(opts)
+"""
+        self.assertEqual(self.literal_lines(source), [3])
+
     def test_detects_codex_timeout_constant_default(self) -> None:
         source = """
 local codex_timeout_seconds = 60 * 60
