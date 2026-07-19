@@ -646,21 +646,19 @@ local function process_ready_event(event)
         if checkpoint_matches_progress(checkpoint, progress) then
           devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "implementing", "implementing", "skip-wip-checkpoint(remote-progress)", "remote branch progress is a WIP checkpoint; retrying implementation attempt")
         else
-        progress.proposal_id = ready.proposal_id
-        progress.dedup_key = marker_ready.dedup_key
-        pr_child_handoff.raise_awaiting_pr_from_fact("implement", repo, issue_number, marker_ready, current, progress, "implementing remote branch progress is visible")
-        return
+          progress.proposal_id = ready.proposal_id
+          progress.dedup_key = marker_ready.dedup_key
+          pr_child_handoff.raise_awaiting_pr_from_fact("implement", repo, issue_number, marker_ready, current, progress, "implementing remote branch progress is visible")
+          return
         end
       end
       local base_head = worktree_lifecycle.prepare_base(branches)
-      local local_progress = branch_progress.local_branch_fact(base_head, branch, branches.integration, marker_ready.dedup_key)
-      if local_progress ~= nil then
-        if checkpoint_matches_progress(checkpoint, local_progress) then
-          devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "implementing", "implementing", "skip-wip-checkpoint(local-progress)", "local branch progress is a WIP checkpoint; retrying implementation attempt")
-        else
-        local_progress.proposal_id = ready.proposal_id
-        pr_child_handoff.raise_awaiting_pr_from_fact("implement", repo, issue_number, marker_ready, current, local_progress, "local implementation branch progress is visible")
-        return
+      if checkpoint == nil then
+        local local_progress = branch_progress.local_branch_fact(base_head, branch, branches.integration, marker_ready.dedup_key)
+        if local_progress ~= nil then
+          local_progress.proposal_id = ready.proposal_id
+          pr_child_handoff.raise_awaiting_pr_from_fact("implement", repo, issue_number, marker_ready, current, local_progress, "local implementation branch progress is visible")
+          return
         end
       end
       local attempts = core.implement_attempt_count(current.comments, ready.proposal_id, marker_ready.dedup_key)

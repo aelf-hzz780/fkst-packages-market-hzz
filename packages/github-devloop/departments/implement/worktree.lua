@@ -88,7 +88,7 @@ end
 function M.prepare_worktree(repo, issue_number, ready, branch, base_head, checkpoint)
   local branch_ref = devloop_commands.git_show_ref_branch(branch, 30)
   local branch_exists = branch_ref.exit_code == 0
-  local checkpoint_head = branch_exists and nil or checkpoint_head_for_branch(checkpoint, branch)
+  local checkpoint_head = checkpoint_head_for_branch(checkpoint, branch)
   if branch_ref.exit_code ~= 0 and branch_ref.exit_code ~= 1 then
     error("github-devloop: branch-ref-check-failed: git branch ref check failed: " .. tostring(branch_ref.stderr))
   end
@@ -98,7 +98,29 @@ function M.prepare_worktree(repo, issue_number, ready, branch, base_head, checkp
     error("github-devloop: runtime-root-read-failed: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime_result.stderr))
   end
   local worktree = devloop_base.implement_worktree_path(runtime_result.stdout, repo, issue_number, ready.dedup_key)
-  if branch_exists then
+  if checkpoint_head ~= nil then
+    if branch_exists then
+      local list_result = devloop_commands.git_worktree_list(30)
+      if list_result.exit_code ~= 0 then
+        error("github-devloop: worktree-list-failed: git worktree list failed: " .. tostring(list_result.stderr))
+      end
+      for _, stale_worktree in ipairs(devloop_commands.find_worktrees_for_branch(list_result.stdout, branch)) do
+        if stale_worktree ~= worktree then
+          devloop_logging.log_line("info", "implement", ready.proposal_id, "IMPLEMENT", {
+            "branch=" .. tostring(branch),
+            "worktree=" .. tostring(stale_worktree),
+            "reason=removing stale checkpoint worktree before remote checkpoint restore",
+          })
+          M.remove_stale_worktree(stale_worktree)
+        end
+      end
+    end
+    local clean_result = devloop_commands.git_worktree_force_clean(worktree, 60)
+    if clean_result.exit_code ~= 0 then
+      error("github-devloop: worktree-cleanup-failed: git worktree cleanup failed: " .. tostring(clean_result.stderr))
+    end
+    restore_remote_checkpoint_worktree(worktree, branch, checkpoint_head)
+  elseif branch_exists then
     local list_result = devloop_commands.git_worktree_list(30)
     if list_result.exit_code ~= 0 then
       error("github-devloop: worktree-list-failed: git worktree list failed: " .. tostring(list_result.stderr))
@@ -136,13 +158,9 @@ function M.prepare_worktree(repo, issue_number, ready, branch, base_head, checkp
     if clean_result.exit_code ~= 0 then
       error("github-devloop: worktree-cleanup-failed: git worktree cleanup failed: " .. tostring(clean_result.stderr))
     end
-    if checkpoint_head ~= nil then
-      restore_remote_checkpoint_worktree(worktree, branch, checkpoint_head)
-    else
-      local worktree_result = devloop_commands.git_worktree_add_new_branch(worktree, branch, base_head, 60)
-      if worktree_result.exit_code ~= 0 then
-        error("github-devloop: git-worktree-add-failed: git worktree add failed: " .. tostring(worktree_result.stderr))
-      end
+    local worktree_result = devloop_commands.git_worktree_add_new_branch(worktree, branch, base_head, 60)
+    if worktree_result.exit_code ~= 0 then
+      error("github-devloop: git-worktree-add-failed: git worktree add failed: " .. tostring(worktree_result.stderr))
     end
   end
   M.reconcile_worktree_to_branch(worktree, branch)
