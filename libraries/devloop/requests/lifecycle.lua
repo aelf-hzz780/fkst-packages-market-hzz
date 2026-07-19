@@ -266,6 +266,54 @@ function C.build_implementing_state_comment_request(M, repo, issue_number, ready
   }, ready.source_ref)
 end
 
+function C.build_implement_checkpoint_comment_request(M, repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha, attempt, started_at, exec_ref, detail)
+  if not forge_validators.is_git_ref_safe(branch) then
+    error("github-devloop: invalid checkpoint branch")
+  end
+  if not forge_validators.is_git_sha(head_sha) then
+    error("github-devloop: invalid checkpoint head_sha")
+  end
+  if not forge_validators.is_git_ref_safe(base_branch) then
+    error("github-devloop: invalid checkpoint base_branch")
+  end
+  if not forge_validators.is_git_sha(base_sha) then
+    error("github-devloop: invalid checkpoint base_sha")
+  end
+  local text = tostring(detail or "")
+  if #text > M._max_impl_output_len then
+    text = base_ids.truncate_utf8(text, M._max_impl_output_len)
+  end
+  if text == "" then
+    text = "Checkpoint pushed after implementation timeout."
+  end
+  text = devloop_base.neutralize_untrusted_comment_text(text)
+  local checkpoint_marker = m_builders.implement_checkpoint_marker(ready.proposal_id, ready.dedup_key, branch, head_sha, base_branch, base_sha, attempt or 1)
+  local attempt_marker = M.implement_attempt_marker(ready.proposal_id, ready.dedup_key, attempt or 1, started_at or "", exec_ref)
+  return m_claims.attach_issue_claim({
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = "github-devloop implementation checkpoint pushed"
+      .. "\n\n" .. text
+      .. "\n\n" .. comment_strings.comment_string(M, "worktree_label") .. tostring(worktree)
+      .. "\n" .. comment_strings.comment_string(M, "branch_label") .. tostring(branch)
+      .. "\n" .. comment_strings.comment_string(M, "head_label") .. tostring(head_sha)
+      .. "\n" .. comment_strings.comment_string(M, "base_branch_label") .. tostring(base_branch)
+      .. "\n" .. comment_strings.comment_string(M, "base_head_label") .. tostring(base_sha)
+      .. "\n\n" .. attempt_marker
+      .. "\n" .. checkpoint_marker,
+    dedup_key = base_ids.dedup_key({
+      "implement",
+      "comment",
+      "checkpoint",
+      tostring(ready.dedup_key),
+      tostring(attempt or 1),
+      tostring(head_sha),
+    }),
+    source_ref = base_ids.normalize_source_ref(ready.source_ref),
+  }, ready.source_ref)
+end
+
 function C.build_implement_attempt_comment_request(M, repo, issue_number, ready, attempt, started_at, exec_ref)
   local marker = M.implement_attempt_marker(ready.proposal_id, ready.dedup_key, attempt, started_at, exec_ref)
   return {
