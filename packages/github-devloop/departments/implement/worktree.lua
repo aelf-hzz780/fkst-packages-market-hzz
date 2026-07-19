@@ -2,6 +2,7 @@ local devloop_base = require("devloop.base")
 local forge_git = require("forge.git").new(function(...) return exec_argv(...) end)
 local devloop_logging = require("devloop.logging")
 local devloop_commands = require("devloop.commands")
+local pr_safety = require("devloop.pr_safety")
 local exec_sync = exec_sync
 
 local M = {}
@@ -51,9 +52,43 @@ function M.remove_stale_worktree(path)
   end
 end
 
-function M.prepare_worktree(repo, issue_number, ready, branch, base_head)
+local function checkpoint_head_for_branch(checkpoint, branch)
+  if type(checkpoint) ~= "table" then
+    return nil
+  end
+  if tostring(checkpoint.branch or "") ~= tostring(branch) then
+    return nil
+  end
+  local head_sha = tostring(checkpoint.head_sha or "")
+  if not pr_safety.is_safe_head_sha(head_sha) then
+    error("github-devloop: unsafe-head-sha: unsafe checkpoint head")
+  end
+  return head_sha
+end
+
+local function restore_remote_checkpoint_worktree(worktree, branch, checkpoint_head)
+  local fetch_result = devloop_commands.git_fetch_branch("origin", branch, 60)
+  if fetch_result.exit_code ~= 0 then
+    error("github-devloop: checkpoint-branch-fetch-failed: git checkpoint branch fetch failed: " .. tostring(fetch_result.stderr))
+  end
+  local remote_head_result = devloop_commands.git_remote_branch_head("origin", branch, 30)
+  if remote_head_result.exit_code ~= 0 then
+    error("github-devloop: checkpoint-head-read-failed: git checkpoint branch head failed: " .. tostring(remote_head_result.stderr))
+  end
+  local remote_head = tostring(remote_head_result.stdout or ""):gsub("%s+$", "")
+  if remote_head ~= checkpoint_head then
+    error("github-devloop: checkpoint-head-mismatch: remote checkpoint head does not match marker fact")
+  end
+  local worktree_result = devloop_commands.git_worktree_add_remote_branch(worktree, "origin", branch, true, 60)
+  if worktree_result.exit_code ~= 0 then
+    error("github-devloop: git-worktree-add-failed: git worktree add remote checkpoint failed: " .. tostring(worktree_result.stderr))
+  end
+end
+
+function M.prepare_worktree(repo, issue_number, ready, branch, base_head, checkpoint)
   local branch_ref = devloop_commands.git_show_ref_branch(branch, 30)
   local branch_exists = branch_ref.exit_code == 0
+  local checkpoint_head = branch_exists and nil or checkpoint_head_for_branch(checkpoint, branch)
   if branch_ref.exit_code ~= 0 and branch_ref.exit_code ~= 1 then
     error("github-devloop: branch-ref-check-failed: git branch ref check failed: " .. tostring(branch_ref.stderr))
   end
@@ -101,9 +136,13 @@ function M.prepare_worktree(repo, issue_number, ready, branch, base_head)
     if clean_result.exit_code ~= 0 then
       error("github-devloop: worktree-cleanup-failed: git worktree cleanup failed: " .. tostring(clean_result.stderr))
     end
-    local worktree_result = devloop_commands.git_worktree_add_new_branch(worktree, branch, base_head, 60)
-    if worktree_result.exit_code ~= 0 then
-      error("github-devloop: git-worktree-add-failed: git worktree add failed: " .. tostring(worktree_result.stderr))
+    if checkpoint_head ~= nil then
+      restore_remote_checkpoint_worktree(worktree, branch, checkpoint_head)
+    else
+      local worktree_result = devloop_commands.git_worktree_add_new_branch(worktree, branch, base_head, 60)
+      if worktree_result.exit_code ~= 0 then
+        error("github-devloop: git-worktree-add-failed: git worktree add failed: " .. tostring(worktree_result.stderr))
+      end
     end
   end
   M.reconcile_worktree_to_branch(worktree, branch)

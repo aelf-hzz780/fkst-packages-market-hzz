@@ -220,10 +220,10 @@ local function merge_integration_for_implementation(worktree, integration_branch
   return false
 end
 
-local function prepare_attempt(repo, issue_number, ready, branches, branch, base_head, attempt, bridge_marker)
+local function prepare_attempt(repo, issue_number, ready, branches, branch, base_head, attempt, bridge_marker, checkpoint)
   local worktree = bridge_marker ~= nil
     and worktree_lifecycle.prepare_worktree_from_base(repo, issue_number, ready, branch, base_head)
-    or worktree_lifecycle.prepare_worktree(repo, issue_number, ready, branch, base_head)
+    or worktree_lifecycle.prepare_worktree(repo, issue_number, ready, branch, base_head, checkpoint)
   local merge_clean = merge_integration_for_implementation(worktree, branches.integration, base_head)
   merge_clean = external_pr_bridge.provision(worktree, bridge_marker, ready.proposal_id) and merge_clean
   substrate_pin.refresh(worktree, branch, base_head, merge_clean)
@@ -679,6 +679,7 @@ local function process_ready_event(event)
         attempt = attempts + 1,
         expected_from_states = { "implementing" },
         bridge_marker = external_pr_bridge.detect(current, repo, managed),
+        checkpoint = checkpoint,
       }
       return
     end
@@ -802,7 +803,8 @@ local function process_ready_event(event)
         attempt_plan.branch,
         attempt_plan.base_head,
         attempt_plan.attempt,
-        attempt_plan.bridge_marker
+        attempt_plan.bridge_marker,
+        attempt_plan.checkpoint
       )
     end
   end)

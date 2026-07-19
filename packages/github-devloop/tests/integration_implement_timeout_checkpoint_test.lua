@@ -40,6 +40,90 @@ local function mock_remote_branch(branch, head_sha)
   })
 end
 
+local function mock_remote_checkpoint_worktree_reuse(branch, checkpoint_head)
+  t.mock_command("git fetch 'origin' 'dev'", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("refs/remotes/'origin'/'dev'^{commit}", {
+    stdout = "abc123\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("show-ref --verify --quiet", {
+    stdout = "",
+    stderr = "",
+    exit_code = 1,
+  })
+  t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
+    stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("show-ref --verify --quiet", {
+    stdout = "",
+    stderr = "",
+    exit_code = 1,
+  })
+  t.mock_command("git worktree remove --force", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git worktree prune", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("mkdir -p", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  mock_remote_branch(branch, checkpoint_head)
+  t.mock_command("git worktree add --force -B", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("reset --hard", {
+    stdout = "HEAD is now at 1111111 checkpoint\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("clean -fd", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("merge --no-edit 'abc123'", {
+    stdout = "Already up to date.\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git show abc123:.fkst/substrate-ref", {
+    stdout = "2222222222222222222222222222222222222222\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git show", {
+    stdout = "1111111111111111111111111111111111111111\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("add -A", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("commit -m 'chore: refresh fkst-substrate pin'", {
+    stdout = "[devloop-owner-repo-42-01HY 9999999] chore: refresh fkst-substrate pin\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function checkpoint_comment(result)
   return find_raise(result.raises, "github-proxy.github_issue_comment_request", function(payload)
     return tostring(payload.body or ""):find("fkst:github-devloop:implement-checkpoint:v1", 1, true) ~= nil
@@ -107,23 +191,8 @@ return {
       m_builders.implement_checkpoint_marker(event.proposal_id, event.dedup_key, branch, checkpoint_head, "dev", "abc123", 1),
     })
     mock_remote_branch(branch, checkpoint_head)
-    t.mock_command("show-ref --verify --quiet", {
-      stdout = "",
-      stderr = "",
-      exit_code = 0,
-    })
-    t.mock_command("rev-list --count", {
-      stdout = "1\n",
-      stderr = "",
-      exit_code = 0,
-    })
-    t.mock_command("rev-parse --verify refs/heads/", {
-      stdout = checkpoint_head .. "\n",
-      stderr = "",
-      exit_code = 0,
-    })
     mock_branch_diff_paths("packages/github-devloop/core.lua\n")
-    mock_existing_empty_implement_worktree_reuse(nil, branch, "1")
+    mock_remote_checkpoint_worktree_reuse(branch, checkpoint_head)
     mock_implement_codex(0, "finished from checkpoint")
     mock_git_status(" M packages/github-devloop/core.lua\n")
     mock_git_commit("2222222222222222222222222222222222222222", branch)
@@ -136,6 +205,8 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("codex exec"), 1)
+    t.eq(count_calls("git worktree add --force -B"), 1)
+    t.eq(count_calls("git worktree add -b"), 0)
     local final = find_raise(result.raises, "github-proxy.github_issue_comment_request", function(payload)
       return tostring(payload.body or ""):find("fkst:github-devloop:implementing:v1", 1, true) ~= nil
     end)
