@@ -1,4 +1,23 @@
+local workflow_env = require("workflow_internal.env")
+
 local M = {}
+
+local role_timeout_defaults = {
+  consensus = 3600,
+}
+
+local role_timeout_env = {
+  consensus = "FKST_CODEX_TIMEOUT_CONSENSUS",
+}
+
+local function timeout_env_command(name)
+  if name ~= "FKST_CODEX_TIMEOUT_CONSENSUS" then
+    error("workflow_internal.codex: invalid-env-name: env name is not allowed")
+  end
+  return 'printf %s "$' .. name .. '"'
+end
+
+local read_timeout_env = workflow_env.read_env(timeout_env_command)
 
 local function copy_opts(opts)
   local out = {}
@@ -6,6 +25,38 @@ local function copy_opts(opts)
     out[key] = value
   end
   return out
+end
+
+local function trim(value)
+  return tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function parse_timeout_seconds(env_name, raw)
+  local value = trim(raw)
+  if value == "" or value:find("[^0-9]") ~= nil then
+    error("workflow_internal.codex: invalid " .. env_name .. ": expected positive integer seconds")
+  end
+  local parsed = tonumber(value)
+  if parsed == nil or parsed <= 0 then
+    error("workflow_internal.codex: invalid " .. env_name .. ": expected positive integer seconds")
+  end
+  return parsed
+end
+
+local function resolved_role_timeout(role, dispatch_opts)
+  if dispatch_opts.timeout ~= nil then
+    return dispatch_opts.timeout
+  end
+  local default = role_timeout_defaults[role]
+  if default == nil then
+    return nil
+  end
+  local env_name = role_timeout_env[role]
+  local raw = env_name and read_timeout_env(env_name, exec_sync) or nil
+  if raw ~= nil then
+    return parse_timeout_seconds(env_name, raw)
+  end
+  return default
 end
 
 function M.judgment_codex_opts(prompt, worktree)
@@ -92,6 +143,7 @@ function M.dispatch(identity, opts)
     }
   end
   local dispatch_opts = copy_opts(opts)
+  dispatch_opts.timeout = resolved_role_timeout(role, dispatch_opts)
   local sync = dispatch_opts.sync == true
   dispatch_opts.sync = nil
   dispatch_opts.role = role
