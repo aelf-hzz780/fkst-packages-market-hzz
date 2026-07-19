@@ -749,7 +749,7 @@ return {
       FKST_DEVLOOP_ROLLUP_RED_WINDOW_MINUTES = "30",
     }))
 
-    t.is_true(result.exit_code ~= 0)
+    t.eq(result.exit_code, 0)
     t.eq(h.find_raise(result.raises, "github-proxy.github_issue_create_request"), nil)
   end,
 
