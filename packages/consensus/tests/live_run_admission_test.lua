@@ -373,6 +373,33 @@ return {
     end)
   end,
 
+  test_workflow_dispatch_unknown_role_with_explicit_timeout_fails_closed = function()
+    with_dispatch_fakes({}, function(calls)
+      local ok, err = pcall(function()
+        workflow_codex.dispatch({
+          role = "unknown-role",
+          proposal_id = "proposal-42",
+          dedup_key = "dedup-42",
+        }, { prompt = "hello", timeout = 77 })
+      end)
+
+      t.eq(ok, false)
+      t.is_true(tostring(err):find("unknown timeout role: unknown-role", 1, true) ~= nil)
+      t.eq(#calls, 0)
+    end)
+  end,
+
+  test_workflow_raw_resolver_unknown_role_with_explicit_timeout_fails_closed = function()
+    with_timeout_env({}, function()
+      local ok, err = pcall(function()
+        workflow_codex.with_resolved_timeout("unknown-role", { prompt = "hello", timeout = 77 })
+      end)
+
+      t.eq(ok, false)
+      t.is_true(tostring(err):find("unknown timeout role: unknown-role", 1, true) ~= nil)
+    end)
+  end,
+
   test_workflow_dispatch_explicit_timeout_wins_over_non_consensus_env_override = function()
     with_dispatch_fakes({ FKST_CODEX_TIMEOUT_IMPLEMENT = "1234" }, function(calls)
       workflow_codex.dispatch({

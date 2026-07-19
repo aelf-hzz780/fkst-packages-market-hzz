@@ -71,12 +71,12 @@ local function parse_timeout_seconds(env_name, raw)
 end
 
 local function resolved_role_timeout(role, dispatch_opts)
-  if dispatch_opts.timeout ~= nil then
-    return dispatch_opts.timeout
-  end
   local default = role_timeout_defaults[role]
   if default == nil then
     error("workflow_internal.codex: unknown timeout role: " .. tostring(role))
+  end
+  if dispatch_opts.timeout ~= nil then
+    return dispatch_opts.timeout
   end
   local env_name = role_timeout_env[role]
   local raw = env_name and read_timeout_env(env_name, exec_sync) or nil
