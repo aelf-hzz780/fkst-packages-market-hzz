@@ -142,10 +142,45 @@ local function dispatch_identity()
   }
 end
 
+local role_timeout_env = {
+  consensus = "FKST_CODEX_TIMEOUT_CONSENSUS",
+  implement = "FKST_CODEX_TIMEOUT_IMPLEMENT",
+  fix = "FKST_CODEX_TIMEOUT_FIX",
+  ["review-meta"] = "FKST_CODEX_TIMEOUT_REVIEW_META",
+  archaudit = "FKST_CODEX_TIMEOUT_ARCHAUDIT",
+  ["release-notes"] = "FKST_CODEX_TIMEOUT_RELEASE_NOTES",
+  judgment = "FKST_CODEX_TIMEOUT_JUDGMENT",
+  decompose = "FKST_CODEX_TIMEOUT_DECOMPOSE",
+  intake = "FKST_CODEX_TIMEOUT_INTAKE",
+  ["workflow-select"] = "FKST_CODEX_TIMEOUT_WORKFLOW_SELECT",
+  ["workflow-materialize"] = "FKST_CODEX_TIMEOUT_WORKFLOW_MATERIALIZE",
+  ["sync-conflict"] = "FKST_CODEX_TIMEOUT_SYNC_CONFLICT",
+}
+
+local function with_timeout_env(env_values, fn)
+  local original_exec_sync = exec_sync
+  if type(env_values) ~= "table" then
+    env_values = { FKST_CODEX_TIMEOUT_CONSENSUS = env_values }
+  end
+  exec_sync = function(cmd)
+    local env_name = tostring(cmd):match('^printf %%s "%$([A-Z0-9_]+)"$')
+    t.is_true(env_name ~= nil, "unexpected env command: " .. tostring(cmd))
+    return {
+      stdout = env_values[env_name] or "",
+      stderr = "",
+      exit_code = 0,
+    }
+  end
+  local ok, err = pcall(fn)
+  exec_sync = original_exec_sync
+  if not ok then
+    error(err)
+  end
+end
+
 local function with_dispatch_fakes(env_value, fn)
   local original_spawn_codex = spawn_codex
   local original_spawn_codex_sync = spawn_codex_sync
-  local original_exec_sync = exec_sync
   local calls = {}
   spawn_codex = function(spawn_opts)
     table.insert(calls, { kind = "async", opts = spawn_opts })
@@ -155,22 +190,15 @@ local function with_dispatch_fakes(env_value, fn)
     table.insert(calls, { kind = "sync", opts = spawn_opts })
     return { kind = "sync", opts = spawn_opts }
   end
-  exec_sync = function(cmd)
-    t.eq(cmd, 'printf %s "$FKST_CODEX_TIMEOUT_CONSENSUS"')
-    return {
-      stdout = env_value or "",
-      stderr = "",
-      exit_code = 0,
-    }
-  end
   local ok, err = pcall(function()
-    with_codex_runs({}, function()
-      fn(calls)
+    with_timeout_env(env_value, function()
+      with_codex_runs({}, function()
+        fn(calls)
+      end)
     end)
   end)
   spawn_codex = original_spawn_codex
   spawn_codex_sync = original_spawn_codex_sync
-  exec_sync = original_exec_sync
   if not ok then
     error(err)
   end
@@ -249,6 +277,63 @@ return {
     end)
   end,
 
+  test_workflow_dispatch_resolves_production_role_defaults = function()
+    local expected = {
+      implement = 7200,
+      fix = 7200,
+      ["review-meta"] = 3600,
+    }
+    for role, timeout in pairs(expected) do
+      with_dispatch_fakes({}, function(calls)
+        workflow_codex.dispatch({
+          role = role,
+          proposal_id = "proposal-" .. role,
+          dedup_key = "dedup-" .. role,
+        }, { prompt = "hello" })
+
+        t.eq(#calls, 1)
+        t.eq(calls[1].opts.timeout, timeout)
+        t.eq(calls[1].opts.role, role)
+      end)
+    end
+  end,
+
+  test_workflow_raw_resolver_defaults_for_direct_production_roles = function()
+    local expected = {
+      archaudit = 3600,
+      ["release-notes"] = 3600,
+      judgment = 3600,
+      decompose = 3600,
+      intake = 3600,
+      ["workflow-select"] = 3600,
+      ["workflow-materialize"] = 3600,
+      ["sync-conflict"] = 3600,
+    }
+    with_timeout_env({}, function()
+      for role, timeout in pairs(expected) do
+        local opts = workflow_codex.with_resolved_timeout(role, { prompt = "hello" })
+        t.eq(opts.timeout, timeout)
+      end
+    end)
+  end,
+
+  test_workflow_raw_resolver_env_overrides_added_roles = function()
+    local overrides = {
+      FKST_CODEX_TIMEOUT_IMPLEMENT = "1234",
+      FKST_CODEX_TIMEOUT_ARCHAUDIT = "2345",
+      FKST_CODEX_TIMEOUT_RELEASE_NOTES = "3456",
+      FKST_CODEX_TIMEOUT_JUDGMENT = "4567",
+    }
+    with_timeout_env(overrides, function()
+      for role, env_name in pairs(role_timeout_env) do
+        if overrides[env_name] ~= nil then
+          local opts = workflow_codex.with_resolved_timeout(role, { prompt = "hello" })
+          t.eq(opts.timeout, tonumber(overrides[env_name]))
+        end
+      end
+    end)
+  end,
+
   test_workflow_dispatch_uses_consensus_timeout_env_override = function()
     with_dispatch_fakes("1234", function(calls)
       local result = workflow_codex.dispatch(dispatch_identity(), { sync = true, prompt = "hello" })
@@ -269,6 +354,35 @@ return {
       t.eq(ok, false)
       t.is_true(tostring(err):find("invalid FKST_CODEX_TIMEOUT_CONSENSUS", 1, true) ~= nil)
       t.eq(#calls, 0)
+    end)
+  end,
+
+  test_workflow_dispatch_invalid_non_consensus_timeout_env_fails_closed = function()
+    with_dispatch_fakes({ FKST_CODEX_TIMEOUT_IMPLEMENT = "0" }, function(calls)
+      local ok, err = pcall(function()
+        workflow_codex.dispatch({
+          role = "implement",
+          proposal_id = "proposal-42",
+          dedup_key = "dedup-42",
+        }, { prompt = "hello" })
+      end)
+
+      t.eq(ok, false)
+      t.is_true(tostring(err):find("invalid FKST_CODEX_TIMEOUT_IMPLEMENT", 1, true) ~= nil)
+      t.eq(#calls, 0)
+    end)
+  end,
+
+  test_workflow_dispatch_explicit_timeout_wins_over_non_consensus_env_override = function()
+    with_dispatch_fakes({ FKST_CODEX_TIMEOUT_IMPLEMENT = "1234" }, function(calls)
+      workflow_codex.dispatch({
+        role = "implement",
+        proposal_id = "proposal-42",
+        dedup_key = "dedup-42",
+      }, { prompt = "hello", timeout = 77 })
+
+      t.eq(#calls, 1)
+      t.eq(calls[1].opts.timeout, 77)
     end)
   end,
 

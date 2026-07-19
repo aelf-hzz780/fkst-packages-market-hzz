@@ -219,7 +219,6 @@ local function run_fix_attempt(plan)
   }), {
     prompt = core.build_fix_prompt(plan.fix, plan.current_issue, plan.feedback_reason, plan.fix.framing, content_fetch, merge_context),
     worktree = worktree,
-    timeout = 2 * 60 * 60,  -- 2h: fix loops code+test (#1481)
     sync = true,
   })
   if type(result) == "table" and result.deferred then

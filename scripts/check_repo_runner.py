@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import check_repo_config
+import check_repo_codex_timeout
 import check_repo_content_truncation
 import check_repo_coverage
 import check_repo_dependency_cycle
@@ -149,6 +150,8 @@ def run_generic(c, config: check_repo_config.CheckRepoConfig, violations: list[s
         c.add(violations, "G-DEAD-LETTER", message)
     for message in check_repo_live_run_dispatch.repository_messages(root, allowlists, enforce_base):
         c.add(violations, "G-LIVE-RUN-DISPATCH", message)
+    for message in check_repo_codex_timeout.repository_messages(root, c.package_lua_files, c.read_text, c.rel, c.strip_lua_comments_and_strings):
+        c.add(violations, "G-CODEX-TIMEOUT", message)
     check_monotone_gate(c, root, violations, allowlists, enforce_base)
     for message in check_repo_restart_lifecycle.repository_messages(root, enforce_base):
         c.add(violations, "G-RESTART-LIFECYCLE", message)
