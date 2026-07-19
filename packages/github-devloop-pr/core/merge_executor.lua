@@ -547,7 +547,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     raise_fixing(repo, issue_number, merge_ready, state, current_pr, mergeable_reason, queue_position)
     return
   end
-  local rollup_green, rollup_reason, check_runs = core.evaluate_ci_status_gate(current_pr, {
+  local rollup_green, rollup_reason, ci_check_runs = core.evaluate_ci_status_gate(current_pr, {
     repo = repo,
     dept = "merge",
     proposal_id = merge_ready.proposal_id,
@@ -571,7 +571,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
           current_pr,
           merge_ready.proposal_id,
           nil,
-          check_runs
+          ci_check_runs
         )
         if healed then
           log_gate(merge_ready, "dry-run", "ci-selfheal-triggered; waiting for checks")
