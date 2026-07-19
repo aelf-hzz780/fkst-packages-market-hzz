@@ -4,14 +4,41 @@ local M = {}
 
 local role_timeout_defaults = {
   consensus = 3600,
+  implement = 2 * 60 * 60,
+  fix = 2 * 60 * 60,
+  ["review-meta"] = 3600,
+  archaudit = 3600,
+  ["release-notes"] = 3600,
+  judgment = 3600,
+  decompose = 3600,
+  intake = 3600,
+  ["workflow-select"] = 3600,
+  ["workflow-materialize"] = 3600,
+  ["sync-conflict"] = 3600,
 }
 
 local role_timeout_env = {
   consensus = "FKST_CODEX_TIMEOUT_CONSENSUS",
+  implement = "FKST_CODEX_TIMEOUT_IMPLEMENT",
+  fix = "FKST_CODEX_TIMEOUT_FIX",
+  ["review-meta"] = "FKST_CODEX_TIMEOUT_REVIEW_META",
+  archaudit = "FKST_CODEX_TIMEOUT_ARCHAUDIT",
+  ["release-notes"] = "FKST_CODEX_TIMEOUT_RELEASE_NOTES",
+  judgment = "FKST_CODEX_TIMEOUT_JUDGMENT",
+  decompose = "FKST_CODEX_TIMEOUT_DECOMPOSE",
+  intake = "FKST_CODEX_TIMEOUT_INTAKE",
+  ["workflow-select"] = "FKST_CODEX_TIMEOUT_WORKFLOW_SELECT",
+  ["workflow-materialize"] = "FKST_CODEX_TIMEOUT_WORKFLOW_MATERIALIZE",
+  ["sync-conflict"] = "FKST_CODEX_TIMEOUT_SYNC_CONFLICT",
 }
 
+local allowed_timeout_env = {}
+for _, env_name in pairs(role_timeout_env) do
+  allowed_timeout_env[env_name] = true
+end
+
 local function timeout_env_command(name)
-  if name ~= "FKST_CODEX_TIMEOUT_CONSENSUS" then
+  if not allowed_timeout_env[name] then
     error("workflow_internal.codex: invalid-env-name: env name is not allowed")
   end
   return 'printf %s "$' .. name .. '"'
@@ -44,12 +71,12 @@ local function parse_timeout_seconds(env_name, raw)
 end
 
 local function resolved_role_timeout(role, dispatch_opts)
-  if dispatch_opts.timeout ~= nil then
-    return dispatch_opts.timeout
-  end
   local default = role_timeout_defaults[role]
   if default == nil then
-    return nil
+    error("workflow_internal.codex: unknown timeout role: " .. tostring(role))
+  end
+  if dispatch_opts.timeout ~= nil then
+    return dispatch_opts.timeout
   end
   local env_name = role_timeout_env[role]
   local raw = env_name and read_timeout_env(env_name, exec_sync) or nil
@@ -57,6 +84,12 @@ local function resolved_role_timeout(role, dispatch_opts)
     return parse_timeout_seconds(env_name, raw)
   end
   return default
+end
+
+function M.with_resolved_timeout(role, opts)
+  local dispatch_opts = copy_opts(opts)
+  dispatch_opts.timeout = resolved_role_timeout(role, dispatch_opts)
+  return dispatch_opts
 end
 
 function M.judgment_codex_opts(prompt, worktree)

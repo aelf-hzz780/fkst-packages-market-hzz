@@ -327,10 +327,10 @@ function M.act(package_core, event, opts)
     version = gate.decision_dedup_key,
     tick = event.ts,
   })
-  local result = spawn_codex_sync(workflow_codex.judgment_codex_opts(
+  local result = spawn_codex_sync(workflow_codex.with_resolved_timeout("intake", workflow_codex.judgment_codex_opts(
     package_core.build_intake_prompt(candidate.proposal_id, gate.current, content_fetch),
     devloop_base.judgment_worktree_with_exec(exec_sync, "intake", candidate.dedup_key)
-  ))
+  )))
   if type(result) ~= "table" or result.exit_code ~= 0 or result.stdout == nil then
     local stderr = type(result) == "table" and result.stderr or "nil result"
     devloop_logging.log_codex_result(dept, candidate.proposal_id, "intake", result, nil, stderr, {

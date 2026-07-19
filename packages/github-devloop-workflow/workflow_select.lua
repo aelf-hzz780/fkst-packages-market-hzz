@@ -307,10 +307,10 @@ local function run_workflow_select_codex(ctx, eligible)
   local proposal_id = ctx.candidate and ctx.candidate.proposal_id or "unknown"
   devloop_logging.log_codex_start("workflow_select", proposal_id, "workflow-select")
   local ok, result = pcall(function()
-    return spawn_codex_sync(workflow_codex.judgment_codex_opts(
+    return spawn_codex_sync(workflow_codex.with_resolved_timeout("workflow-select", workflow_codex.judgment_codex_opts(
       prompt,
       devloop_base.judgment_worktree_with_exec(exec_sync, "workflow-select", ctx.candidate and ctx.candidate.dedup_key)
-    ))
+    )))
   end)
   if not ok then
     devloop_logging.log_codex_result("workflow_select", proposal_id, "workflow-select", nil, nil, result, {

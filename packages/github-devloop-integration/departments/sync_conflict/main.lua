@@ -16,6 +16,7 @@ local devloop_logging = require("devloop.logging")
 local devloop_commands = require("devloop.commands")
 local pr_commands = require("devloop.commands.prs")
 local github_factory = require("devloop.github_factory")
+local workflow_codex = require("workflow_internal.codex")
 
 local spec = {
   consumes = { "devloop_sync_conflict" },
@@ -457,10 +458,10 @@ local function act(event, ports)
       end
 
       devloop_logging.log_codex_start("sync_conflict", "branch-sync", "sync-conflict")
-      local result = spawn_codex_sync({
+      local result = spawn_codex_sync(workflow_codex.with_resolved_timeout("sync-conflict", {
         prompt = core.build_sync_conflict_prompt(active_conflict),
         worktree = worktree,
-      })
+      }))
       if type(result) ~= "table" or result.exit_code ~= 0 then
         local stderr = type(result) == "table" and result.stderr or "nil result"
         devloop_logging.log_codex_result("sync_conflict", "branch-sync", "sync-conflict", result, nil, stderr, {
