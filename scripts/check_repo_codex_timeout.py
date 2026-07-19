@@ -12,6 +12,12 @@ NUMERIC_TIMEOUT_RE = re.compile(r"\btimeout\s*=\s*(?:\d+\s*(?:\*\s*\d+\s*)*)")
 NUMERIC_TIMEOUT_ASSIGN_RE = re.compile(
     r"\b(?P<opts>[A-Za-z_][A-Za-z0-9_]*)\s*\.\s*timeout\s*=\s*(?:\d+\s*(?:\*\s*\d+\s*)*)"
 )
+NUMERIC_CONST_ASSIGN_RE = re.compile(
+    r"\b(?:local\s+)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:\d+\s*(?:\*\s*\d+\s*)*)"
+)
+TIMEOUT_VAR_ASSIGN_RE = re.compile(
+    r"\b(?P<opts>[A-Za-z_][A-Za-z0-9_]*)\s*\.\s*timeout\s*=\s*(?P<value>[A-Za-z_][A-Za-z0-9_]*)"
+)
 CODEX_TIMEOUT_CONST_RE = re.compile(
     r"\b(?:local\s+)?(?=[A-Za-z_][A-Za-z0-9_]*\s*=)(?=[A-Za-z0-9_]*codex_timeout)[A-Za-z_][A-Za-z0-9_]*\s*=\s*(?:\d+\s*(?:\*\s*\d+\s*)*)",
     re.IGNORECASE,
@@ -54,11 +60,19 @@ def codex_timeout_literal_lines(
 ) -> list[int]:
     stripped = strip_lua_comments_and_strings(text)
     lines: set[int] = set()
+    numeric_const_lines = {
+        match.group("name"): text.count("\n", 0, match.start()) + 1
+        for match in NUMERIC_CONST_ASSIGN_RE.finditer(stripped)
+    }
     for match in CODEX_TIMEOUT_CONST_RE.finditer(stripped):
         lines.add(text.count("\n", 0, match.start()) + 1)
     for match in NUMERIC_TIMEOUT_ASSIGN_RE.finditer(stripped):
         if variable_used_as_codex_opts_argument(stripped, match.group("opts"), match.end()):
             lines.add(text.count("\n", 0, match.start()) + 1)
+    for match in TIMEOUT_VAR_ASSIGN_RE.finditer(stripped):
+        const_line = numeric_const_lines.get(match.group("value"))
+        if const_line is not None and variable_used_as_codex_opts_argument(stripped, match.group("opts"), match.end()):
+            lines.add(const_line)
     for call in CODEX_RUN_CALL_RE.finditer(stripped):
         close = matching_lua_paren(stripped, call.end() - 1)
         if close is None:

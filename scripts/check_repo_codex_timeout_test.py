@@ -79,6 +79,15 @@ return spawn_codex_sync(opts)
 """
         self.assertEqual(self.literal_lines(source), [2])
 
+    def test_detects_numeric_timeout_alias_before_codex_spawn(self) -> None:
+        source = """
+local timeout_seconds = 3600
+local opts = workflow_codex.judgment_codex_opts(prompt, ".")
+opts.timeout = timeout_seconds
+return spawn_codex_sync(opts)
+"""
+        self.assertEqual(self.literal_lines(source), [2])
+
     def test_ignores_comments_strings_and_non_codex_timeouts(self) -> None:
         source = """
 -- spawn_codex_sync({ timeout = 3600 })
