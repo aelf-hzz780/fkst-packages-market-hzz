@@ -134,6 +134,48 @@ local function with_codex_runs(runs, fn)
   end
 end
 
+local function dispatch_identity()
+  return {
+    role = "consensus",
+    proposal_id = "proposal-42",
+    dedup_key = "dedup-42",
+  }
+end
+
+local function with_dispatch_fakes(env_value, fn)
+  local original_spawn_codex = spawn_codex
+  local original_spawn_codex_sync = spawn_codex_sync
+  local original_exec_sync = exec_sync
+  local calls = {}
+  spawn_codex = function(spawn_opts)
+    table.insert(calls, { kind = "async", opts = spawn_opts })
+    return { kind = "async", opts = spawn_opts }
+  end
+  spawn_codex_sync = function(spawn_opts)
+    table.insert(calls, { kind = "sync", opts = spawn_opts })
+    return { kind = "sync", opts = spawn_opts }
+  end
+  exec_sync = function(cmd)
+    t.eq(cmd, 'printf %s "$FKST_CODEX_TIMEOUT_CONSENSUS"')
+    return {
+      stdout = env_value or "",
+      stderr = "",
+      exit_code = 0,
+    }
+  end
+  local ok, err = pcall(function()
+    with_codex_runs({}, function()
+      fn(calls)
+    end)
+  end)
+  spawn_codex = original_spawn_codex
+  spawn_codex_sync = original_spawn_codex_sync
+  exec_sync = original_exec_sync
+  if not ok then
+    error(err)
+  end
+end
+
 return {
   test_convergence_identity_uses_only_stable_proposal_fields = function()
     local built = identity.from_proposal("consensus", proposal({
@@ -191,6 +233,51 @@ return {
       t.eq(result.deferred, true)
       t.eq(result.reason, "live-run-active")
       t.eq(#codex_calls(), 0)
+    end)
+  end,
+
+  test_workflow_dispatch_resolves_consensus_default_timeout = function()
+    with_dispatch_fakes(nil, function(calls)
+      local result = workflow_codex.dispatch(dispatch_identity(), { prompt = "hello", worktree = "/tmp/worktree" })
+
+      t.eq(result.kind, "async")
+      t.eq(#calls, 1)
+      t.eq(calls[1].opts.timeout, 3600)
+      t.eq(calls[1].opts.role, "consensus")
+      t.eq(calls[1].opts.proposal_id, "proposal-42")
+      t.eq(calls[1].opts.dedup_key, "dedup-42")
+    end)
+  end,
+
+  test_workflow_dispatch_uses_consensus_timeout_env_override = function()
+    with_dispatch_fakes("1234", function(calls)
+      local result = workflow_codex.dispatch(dispatch_identity(), { sync = true, prompt = "hello" })
+
+      t.eq(result.kind, "sync")
+      t.eq(#calls, 1)
+      t.eq(calls[1].opts.timeout, 1234)
+      t.eq(calls[1].opts.sync, nil)
+    end)
+  end,
+
+  test_workflow_dispatch_invalid_consensus_timeout_env_fails_closed = function()
+    with_dispatch_fakes("12x", function(calls)
+      local ok, err = pcall(function()
+        workflow_codex.dispatch(dispatch_identity(), { prompt = "hello" })
+      end)
+
+      t.eq(ok, false)
+      t.is_true(tostring(err):find("invalid FKST_CODEX_TIMEOUT_CONSENSUS", 1, true) ~= nil)
+      t.eq(#calls, 0)
+    end)
+  end,
+
+  test_workflow_dispatch_explicit_timeout_wins_over_consensus_env_override = function()
+    with_dispatch_fakes("1234", function(calls)
+      workflow_codex.dispatch(dispatch_identity(), { prompt = "hello", timeout = 77 })
+
+      t.eq(#calls, 1)
+      t.eq(calls[1].opts.timeout, 77)
     end)
   end,
 
