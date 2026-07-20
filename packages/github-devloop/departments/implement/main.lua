@@ -6,7 +6,6 @@ local requests_labels = require("devloop.requests.labels")
 local requests_lifecycle = require("devloop.requests.lifecycle")
 local parsers_issue = require("devloop.parsers.issue")
 local core = require("core")
-local git_adapter = require("forge.git")
 local queue = require("devloop.queue")
 local saga = require("workflow.saga")
 local convergence_identity = require("contract.convergence_identity")
@@ -18,6 +17,7 @@ local slice_gate = require("departments.implement.slice_gate")
 local substrate_pin = require("departments.implement.substrate_pin")
 local transitions = require("departments.implement.transitions")
 local worktree_lifecycle = require("departments.implement.worktree")
+local harvest = require("departments.implement.harvest")
 local branch_progress = require("departments.implement.branch_progress")
 local dispatch_live_run = require("devloop.dispatch_live_run")
 local context_bundle = require("devloop.context_bundle")
@@ -36,7 +36,6 @@ local dispatch_liveness = {
   end,
 }
 
-local payloads_builders = require("devloop.payloads.builders")
 local payloads_predicates = require("devloop.payloads.predicates")
 local v_ready = require("devloop.validators.ready")
 local m_facts = require("devloop.markers.facts")
@@ -56,8 +55,6 @@ local spec = {
   stall_window = "10m",
   retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
-
-local git = git_adapter.production_handle
 
 local function implement_done(_event)
   return false
@@ -136,6 +133,23 @@ local function ready_for_implementation_version(ready, version)
   return copy
 end
 
+local function implementation_outcome(ready, worktree, branch, head_sha, base_branch, base_sha, attempt, started_at, exec_ref, status)
+  return {
+    kind = "implementing",
+    ready = ready,
+    worktree = worktree,
+    branch = branch,
+    head_sha = head_sha,
+    base_branch = base_branch,
+    base_sha = base_sha,
+    attempt = attempt,
+    started_at = started_at,
+    exec_ref = exec_ref,
+    finished_at = now(),
+    outcome = status or "completed",
+  }
+end
+
 local function raise_implement_version_mismatch(repo, issue_number, ready, state, expected_version, attempt)
   local request = requests_lifecycle.build_implement_version_mismatch_comment_request(core,
     repo,
@@ -206,10 +220,10 @@ local function merge_integration_for_implementation(worktree, integration_branch
   return false
 end
 
-local function prepare_attempt(repo, issue_number, ready, branches, branch, base_head, attempt, bridge_marker)
+local function prepare_attempt(repo, issue_number, ready, branches, branch, base_head, attempt, bridge_marker, checkpoint)
   local worktree = bridge_marker ~= nil
     and worktree_lifecycle.prepare_worktree_from_base(repo, issue_number, ready, branch, base_head)
-    or worktree_lifecycle.prepare_worktree(repo, issue_number, ready, branch, base_head)
+    or worktree_lifecycle.prepare_worktree(repo, issue_number, ready, branch, base_head, checkpoint)
   local merge_clean = merge_integration_for_implementation(worktree, branches.integration, base_head)
   merge_clean = external_pr_bridge.provision(worktree, bridge_marker, ready.proposal_id) and merge_clean
   substrate_pin.refresh(worktree, branch, base_head, merge_clean)
@@ -249,18 +263,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
       source_ref = ready.source_ref,
       terminal = false,
     })
-    return {
-      kind = "impl-failed",
-      ready = ready,
-      reason = "codex-failed",
-      detail = stderr,
-      attempt = attempt,
-      started_at = codex_started_at,
-      exec_ref = exec_ref,
-      finished_at = now(),
-      base_sha = base_head,
-      outcome = "failed: codex-failed",
-    }
+    return harvest.after_codex_failure(repo, issue_number, ready, branches.integration, branch, base_head, worktree, attempt, codex_started_at, exec_ref, stderr)
   end
   devloop_logging.log_codex_result("implement", ready.proposal_id, "implement", result, "result=completed", nil)
 
@@ -277,20 +280,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
         "head_sha=" .. tostring(head_sha),
         "reason=reusing clean ahead implementation branch",
       })
-      return {
-        kind = "implementing",
-        ready = ready,
-        worktree = worktree,
-        branch = branch,
-        head_sha = head_sha,
-        base_branch = branches.integration,
-        base_sha = base_head,
-        attempt = attempt,
-        started_at = codex_started_at,
-        exec_ref = exec_ref,
-        finished_at = now(),
-        outcome = "completed",
-      }
+      return implementation_outcome(ready, worktree, branch, head_sha, branches.integration, base_head, attempt, codex_started_at, exec_ref)
     end
 
     local detail = tostring(result.stdout or "")
@@ -302,68 +292,11 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
       source_ref = ready.source_ref,
       terminal = false,
     })
-    return {
-      kind = "impl-failed",
-      ready = ready,
-      reason = "no-changes",
-      detail = detail,
-      attempt = attempt,
-      started_at = codex_started_at,
-      exec_ref = exec_ref,
-      finished_at = now(),
-      base_sha = base_head,
-      outcome = "failed: no-changes",
-    }
+    return harvest.impl_failed_outcome(ready, "no-changes", detail, attempt, codex_started_at, exec_ref, base_head)
   end
 
-  local add_result = devloop_commands.git_add_all(worktree, 30)
-  if add_result.exit_code ~= 0 then
-    error("github-devloop: git-add-failed: git add failed: " .. tostring(add_result.stderr))
-  end
-
-  local commit_result = devloop_commands.git_commit(worktree, payloads_builders.implement_commit_subject(
-      issue_number,
-      require("devloop.github_proxy_entity_view").commit_issue_subject_snapshot(repo, issue_number)
-    ), 60)
-  if commit_result.exit_code ~= 0 then
-    error("github-devloop: git-commit-failed: git commit failed: " .. tostring(commit_result.stderr))
-  end
-
-  local branch_result = devloop_commands.git_current_branch(worktree, 30)
-  if branch_result.exit_code ~= 0 then
-    error("github-devloop: branch-fact-read-failed: git branch fact failed: " .. tostring(branch_result.stderr))
-  end
-  local actual_branch = tostring(branch_result.stdout or ""):gsub("%s+$", "")
-  if actual_branch ~= branch then
-    error("github-devloop: branch-mismatch: deterministic implementing branch mismatch")
-  end
-  if not require("devloop.pr_safety").is_safe_branch(branch) then
-    error("github-devloop: unsafe-branch: unsafe implementing branch")
-  end
-
-  local head_result = git("github-devloop").git_head_sha(worktree, 30)
-  if head_result.exit_code ~= 0 then
-    error("github-devloop: git-head-read-failed: git head fact failed: " .. tostring(head_result.stderr))
-  end
-  local head_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
-  if not require("devloop.pr_safety").is_safe_head_sha(head_sha) then
-    error("github-devloop: unsafe-head-sha: unsafe implementing head_sha")
-  end
-
-  return {
-    kind = "implementing",
-    ready = ready,
-    worktree = worktree,
-    branch = branch,
-    head_sha = head_sha,
-    base_branch = branches.integration,
-    base_sha = base_head,
-    attempt = attempt,
-    started_at = codex_started_at,
-    exec_ref = exec_ref,
-    finished_at = now(),
-    outcome = "completed",
-  }
+  local head_sha = harvest.commit_dirty_worktree(repo, issue_number, ready, worktree, branch)
+  return implementation_outcome(ready, worktree, branch, head_sha, branches.integration, base_head, attempt, codex_started_at, exec_ref)
 end
 
 local function raise_attempt_outcome(repo, issue_number, outcome)
@@ -399,6 +332,26 @@ local function raise_attempt_outcome(repo, issue_number, outcome)
       },
       "implementation output published; waiting for visible delegated PR child"
     )
+    return
+  end
+  if outcome.kind == "implement-checkpoint" then
+    publish_implementation_branch(repo, issue_number, outcome.ready, outcome.worktree, outcome.branch)
+    local request = requests_lifecycle.build_implement_checkpoint_comment_request(
+      core,
+      repo,
+      issue_number,
+      outcome.ready,
+      outcome.worktree,
+      outcome.branch,
+      outcome.head_sha,
+      outcome.base_branch,
+      outcome.base_sha,
+      outcome.attempt,
+      outcome.started_at,
+      outcome.exec_ref,
+      outcome.detail
+    )
+    devloop_logging.log_raise("implement", outcome.ready.proposal_id, "github-proxy.github_issue_comment_request", request)
     return
   end
   if outcome.kind == "impl-failed" then
@@ -547,6 +500,13 @@ local function operator_blocked_reimplement_allowed(ready, current, state)
     and tostring(link.impl_version or "") == tostring(reentry.impl_version or "")
 end
 
+local function checkpoint_matches_progress(checkpoint, progress)
+  return checkpoint ~= nil
+    and progress ~= nil
+    and checkpoint.branch == progress.branch
+    and checkpoint.head_sha == progress.head_sha
+end
+
 local function process_ready_event(event)
   local ready = event.payload or {}
   if not v_ready.is_supported_ready(core, ready) then
@@ -673,6 +633,8 @@ local function process_ready_event(event)
         return
       end
       local progress = nil
+      local checkpoint = fact == nil and m_facts.implement_checkpoint_fact(current.comments, ready.proposal_id, marker_ready.dedup_key) or nil
+      local resume_checkpoint = checkpoint
       if fact ~= nil then
         progress = branch_progress.remote_branch_fact(core.git, fact.branch, fact.base_branch, fact)
       else
@@ -682,17 +644,30 @@ local function process_ready_event(event)
         })
       end
       if progress ~= nil then
-        progress.proposal_id = ready.proposal_id
-        progress.dedup_key = marker_ready.dedup_key
-        pr_child_handoff.raise_awaiting_pr_from_fact("implement", repo, issue_number, marker_ready, current, progress, "implementing remote branch progress is visible")
-        return
+        if fact ~= nil then
+          progress.proposal_id = ready.proposal_id
+          progress.dedup_key = marker_ready.dedup_key
+          pr_child_handoff.raise_awaiting_pr_from_fact("implement", repo, issue_number, marker_ready, current, progress, "implementing remote branch progress is visible")
+          return
+        elseif checkpoint_matches_progress(checkpoint, progress) then
+          resume_checkpoint = checkpoint
+          devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "implementing", "implementing", "skip-wip-checkpoint(remote-progress)", "remote branch progress is a WIP checkpoint; retrying implementation attempt")
+        else
+          resume_checkpoint = progress
+          devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "implementing", "implementing", "skip-unmarked-progress(remote-progress)", "remote branch progress has no durable implementing fact; retrying implementation attempt")
+        end
       end
       local base_head = worktree_lifecycle.prepare_base(branches)
-      local local_progress = branch_progress.local_branch_fact(base_head, branch, branches.integration, marker_ready.dedup_key)
-      if local_progress ~= nil then
-        local_progress.proposal_id = ready.proposal_id
-        pr_child_handoff.raise_awaiting_pr_from_fact("implement", repo, issue_number, marker_ready, current, local_progress, "local implementation branch progress is visible")
-        return
+      if resume_checkpoint == nil then
+        local local_progress = branch_progress.local_branch_fact(base_head, branch, branches.integration, marker_ready.dedup_key)
+        if local_progress ~= nil then
+          if fact ~= nil then
+            local_progress.proposal_id = ready.proposal_id
+            pr_child_handoff.raise_awaiting_pr_from_fact("implement", repo, issue_number, marker_ready, current, local_progress, "local implementation branch progress is visible")
+            return
+          end
+          devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "implementing", "implementing", "skip-unmarked-progress(local-progress)", "local branch progress has no durable implementing fact; retrying implementation attempt")
+        end
       end
       local attempts = core.implement_attempt_count(current.comments, ready.proposal_id, marker_ready.dedup_key)
       if attempts >= MAX_IMPLEMENT_ATTEMPTS then
@@ -710,6 +685,7 @@ local function process_ready_event(event)
         attempt = attempts + 1,
         expected_from_states = { "implementing" },
         bridge_marker = external_pr_bridge.detect(current, repo, managed),
+        checkpoint = resume_checkpoint,
       }
       return
     end
@@ -833,7 +809,8 @@ local function process_ready_event(event)
         attempt_plan.branch,
         attempt_plan.base_head,
         attempt_plan.attempt,
-        attempt_plan.bridge_marker
+        attempt_plan.bridge_marker,
+        attempt_plan.checkpoint
       )
     end
   end)

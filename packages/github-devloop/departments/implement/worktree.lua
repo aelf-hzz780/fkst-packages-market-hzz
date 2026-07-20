@@ -2,6 +2,7 @@ local devloop_base = require("devloop.base")
 local forge_git = require("forge.git").new(function(...) return exec_argv(...) end)
 local devloop_logging = require("devloop.logging")
 local devloop_commands = require("devloop.commands")
+local pr_safety = require("devloop.pr_safety")
 local exec_sync = exec_sync
 
 local M = {}
@@ -51,9 +52,43 @@ function M.remove_stale_worktree(path)
   end
 end
 
-function M.prepare_worktree(repo, issue_number, ready, branch, base_head)
+local function checkpoint_head_for_branch(checkpoint, branch)
+  if type(checkpoint) ~= "table" then
+    return nil
+  end
+  if tostring(checkpoint.branch or "") ~= tostring(branch) then
+    return nil
+  end
+  local head_sha = tostring(checkpoint.head_sha or "")
+  if not pr_safety.is_safe_head_sha(head_sha) then
+    error("github-devloop: unsafe-head-sha: unsafe checkpoint head")
+  end
+  return head_sha
+end
+
+local function restore_remote_checkpoint_worktree(worktree, branch, checkpoint_head)
+  local fetch_result = devloop_commands.git_fetch_branch("origin", branch, 60)
+  if fetch_result.exit_code ~= 0 then
+    error("github-devloop: checkpoint-branch-fetch-failed: git checkpoint branch fetch failed: " .. tostring(fetch_result.stderr))
+  end
+  local remote_head_result = devloop_commands.git_remote_branch_head("origin", branch, 30)
+  if remote_head_result.exit_code ~= 0 then
+    error("github-devloop: checkpoint-head-read-failed: git checkpoint branch head failed: " .. tostring(remote_head_result.stderr))
+  end
+  local remote_head = tostring(remote_head_result.stdout or ""):gsub("%s+$", "")
+  if remote_head ~= checkpoint_head then
+    error("github-devloop: checkpoint-head-mismatch: remote checkpoint head does not match marker fact")
+  end
+  local worktree_result = devloop_commands.git_worktree_add_remote_branch(worktree, "origin", branch, true, 60)
+  if worktree_result.exit_code ~= 0 then
+    error("github-devloop: git-worktree-add-failed: git worktree add remote checkpoint failed: " .. tostring(worktree_result.stderr))
+  end
+end
+
+function M.prepare_worktree(repo, issue_number, ready, branch, base_head, checkpoint)
   local branch_ref = devloop_commands.git_show_ref_branch(branch, 30)
   local branch_exists = branch_ref.exit_code == 0
+  local checkpoint_head = checkpoint_head_for_branch(checkpoint, branch)
   if branch_ref.exit_code ~= 0 and branch_ref.exit_code ~= 1 then
     error("github-devloop: branch-ref-check-failed: git branch ref check failed: " .. tostring(branch_ref.stderr))
   end
@@ -63,7 +98,29 @@ function M.prepare_worktree(repo, issue_number, ready, branch, base_head)
     error("github-devloop: runtime-root-read-failed: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime_result.stderr))
   end
   local worktree = devloop_base.implement_worktree_path(runtime_result.stdout, repo, issue_number, ready.dedup_key)
-  if branch_exists then
+  if checkpoint_head ~= nil then
+    if branch_exists then
+      local list_result = devloop_commands.git_worktree_list(30)
+      if list_result.exit_code ~= 0 then
+        error("github-devloop: worktree-list-failed: git worktree list failed: " .. tostring(list_result.stderr))
+      end
+      for _, stale_worktree in ipairs(devloop_commands.find_worktrees_for_branch(list_result.stdout, branch)) do
+        if stale_worktree ~= worktree then
+          devloop_logging.log_line("info", "implement", ready.proposal_id, "IMPLEMENT", {
+            "branch=" .. tostring(branch),
+            "worktree=" .. tostring(stale_worktree),
+            "reason=removing stale checkpoint worktree before remote checkpoint restore",
+          })
+          M.remove_stale_worktree(stale_worktree)
+        end
+      end
+    end
+    local clean_result = devloop_commands.git_worktree_force_clean(worktree, 60)
+    if clean_result.exit_code ~= 0 then
+      error("github-devloop: worktree-cleanup-failed: git worktree cleanup failed: " .. tostring(clean_result.stderr))
+    end
+    restore_remote_checkpoint_worktree(worktree, branch, checkpoint_head)
+  elseif branch_exists then
     local list_result = devloop_commands.git_worktree_list(30)
     if list_result.exit_code ~= 0 then
       error("github-devloop: worktree-list-failed: git worktree list failed: " .. tostring(list_result.stderr))
