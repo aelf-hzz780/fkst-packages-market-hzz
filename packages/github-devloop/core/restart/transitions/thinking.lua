@@ -58,6 +58,19 @@ return function(M, h)
         output_variant = "issue_reconcile_true_stall",
         cas_policy_id = "cas.legacy_issue_reconcile_v1",
         cas_variant = "thinking_to_blocked",
+        transition_effect_entitlements = {
+          apply = {
+            id = "github-devloop/thinking/entry/issue_reconcile_true_stall/apply",
+            effect_ids = {
+              "github-proxy.github_issue_comment_request",
+              "github-proxy.github_issue_label_request",
+            },
+          },
+          idempotent = {
+            id = "github-devloop/thinking/entry/issue_reconcile_true_stall/idempotent",
+            effect_ids = {},
+          },
+        },
         pending_order = { participates = false },
       },
     },
@@ -125,11 +138,10 @@ return function(M, h)
           output_variant = "consensus-stalled",
           cas_policy_id = "cas.legacy_loop_plain_v1",
           cas_variant = "thinking_to_blocked",
-          -- SPEC sections 69/71 and A4.3 row-replay classify both emission plans as grantless.
           transition_effect_entitlements = {
             apply = {
               id = "github-devloop/thinking/autonomous/consensus-stalled/apply",
-              effect_ids = {},
+              effect_ids = { "github-proxy.github_issue_comment_request" },
             },
             idempotent = {
               id = "github-devloop/thinking/autonomous/consensus-stalled/idempotent",
