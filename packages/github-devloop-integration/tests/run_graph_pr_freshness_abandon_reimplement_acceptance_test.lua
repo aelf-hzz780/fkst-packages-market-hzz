@@ -400,6 +400,12 @@ local function mock_replacement_implementation(ready, ready_body)
     })
   end
   h.mock_implement_codex(1, "", "acceptance stop after implementation prep")
+  h.mock_git_status("")
+  t.mock_command("git rev-list --count " .. INTEGRATION_SHA .. "..refs/heads/" .. implementation_branch, {
+    stdout = "0\n",
+    stderr = "",
+    exit_code = 0,
+  })
 end
 
 local function mock_ready_and_implementation_outbound()

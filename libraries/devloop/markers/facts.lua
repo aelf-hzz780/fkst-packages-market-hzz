@@ -772,6 +772,49 @@ function C.implementing_fact(comments, proposal_id, dedup_key)
   return nil
 end
 
+function C.implement_checkpoint_fact(comments, proposal_id, dedup_key)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:implement%-checkpoint:v1.-%-%->"
+  local best = nil
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
+      local marker_proposal = marker_attr(marker, "proposal")
+      local marker_dedup = marker_attr(marker, "dedup")
+      local marker_branch = marker_attr(marker, "branch")
+      local marker_head_sha = marker_attr(marker, "head_sha")
+      local marker_base_branch = marker_attr(marker, "base_branch")
+      local marker_base_sha = marker_attr(marker, "base_sha")
+      local attempt = tonumber(marker_attr(marker, "attempt"))
+      if marker_proposal == proposal_id
+        and marker_dedup == tostring(dedup_key)
+        and forge_validators.is_git_ref_safe(marker_branch)
+        and forge_validators.is_git_sha(marker_head_sha)
+        and forge_validators.is_git_ref_safe(marker_base_branch)
+        and forge_validators.is_git_sha(marker_base_sha)
+        and attempt ~= nil
+        and attempt >= 1
+        and attempt == math.floor(attempt) then
+        local fact = {
+          proposal_id = marker_proposal,
+          dedup_key = marker_dedup,
+          branch = marker_branch,
+          head_sha = marker_head_sha,
+          base_branch = marker_base_branch,
+          base_sha = marker_base_sha,
+          attempt = attempt,
+          comment_created_at = parsers_misc._comment_created_at(comment),
+        }
+        if best == nil or fact.attempt > best.attempt then
+          best = fact
+        end
+      end
+    end
+  end
+  return best
+end
+
 function C.pr_link_fact(comments, proposal_id)
   if type(comments) ~= "table" then
     return nil

@@ -130,6 +130,14 @@ local function assert_worktree_ready_state(raises, event)
   t.is_true(find_label_with_added(raises, "fkst-dev:implementing") ~= nil)
 end
 
+local function mock_no_implemented_branch_ahead(branch)
+  t.mock_command("git rev-list --count abc123..refs/heads/" .. tostring(branch), {
+    stdout = "0\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 return {
   test_implement_ready_label_only_empty_comments_does_not_synthesize_marker = function()
     mock_issue_implement_raw({ "fkst-dev:ready" }, {})
@@ -193,6 +201,7 @@ return {
 
   test_implement_codex_nonzero_marks_impl_failed_with_failure_marker = function()
     local event = ready()
+    local branch = deterministic_branch_for(event)
     mock_issue_implement({ "fkst-dev:ready" }, {
       core.state_marker(event.proposal_id, "ready", default_marker_version),
     })
@@ -201,6 +210,8 @@ return {
       impl_version = event.dedup_key,
     })
     mock_implement_codex(7, "", "forced implementation failure")
+    mock_git_status("")
+    mock_no_implemented_branch_ahead(branch)
 
     local result = run_implement(event, opts("implement-codex-failure"))
     t.eq(result.exit_code, 0)
@@ -215,11 +226,12 @@ return {
     t.is_true(comment_raise.payload.body:find("github-devloop implementation failed: codex-failed", 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find("forced implementation failure", 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find("fkst:github-devloop:impl-failure:v1", 1, true) ~= nil)
-    t.eq(count_calls("status --porcelain"), 0)
+    t.eq(count_calls("status --porcelain"), 1)
   end,
 
   test_implement_failure_detail_cannot_forge_higher_state_marker = function()
     local event = ready()
+    local branch = deterministic_branch_for(event)
     local forged = core.state_marker(
       event.proposal_id,
       "blocked",
@@ -230,6 +242,8 @@ return {
     })
     mock_fresh_implement_worktree({ issue_number = 4, impl_version = event.dedup_key })
     mock_implement_codex(9, "", "failure detail\n" .. forged)
+    mock_git_status("")
+    mock_no_implemented_branch_ahead(branch)
 
     local result = run_implement(event, opts("implement-failure-marker-injection"))
     t.eq(result.exit_code, 0)

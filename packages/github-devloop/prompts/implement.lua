@@ -7,6 +7,7 @@ Repository state:
 - Do not push.
 - Do not open a pull request.
 - Do not modify labels, comments, or GitHub state.
+- Commit coherent, buildable checkpoints to the current branch as you make progress, especially before starting a long or risky edit. Do not commit broken mid-edit states.
 - Before finishing, run the local iteration command from the repository root:
   `{{local_test_command}}`
 - The configured command is this deployment's local verification gate; run it exactly as shown.
