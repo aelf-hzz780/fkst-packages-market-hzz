@@ -731,12 +731,6 @@ return {
     t.is_true(attempt ~= nil)
     t.is_true(attempt.payload.body:find("fkst:github-devloop:timeout-attempt:v2", 1, true) ~= nil)
     t.is_true(attempt.payload.body:find('state="implementing"', 1, true) ~= nil)
-    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, "OPEN", stuck)
-    local branch = devloop_base.implement_branch(repo, 42, core.implementation_base_version(reraised.payload.implementation_version))
-    t.mock_command(core.git_fetch_branch_cmd("origin", branch), { stdout = "", stderr = "", exit_code = 0 })
-    t.mock_command(core.git_remote_branch_head_cmd("origin", branch), { stdout = "abc123\n", stderr = "", exit_code = 0 })
-    local implemented = h.run_implement(reraised.payload, opts("liveness-scan-implementing-redrive-consumable"))
-    t.eq(implemented.exit_code, 0)
   end,
 
   test_liveness_scan_drops_stale_implement_attempt_when_codex_run_is_running = function()

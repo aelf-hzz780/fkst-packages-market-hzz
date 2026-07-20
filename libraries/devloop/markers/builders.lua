@@ -128,6 +128,34 @@ function C.implementing_marker(proposal_id, dedup_key, branch, head_sha, base_br
     .. '" -->'
 end
 
+function C.implement_checkpoint_marker(proposal_id, dedup_key, branch, head_sha, base_branch, base_sha, attempt)
+  if not forge_validators.is_git_ref_safe(branch) then
+    error("github-devloop: invalid checkpoint branch")
+  end
+  if not forge_validators.is_git_sha(head_sha) then
+    error("github-devloop: invalid checkpoint head sha")
+  end
+  if not forge_validators.is_git_ref_safe(base_branch) then
+    error("github-devloop: invalid checkpoint base branch")
+  end
+  if not forge_validators.is_git_sha(base_sha) then
+    error("github-devloop: invalid checkpoint base sha")
+  end
+  local n = tonumber(attempt)
+  if n == nil or n < 1 or n ~= math.floor(n) then
+    error("github-devloop: invalid checkpoint attempt")
+  end
+  return '<!-- fkst:github-devloop:implement-checkpoint:v1 proposal="' .. tostring(proposal_id)
+    .. '" dedup="' .. tostring(dedup_key)
+    .. '" branch="' .. tostring(branch)
+    .. '" head_sha="' .. tostring(head_sha)
+    .. '" base_branch="' .. tostring(base_branch)
+    .. '" base_sha="' .. tostring(base_sha)
+    .. '" attempt="' .. tostring(n)
+    .. '" outcome="wip'
+    .. '" -->'
+end
+
 function C.pr_link_marker(proposal_id, pr_number, branch, impl_version, base_branch)
   if not forge_validators.is_positive_pr_number(pr_number) then
     error("github-devloop: invalid pr number")
