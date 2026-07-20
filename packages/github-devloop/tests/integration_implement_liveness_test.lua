@@ -11,6 +11,7 @@ local mock_issue_implement = h.mock_issue_implement
 local mock_issue_state = h.mock_issue_state
 local deterministic_branch_for = h.deterministic_branch_for
 local mock_fresh_implement_worktree = h.mock_fresh_implement_worktree
+local mock_existing_empty_implement_worktree_reuse = h.mock_existing_empty_implement_worktree_reuse
 local mock_implement_codex = h.mock_implement_codex
 local mock_git_status = h.mock_git_status
 local mock_branch_diff_paths = h.mock_branch_diff_paths
@@ -284,41 +285,39 @@ return {
   test_implementing_redelivery_recovers_local_branch_before_attempt_budget = function()
     local event = ready()
     local comments, branch = implementing_comments(event, {
-      core.implement_attempt_marker(event.proposal_id, event.dedup_key, 2, stale_attempt_started_at()),
+      core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, stale_attempt_started_at()),
     })
     mock_issue_implement({ "fkst-dev:implementing" }, comments)
     mock_missing_remote_branch(branch)
-    t.mock_command("git fetch 'origin' 'dev'", {
-      stdout = "",
-      stderr = "",
-      exit_code = 0,
-    })
-    t.mock_command("refs/remotes/'origin'/'dev'^{commit}", {
-      stdout = "abc123\n",
-      stderr = "",
-      exit_code = 0,
-    })
+    mock_existing_empty_implement_worktree_reuse(nil, branch, "1")
     t.mock_command("show-ref --verify --quiet", {
       stdout = "",
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command("rev-list --count", {
-      stdout = "1\n",
+    t.mock_command("git show " .. branch .. ":.fkst/substrate-ref", {
+      stdout = "1111111111111111111111111111111111111111\n",
       stderr = "",
       exit_code = 0,
     })
+    mock_branch_diff_paths("packages/github-devloop/core.lua\n")
     t.mock_command("rev-parse --verify refs/heads/", {
       stdout = "def456\n",
       stderr = "",
       exit_code = 0,
     })
-    mock_branch_diff_paths("packages/github-devloop/core.lua\n")
+    mock_implement_codex(0, "finished from local progress")
+    mock_git_status(" M packages/github-devloop/core.lua\n")
+    mock_git_commit("fed456", branch)
+    mock_issue_implement({ "fkst-dev:implementing" }, comments)
 
     local result = run_implement(event, opts("implement-liveness-local-progress-at-budget"))
     t.eq(result.exit_code, 0)
-    t.eq(count_calls("codex exec"), 0)
-    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request"), nil)
+    t.eq(count_calls("codex exec"), 1)
+    local final = find_raise(result.raises, "github-proxy.github_issue_comment_request", function(payload)
+      return tostring(payload.body or ""):find("fkst:github-devloop:implementing:v1", 1, true) ~= nil
+    end)
+    t.is_true(final ~= nil)
   end,
 
   test_second_retry_death_exhausts_after_observe_reraises = function()

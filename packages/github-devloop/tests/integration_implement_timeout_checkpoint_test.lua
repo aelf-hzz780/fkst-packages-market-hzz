@@ -41,6 +41,14 @@ local function mock_remote_branch(branch, head_sha)
   })
 end
 
+local function mock_missing_remote_branch(branch)
+  t.mock_command("git fetch 'origin' '" .. tostring(branch) .. "'", {
+    stdout = "",
+    stderr = "missing remote branch",
+    exit_code = 1,
+  })
+end
+
 local function mock_remote_checkpoint_worktree_reuse(branch, checkpoint_head)
   t.mock_command("git fetch 'origin' 'dev'", {
     stdout = "",
@@ -327,6 +335,54 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("codex exec"), 1)
     t.eq(count_calls("git worktree add --force -B"), 1)
+    local final = find_raise(result.raises, "github-proxy.github_issue_comment_request", function(payload)
+      return tostring(payload.body or ""):find("fkst:github-devloop:implementing:v1", 1, true) ~= nil
+    end)
+    t.is_true(final ~= nil)
+    local fact = m_facts.implementing_fact({ final.payload.body }, event.proposal_id, event.dedup_key)
+    t.eq(fact.head_sha, "2222222222222222222222222222222222222222")
+  end,
+
+  test_unmarked_local_progress_is_retried_not_handed_off_when_remote_missing = function()
+    local event = ready()
+    local branch = deterministic_branch_for(event)
+    mock_issue_implement({ "fkst-dev:implementing" }, {
+      core.state_marker(event.proposal_id, "implementing", event.dedup_key),
+      core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, stale_started_at()),
+    })
+    mock_missing_remote_branch(branch)
+    mock_existing_empty_implement_worktree_reuse(nil, branch, "1")
+    t.mock_command("show-ref --verify --quiet", {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("git show " .. branch .. ":.fkst/substrate-ref", {
+      stdout = "1111111111111111111111111111111111111111\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    mock_branch_diff_paths("packages/github-devloop/core.lua\n")
+    t.mock_command("rev-parse --verify refs/heads/", {
+      stdout = "1111111111111111111111111111111111111111\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    mock_implement_codex(0, "finished from local progress")
+    mock_git_status(" M packages/github-devloop/core.lua\n")
+    mock_git_commit("2222222222222222222222222222222222222222", branch)
+    mock_issue_implement({ "fkst-dev:implementing" }, {
+      core.state_marker(event.proposal_id, "implementing", event.dedup_key),
+      core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, stale_started_at()),
+    })
+
+    local result = run_implement(event, opts("implement-timeout-unmarked-local-progress"))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("codex exec"), 1)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_comment_request", function(payload)
+      return tostring(payload.body or ""):find('state="awaiting-pr"', 1, true) ~= nil
+    end), nil)
     local final = find_raise(result.raises, "github-proxy.github_issue_comment_request", function(payload)
       return tostring(payload.body or ""):find("fkst:github-devloop:implementing:v1", 1, true) ~= nil
     end)
