@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import shutil
 import subprocess
 import tempfile
@@ -36,6 +37,7 @@ WEBSITE_PLATFORM_PACKAGES = " ".join(
 )
 STALE_WEBSITE_PACKAGES = "github-devloop github-devloop-pr github-devloop-integration"
 FIXED_TS = "1760000000"
+COMMAND_TIMEOUT_SECONDS = 60.0
 
 
 def self_workspace_platform_packages() -> str:
@@ -58,6 +60,53 @@ ALL_PLATFORM_PACKAGES = sorted(set(PLATFORM_PACKAGES.split()) | set(WEBSITE_PLAT
 def write_executable(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
     path.chmod(0o755)
+
+
+def kill_process_group(process: subprocess.Popen[str]) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+def run_bounded(
+    args: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    timeout: float = COMMAND_TIMEOUT_SECONDS,
+) -> subprocess.CompletedProcess[str]:
+    process = subprocess.Popen(
+        args,
+        cwd=cwd,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as error:
+        kill_process_group(process)
+        stdout, stderr = process.communicate(timeout=timeout)
+        error.stdout = stdout
+        error.stderr = stderr
+        raise
+    finally:
+        kill_process_group(process)
+    return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
+
+
+def wait_for_process_exit(pid: int, timeout: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.05)
+    return False
 
 
 def make_fake_bin(path: Path) -> None:
@@ -128,29 +177,13 @@ def make_fake_tools(bin_dir: Path) -> None:
 
 
 def run_git(args: list[str], cwd: Path, env: dict[str, str]) -> None:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=cwd,
-        env=env,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
+    result = run_bounded(["git", *args], cwd=cwd, env=env)
     if result.returncode != 0:
         raise AssertionError(f"git {' '.join(args)} failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}")
 
 
 def git_stdout(args: list[str], cwd: Path, env: dict[str, str]) -> str:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=cwd,
-        env=env,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
+    result = run_bounded(["git", *args], cwd=cwd, env=env)
     if result.returncode != 0:
         raise AssertionError(f"git {' '.join(args)} failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}")
     return result.stdout.strip()
@@ -290,18 +323,7 @@ class DogfoodLayout:
         run_git(["init", "-q"], cwd=platform, env=git_env)
         run_git(["add", "."], cwd=platform, env=git_env)
         run_git(["commit", "-q", "-m", "seed"], cwd=platform, env=git_env)
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=platform,
-            env=git_env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-        if result.returncode != 0:
-            raise AssertionError(result.stderr)
-        return result.stdout.strip()
+        return git_stdout(["rev-parse", "HEAD"], cwd=platform, env=git_env)
 
     def _advance_platform_git_repo(self, platform: Path) -> None:
         marker = platform / "packages" / "github-proxy" / "current.txt"
@@ -354,14 +376,10 @@ class DogfoodLayout:
 
     def launch(self, target: str) -> dict[str, object]:
         self.capture.unlink(missing_ok=True)
-        result = subprocess.run(
+        result = run_bounded(
             [str(self.script), "start", target],
             cwd=self.root,
             env=self.env(target),
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
         )
         if result.returncode != 0:
             raise AssertionError(
@@ -376,26 +394,18 @@ class DogfoodLayout:
 
     def run_start(self, target: str) -> subprocess.CompletedProcess[str]:
         self.capture.unlink(missing_ok=True)
-        return subprocess.run(
+        return run_bounded(
             [str(self.script), "start", target],
             cwd=self.root,
             env=self.env(target),
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
         )
 
     def run_sync(self, target: str) -> subprocess.CompletedProcess[str]:
         self.capture.unlink(missing_ok=True)
-        return subprocess.run(
+        return run_bounded(
             [str(self.script), "sync", target],
             cwd=self.root,
             env=self.env(target),
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
         )
 
 
@@ -422,6 +432,47 @@ def normalize(record: dict[str, object], root: Path) -> dict[str, object]:
 
 class HostRunEquivalenceTest(unittest.TestCase):
     maxDiff = None
+
+    def test_external_commands_cannot_bypass_bounded_runner(self) -> None:
+        self.assertNotIn("subprocess" + ".run(", Path(__file__).read_text(encoding="utf-8"))
+
+    def test_bounded_runner_kills_process_tree_on_timeout_and_parent_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = root / "child-tree.sh"
+            write_executable(
+                script,
+                "#!/usr/bin/env bash\nsleep 60 >/dev/null 2>&1 &\nprintf '%s %s\\n' \"$$\" \"$!\" > \"$1\"\n[ \"$2\" != timeout ] || wait\n",
+            )
+            for mode in ("timeout", "success"):
+                pid_file = root / f"{mode}.pids"
+                pids: list[int] = []
+                started_at = time.monotonic()
+                try:
+                    if mode == "timeout":
+                        with self.assertRaises(subprocess.TimeoutExpired):
+                            run_bounded(
+                                [str(script), str(pid_file), mode],
+                                cwd=root,
+                                env=os.environ.copy(),
+                                timeout=1.0,
+                            )
+                        self.assertLess(time.monotonic() - started_at, 5.0)
+                    else:
+                        result = run_bounded(
+                            [str(script), str(pid_file), mode], cwd=root, env=os.environ.copy(), timeout=5.0
+                        )
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                    pids = [int(value) for value in pid_file.read_text(encoding="utf-8").split()]
+                    self.assertEqual(len(pids), 2)
+                    for pid in pids:
+                        self.assertTrue(wait_for_process_exit(pid), f"process {pid} survived {mode} cleanup")
+                finally:
+                    for pid in pids:
+                        try:
+                            os.kill(pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
 
     def test_delegated_dogfood_launch_matches_committed_golden_for_all_targets(self) -> None:
         golden = load_golden_launches()
@@ -746,14 +797,10 @@ class HostRunEquivalenceTest(unittest.TestCase):
                 "LOGDIR": str(root / "dogfood"),
             }
         )
-        return subprocess.run(
+        return run_bounded(
             [str(script), "sync", target],
             cwd=root,
             env=env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
         )
 
     def _create_branch_remote(self, root: Path, name: str, files: dict[str, str]) -> Path:
