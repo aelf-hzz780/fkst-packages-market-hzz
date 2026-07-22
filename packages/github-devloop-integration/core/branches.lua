@@ -5,6 +5,7 @@ local S = {}
 local function bounded_lock_key(max_key_len, shared, prefix, repo, components)
   local safe_repo = base_ids.safe_repo(shared.require_safe_repo(repo))
   local separator_count = #components + 1
+  -- Reserve separators, then split the remaining bytes evenly across checksummed branch components.
   local component_limit = math.floor((max_key_len - #prefix - #safe_repo - separator_count) / #components)
   local key_parts = { prefix, safe_repo }
   for _, component in ipairs(components) do
