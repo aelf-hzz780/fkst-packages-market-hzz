@@ -112,6 +112,10 @@ return {
       "github-devloop/rollup/owner/repo/dev-2006806159/integration-dev-3436629376"
     )
     t.eq(
+      core.pr_freshness_lock_key("owner/repo", "integration/dev"),
+      "github-devloop/pr-freshness/owner/repo/integration-dev-3436629376"
+    )
+    t.eq(
       git_mechanics.repo_ref_store_lock_key("owner/repo"),
       "github-devloop/git/owner/repo/fetch"
     )
@@ -150,12 +154,16 @@ return {
 
     local branch_sync_key = core.branch_sync_lock_key(repo, upstream, integration)
     local rollup_key = core.rollup_lock_key(repo, upstream, integration)
+    local pr_freshness_key = core.pr_freshness_lock_key(repo, integration)
     t.is_true(strings.is_path_safe_key(branch_sync_key, 200))
     t.is_true(strings.is_path_safe_key(rollup_key, 200))
+    t.is_true(strings.is_path_safe_key(pr_freshness_key, 200))
     t.eq(branch_sync_key, core.branch_sync_lock_key(repo, upstream, integration))
     t.eq(rollup_key, core.rollup_lock_key(repo, upstream, integration))
+    t.eq(pr_freshness_key, core.pr_freshness_lock_key(repo, integration))
     t.is_true(branch_sync_key ~= core.branch_sync_lock_key(repo, upstream, different_integration))
     t.is_true(rollup_key ~= core.rollup_lock_key(repo, upstream, different_integration))
+    t.is_true(pr_freshness_key ~= core.pr_freshness_lock_key(repo, different_integration))
     t.is_true(core.branch_sync_lock_key(repo, "a/b", "c") ~= core.branch_sync_lock_key(repo, "a", "b/c"))
   end,
 
@@ -173,12 +181,16 @@ return {
 
     local branch_sync_key = core.branch_sync_lock_key(repo, upstream, integration)
     local rollup_key = core.rollup_lock_key(repo, upstream, integration)
+    local pr_freshness_key = core.pr_freshness_lock_key(repo, integration)
     t.is_true(strings.is_path_safe_key(branch_sync_key, 200))
     t.is_true(strings.is_path_safe_key(rollup_key, 200))
+    t.is_true(strings.is_path_safe_key(pr_freshness_key, 200))
     t.is_true(#branch_sync_key <= 200)
     t.is_true(#rollup_key <= 200)
+    t.is_true(#pr_freshness_key <= 200)
     t.eq(#branch_sync_key, 199)
     t.eq(#rollup_key, 200)
+    t.eq(#pr_freshness_key, 200)
   end,
 
   test_branch_sync_rejects_unsafe_shapes = function()
