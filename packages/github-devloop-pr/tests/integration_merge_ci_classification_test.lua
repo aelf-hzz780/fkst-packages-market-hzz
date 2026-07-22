@@ -82,7 +82,7 @@ return {
     t.eq(comment.payload.handoff.ci_failure_key, fixing.ci_failure_key)
     t.is_true(comment.payload.body:find('ci_failure_key="' .. fixing.ci_failure_key .. '"', 1, true) ~= nil)
     t.eq(fixing.gate_failure_excerpt, "own-ci-red")
-    t.eq(fixing.blocking_gap, "own-ci-red")
+    t.eq(fixing.blocking_gap, nil)
     t.eq(fixing.repair_input, "ci-failure")
     t.is_true(fixing.dedup_key:find(fixing.ci_failure_key, 1, true) == nil)
     t.is_true(fixing.work_unit_key:find(fixing.ci_failure_key, 1, true) == nil)
@@ -99,8 +99,7 @@ return {
     local fixing = find_causal_raise(result, "devloop_fixing").payload
     t.is_true(fixing.gate_failure_excerpt:find("SL-003", 1, true) ~= nil)
     t.is_true(fixing.gate_failure_excerpt:find("directory contains 14 files maximum 12", 1, true) ~= nil)
-    t.is_true(fixing.blocking_gap:find("SL-003", 1, true) ~= nil)
-    t.is_true(fixing.blocking_gap:find("directory contains 14 files maximum 12", 1, true) ~= nil)
+    t.eq(fixing.blocking_gap, nil)
     t.eq(fixing.repair_input, "ci-failure")
   end,
 

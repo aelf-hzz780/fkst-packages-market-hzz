@@ -230,9 +230,6 @@ function C.build_devloop_fixing_payload(origin, pr_number, review_fact, source_r
     payload.gate_failure_excerpt = gate_failure_excerpt
   end
   local blocking_gap = shared.bounded_control_text(review_fact.blocking_gap, devloop_base._max_blocking_gap_len)
-  if blocking_gap == nil and repair_input == "ci-failure" then
-    blocking_gap = shared.bounded_control_text(gate_failure_excerpt, devloop_base._max_blocking_gap_len)
-  end
   if blocking_gap ~= nil then
     payload.blocking_gap = blocking_gap
   end
