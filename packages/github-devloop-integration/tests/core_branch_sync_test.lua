@@ -191,6 +191,7 @@ return {
     t.eq(#branch_sync_key, 199)
     t.eq(#rollup_key, 200)
     t.eq(#pr_freshness_key, 200)
+    t.is_true(pr_freshness_key ~= core.pr_freshness_lock_key(repo, integration:sub(1, -2) .. "j"))
   end,
 
   test_branch_sync_rejects_unsafe_shapes = function()
