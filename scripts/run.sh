@@ -92,6 +92,8 @@ DEFAULT_DURABLE_ROOT="$FKST_DIR/run/durable"
 . "$ROOT/scripts/test_affected.sh"
 # shellcheck source=scripts/test_parallel.sh
 . "$ROOT/scripts/test_parallel.sh"
+# shellcheck source=scripts/test_deadline.sh
+. "$ROOT/scripts/test_deadline.sh"
 
 resolve_bin() {
   if ! resolve_bin_contract "$ROOT" "bootstrap"; then
@@ -279,6 +281,8 @@ cmd_check() {
     'python3 -B "$ROOT/scripts/host_run_equivalence_test.py"'
     'python3 -B "$ROOT/scripts/run_sh_coverage_test.py"'
     'python3 -B "$ROOT/scripts/run_sh_test_affected_test.py"'
+    'python3 -B "$ROOT/scripts/run_sh_test_deadline_test.py"'
+    'python3 -B "$ROOT/scripts/dogfood_reaper_test.py"'
     'python3 -B "$ROOT/scripts/composed_manifest_test.py"'
     'python3 -B "$ROOT/scripts/board_test.py"'
     'python3 -B "$ROOT/scripts/dogfood_board_test.py"'
@@ -548,9 +552,9 @@ cmd_test() {
     shift
   done
 
-  # One EXIT trap sweeps all three temp roots — including the per-package roots parent —
-  # so even a SIGKILL/OOM of a parallel package unit cannot leak its runtime/durable dirs.
-  trap 'rm -rf "${TEST_HERMETIC_RUNTIME_ROOT:-}" "${TEST_HERMETIC_DURABLE_ROOT:-}" "${TEST_HERMETIC_PKG_ROOTS:-}"' EXIT
+  # One EXIT trap sweeps all three temp roots (even a SIGKILL/OOM of a parallel unit cannot leak its
+  # runtime/durable dirs) and disarms the main()-armed bounded-execution watchdog on a normal finish.
+  trap 'rm -rf "${TEST_HERMETIC_RUNTIME_ROOT:-}" "${TEST_HERMETIC_DURABLE_ROOT:-}" "${TEST_HERMETIC_PKG_ROOTS:-}"; disarm_test_deadline' EXIT
   TEST_HERMETIC_RUNTIME_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/fkst-test-rt.XXXXXX")"
   TEST_HERMETIC_DURABLE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/fkst-test-durable.XXXXXX")"
   TEST_HERMETIC_PKG_ROOTS="$(mktemp -d "${TMPDIR:-/tmp}/fkst-test-pkgroots.XXXXXX")"
@@ -958,6 +962,10 @@ cmd_build() {
 }
 
 main() {
+  # Bound the whole test-family run BEFORE dispatch (covers cmd_check too); see scripts/test_deadline.sh.
+  case "${1:-}" in
+    check|test|test-composed|test-affected) arm_test_deadline; trap 'disarm_test_deadline' EXIT ;;
+  esac
   case "${1:-}" in
     check) shift; cmd_check "$@" ;;
     host) shift; cmd_host "$@" ;;
