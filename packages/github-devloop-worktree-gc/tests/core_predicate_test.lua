@@ -104,6 +104,34 @@ return {
     t.eq(skip_reason(result, CURRENT_PATH), "current-runtime-root")
   end,
 
+  test_branch_issue_ref_parses_normal_github_issue_branch = function()
+    local issue_ref = core.issue_ref_from_branch(CURRENT_BRANCH)
+    t.eq(issue_ref.repo, REPO)
+    t.eq(issue_ref.issue, "333")
+    t.eq(issue_ref.proposal_id, "github-devloop/issue/" .. REPO .. "/333")
+    t.eq(issue_ref.source_ref.kind, "external")
+    t.eq(issue_ref.source_ref.ref, REPO .. "#issue/333")
+  end,
+
+  test_current_rt_terminal_issue_is_removable = function()
+    local worktrees = core.parse_worktrees(FULL_PORCELAIN)
+    local live = core.live_branches({ running_row(111, "dedup-orphan") }, NOW_MS)
+    local result = core.classify(worktrees, live, CUR_RT, {
+      terminal_issues = {
+        ["github-devloop/issue/" .. REPO .. "/333"] = true,
+      },
+    })
+    t.eq(removable_has(result, CURRENT_PATH), true)
+  end,
+
+  test_current_rt_without_terminal_proof_is_skipped = function()
+    local worktrees = core.parse_worktrees(FULL_PORCELAIN)
+    local live = core.live_branches({ running_row(111, "dedup-orphan") }, NOW_MS)
+    local result = core.classify(worktrees, live, CUR_RT, { terminal_issues = {} })
+    t.eq(removable_has(result, CURRENT_PATH), false)
+    t.eq(skip_reason(result, CURRENT_PATH), "current-runtime-terminal-unverified")
+  end,
+
   -- Detached, foreign, and main-checkout worktrees are never removable.
   test_detached_foreign_main_skipped = function()
     local worktrees = core.parse_worktrees(FULL_PORCELAIN)
