@@ -16,6 +16,7 @@ local m_facts = require("devloop.markers.facts")
 local devloop_logging = require("devloop.logging")
 local devloop_commands = require("devloop.commands")
 local devloop_state = require("devloop.state")
+local topology = require("topology")
 
 local spec = {
   consumes = { "devloop_branch_tick" },
@@ -237,7 +238,17 @@ local function process_pr(repo, branches, listed_pr)
   end
 
   with_lock(core.pr_freshness_lock_key(repo, pr.head_ref_name), function()
-    git_mechanics.fetch_branches(core.git, repo, { branches.integration, pr.head_ref_name }, "PR freshness fetch")
+    if not topology.integration_topology_available({
+      git = core.git,
+      repo = repo,
+      branches = branches,
+      department = "pr_freshness_scan",
+      domain = "pr-freshness",
+      error_class = "PR freshness fetch",
+    }) then
+      return
+    end
+    git_mechanics.fetch_branches(core.git, repo, { pr.head_ref_name }, "PR freshness fetch")
     local integration_sha = git_mechanics.remote_head(core.git, branches.integration, "PR freshness remote head", "unsafe PR freshness branch head")
     local branch_sha = git_mechanics.remote_head(core.git, pr.head_ref_name, "PR freshness remote head", "unsafe PR freshness branch head")
     if branch_sha ~= pr.head_sha then
