@@ -164,7 +164,7 @@ return {
     local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
     local fixing_handoff = comment_raise.payload.handoff
     t.eq(fixing_handoff.kind, "github-devloop.fixing")
-    t.eq(fixing_handoff.blocking_gap, nil)
+    t.eq(fixing_handoff.blocking_gap, "own-ci-red")
     t.mock_command("gh api --method GET 'repos/owner/repo/issues/comments/IC_merge_ci_red_fixing_1'", {
       stdout = '{"body":"' .. h.json_string(core.state_marker(fixing_handoff.proposal_id, "fixing", fixing_handoff.version)) .. '","user":{"login":"fkst-test-bot"}}\n',
       stderr = "",
@@ -189,7 +189,7 @@ return {
     t.eq(fixing_payload.schema, "github-devloop.fixing.v1")
     t.eq(fixing_payload.gate_baseline_sha, "ba5e9999")
     t.eq(fixing_payload.gate_failure_excerpt, "own-ci-red")
-    t.eq(fixing_payload.blocking_gap, nil)
+    t.eq(fixing_payload.blocking_gap, "own-ci-red")
     local comment_body = comment_raise.payload.body
     t.is_true(comment_body:find("fkst:github-devloop:merge-gate:v1", 1, true) ~= nil)
     t.is_true(comment_body:find("gate_baseline_sha", 1, true) ~= nil)
