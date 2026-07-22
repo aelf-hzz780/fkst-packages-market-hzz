@@ -775,6 +775,13 @@ return {
     local new_ci_failure = payloads_builders.build_replayed_fixing_payload(origin, 7, copy_table(feedback, {
       ci_failure_key = "head:def456/checks:digest-0000000101",
     }), source_ref())
+    local capacity_diagnostic = "own-ci-red: check=test conclusion=FAILURE output=baseline admission RULE_REJECTED SL-003 directory contains 14 files maximum 12"
+    local capacity_replay = payloads_builders.build_replayed_fixing_payload(origin, 7, copy_table(feedback, {
+      ci_failure_key = "head:def456/checks:digest-0000000101",
+      gate_failure_excerpt = capacity_diagnostic,
+      reason = "own-ci-red",
+      review_reason = "generic merge gate comment",
+    }), source_ref())
 
     t.eq(defective.gate_baseline_sha, nil)
     t.eq(corrected.gate_baseline_sha, "828df8d3")
@@ -786,6 +793,8 @@ return {
     t.is_true(new_predecessors.dedup_key:find("/nobase/pr5-github-devloop/issue/owner/repo/41-ready-aaa111/noci/def456", 1, true) ~= nil)
     t.eq(new_ci_failure.repair_input, "ci-failure")
     t.eq(new_ci_failure.ci_failure_key, "head:def456/checks:digest-0000000101")
+    t.eq(capacity_replay.gate_failure_excerpt, capacity_diagnostic)
+    t.eq(capacity_replay.blocking_gap, "rollup red")
     -- ci_failure_key is diagnostic only and must stay out of dedup identity: a drifting
     -- CI digest would otherwise mint a fresh dedup every round and reset the repair budget.
     local drifted_ci_failure = payloads_builders.build_replayed_fixing_payload(origin, 7, copy_table(feedback, {
