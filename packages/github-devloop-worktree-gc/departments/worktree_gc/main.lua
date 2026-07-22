@@ -1,21 +1,22 @@
 -- worktree_gc: level-triggered, stateless, fail-open sweep that removes EXPIRED
 -- deterministic github-devloop worktrees. "Expired" = proven not-live by the
--- ground-truth codex-run -> implement_branch join (never age). v1 scope is
--- old-runtime-root (restart-orphaned) worktrees only, which is the primary
--- "registry leak #500" and is structurally free of the creation race.
+-- ground-truth codex-run -> implement_branch join (never age). Current-runtime
+-- deterministic worktrees additionally require a fresh trusted terminal issue marker.
 --
 -- Safety: nothing is removed unless core.classify proves it, and each candidate is
 -- re-validated against a FRESH codex_runs snapshot immediately before removal
--- (TOCTOU guard). Any error, empty runtime root, or incomplete live set fails OPEN
--- (skip this tick, retry next). Non-deterministic/detached/current-RT worktrees are
--- skipped and never force-removed — those need an engine primitive that exposes the
--- running codex's worktree path (a separate fkst-substrate change).
+-- (TOCTOU guard). Any error, empty runtime root, incomplete live set, or unverified
+-- terminal issue fact fails OPEN (skip this tick, retry next). Non-deterministic and
+-- detached worktrees are skipped and never force-removed.
 
 local env = require("workflow_internal.env")
 local error_facts = require("contract.error_facts")
 local ports_lib = require("forge.ports")
 local saga = require("workflow.saga")
 local caps = require("worktree_gc_caps")
+local devloop_base = require("devloop.base")
+local devloop_state = require("devloop.state")
+local github_factory = require("devloop.github_factory")
 
 local spec = {
   consumes = { "worktree_gc_tick" },
@@ -55,6 +56,10 @@ local function production_codex_runs()
   return fkst.codex_runs()
 end
 
+local function production_github()
+  return github_factory.production_handle()
+end
+
 local function is_gc_tick(event)
   local queue = tostring(event and event.queue or "")
   return queue == "worktree_gc_tick" or queue == "github-devloop-worktree-gc.worktree_gc_tick"
@@ -92,6 +97,7 @@ end
 local function make_department(ports)
   ports = ports or {}
   local git = ports.git
+  local github = ports.github
   local read_env = ports.read_env or production_read_env
   local now_value = ports.now or production_now
   local codex_runs = ports.codex_runs or production_codex_runs
@@ -105,6 +111,45 @@ local function make_department(ports)
     end
     local now_ms = now_value() * 1000
     return caps.live_branches(runs.running or {}, now_ms)
+  end
+
+  local function issue_is_terminal(issue_ref)
+    local github_handle = github or production_github()
+    local ok, issue = pcall(function()
+      return github_handle.read_issue(issue_ref.source_ref, {
+        force_fresh = true,
+        timeout = 30,
+        consumer = "github-devloop-worktree-gc",
+      })
+    end)
+    if not ok or type(issue) ~= "table" then
+      gc_log("skip-terminal-read-failed", {
+        "proposal_id=" .. tostring(issue_ref.proposal_id),
+      })
+      return false
+    end
+    return devloop_state.current_issue_observation_is_terminal(issue.comments, issue_ref.proposal_id)
+  end
+
+  local function current_runtime_terminal_issues(worktrees, live, current_rt)
+    local terminal = {}
+    if not (live and live.complete) then
+      return terminal
+    end
+    for _, w in ipairs(worktrees or {}) do
+      if not w.detached
+        and caps.is_deterministic_devloop_branch(w.branch)
+        and not live.set[w.branch] then
+        local issue_ref = caps.issue_ref_from_branch(w.branch)
+        if issue_ref ~= nil
+          and devloop_base.path_under_runtime_root(current_rt, w.path) then
+          if issue_is_terminal(issue_ref) then
+            terminal[issue_ref.proposal_id] = true
+          end
+        end
+      end
+    end
+    return terminal
   end
 
   local function act_gc(event)
@@ -137,8 +182,10 @@ local function make_department(ports)
       return
     end
 
-    -- (4) classify. Removable = deterministic devloop branch, not live, old-RT.
-    local result = caps.classify(worktrees, live, current_rt)
+    -- (4) classify. Removable = deterministic devloop branch, not live, and either
+    -- old-RT or current-RT with a fresh trusted terminal issue marker.
+    local terminal_issues = current_runtime_terminal_issues(worktrees, live, current_rt)
+    local result = caps.classify(worktrees, live, current_rt, { terminal_issues = terminal_issues })
     gc_log("scanned", {
       "worktrees=" .. tostring(#worktrees),
       "removable=" .. tostring(#result.removable),
@@ -154,6 +201,8 @@ local function make_department(ports)
         gc_log("skip-recheck-indeterminate", { "branch=" .. tostring(candidate.branch), "path=" .. tostring(candidate.path) })
       elseif recheck.set[candidate.branch] then
         gc_log("skip-raced-now-live", { "branch=" .. tostring(candidate.branch), "path=" .. tostring(candidate.path) })
+      elseif candidate.issue_ref ~= nil and not issue_is_terminal(candidate.issue_ref) then
+        gc_log("skip-raced-terminal-unverified", { "branch=" .. tostring(candidate.branch), "path=" .. tostring(candidate.path) })
       elseif not remove_enabled then
         gc_log("would-remove-dry-run", { "branch=" .. tostring(candidate.branch), "path=" .. tostring(candidate.path) })
       else

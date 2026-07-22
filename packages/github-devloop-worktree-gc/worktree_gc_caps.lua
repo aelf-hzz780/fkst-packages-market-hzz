@@ -3,5 +3,7 @@ local core = require("core")
 return {
   parse_worktrees = core.parse_worktrees,
   live_branches = core.live_branches,
+  is_deterministic_devloop_branch = core.is_deterministic_devloop_branch,
+  issue_ref_from_branch = core.issue_ref_from_branch,
   classify = core.classify,
 }

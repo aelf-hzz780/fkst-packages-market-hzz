@@ -5,7 +5,9 @@
 
 local testing = require("testkit_internal.testing")
 local git_fake = require("forge.git_fake")
+local github_fake = require("forge.github_fake")
 local base = require("devloop.base")
+local devloop_state = require("devloop.state")
 local worktree_gc = require("departments.worktree_gc.main")
 local t = fkst.test
 
@@ -76,9 +78,38 @@ local function running_row(issue, dedup)
   }
 end
 
-local function department_with(removed, running_rows, remove_env)
+local function issue_fixture(issue_number, state_name)
+  return {
+    number = issue_number,
+    title = "fixture",
+    state = state_name == "merged" and "CLOSED" or "OPEN",
+    comments = {
+      {
+        id = tostring(issue_number) .. "001",
+        body = devloop_state.state_marker(
+          "github-devloop/issue/" .. REPO .. "/" .. tostring(issue_number),
+          state_name,
+          "dedup-current"
+        ),
+        author = { login = base._test_bot_login },
+        createdAt = "2026-07-22T00:01:00Z",
+      },
+    },
+  }
+end
+
+local function fake_github(issue_state)
+  local issues = {}
+  if issue_state ~= nil then
+    issues[REPO .. "#issue/333"] = issue_fixture(333, issue_state)
+  end
+  return github_fake.new(github_fake.model({ issues = issues }))
+end
+
+local function department_with(removed, running_rows, remove_env, issue_state)
   return worktree_gc.make_department({
     git = fake_git(removed),
+    github = fake_github(issue_state),
     read_env = function(name)
       if name == "FKST_RUNTIME_ROOT" then
         return CUR_RT
@@ -121,7 +152,7 @@ return {
   -- current-RT, detached, foreign, and the main checkout are never removed.
   test_removes_only_terminal_old_rt_worktree = function()
     local removed = {}
-    local dept = department_with(removed, { running_row(111, "dedup-orphan") }, "1")
+    local dept = department_with(removed, { running_row(111, "dedup-orphan") }, "1", "ready")
     testing.run_fake(dept, tick())
 
     t.eq(#removed, 1)
@@ -137,7 +168,7 @@ return {
   -- removable candidate but mutates NOTHING (it only logs `would-remove`).
   test_dry_run_removes_nothing = function()
     local removed = {}
-    local dept = department_with(removed, { running_row(111, "dedup-orphan") }, nil)
+    local dept = department_with(removed, { running_row(111, "dedup-orphan") }, nil, "merged")
     testing.run_fake(dept, tick())
     t.eq(#removed, 0)
   end,
@@ -150,8 +181,33 @@ return {
       running_row(111, "dedup-orphan"),
       { status = "running", proposal_id = "unparseable", dedup_key = "x", lease_expires_at_ms = (NOW_S * 1000) + 600000 },
     }
-    local dept = department_with(removed, rows, "1")
+    local dept = department_with(removed, rows, "1", "merged")
     testing.run_fake(dept, tick())
     t.eq(#removed, 0)
+  end,
+
+  -- A current-runtime deterministic worktree is removed only when the issue stream has
+  -- a fresh trusted terminal marker and codex_runs proves the branch is not live.
+  test_removes_current_rt_terminal_worktree = function()
+    local removed = {}
+    local dept = department_with(removed, { running_row(111, "dedup-orphan") }, "1", "merged")
+    testing.run_fake(dept, tick())
+
+    t.eq(#removed, 2)
+    t.eq(contains(removed, TERMINAL_PATH), true)
+    t.eq(contains(removed, CURRENT_PATH), true)
+    t.eq(contains(removed, ORPHAN_PATH), false)
+  end,
+
+  -- A current-runtime deterministic worktree with a nonterminal trusted marker is kept
+  -- even when no codex row is live; this preserves retryable rows such as impl-failed.
+  test_keeps_current_rt_nonterminal_worktree = function()
+    local removed = {}
+    local dept = department_with(removed, { running_row(111, "dedup-orphan") }, "1", "impl-failed")
+    testing.run_fake(dept, tick())
+
+    t.eq(#removed, 1)
+    t.eq(removed[1], TERMINAL_PATH)
+    t.eq(contains(removed, CURRENT_PATH), false)
   end,
 }

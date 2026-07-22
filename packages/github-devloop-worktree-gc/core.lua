@@ -10,6 +10,7 @@
 -- Pure functions only (no I/O); the department wires the real primitives.
 
 local base = require("devloop.base")
+local base_ids = require("devloop.base_ids")
 
 local M = {}
 
@@ -100,17 +101,35 @@ function M.is_deterministic_devloop_branch(branch)
     and branch:sub(1, #IMPLEMENT_BRANCH_PREFIX) == IMPLEMENT_BRANCH_PREFIX
 end
 
+function M.issue_ref_from_branch(branch)
+  local owner, repo_name, issue =
+    tostring(branch or ""):match("^devloop/issue/([^/]+)/([^/]+)/([0-9]+)/")
+  if owner == nil or repo_name == nil or issue == nil then
+    return nil
+  end
+  local repo = owner .. "/" .. repo_name
+  if base_ids.safe_repo(repo) ~= repo or base_ids.safe_issue(issue) ~= issue then
+    return nil
+  end
+  return {
+    repo = repo,
+    issue = issue,
+    proposal_id = base_ids.proposal_id(repo, issue),
+    source_ref = base_ids.issue_source_ref(repo, issue),
+  }
+end
+
 -- classify(worktrees, live, current_runtime_root) -> { removable = {<path>,...}, skipped = {{path,branch,reason},...} }.
 -- A worktree is REMOVABLE iff ALL hold:
 --   (1) the live set is complete (else fail-open: skip everything);
 --   (2) it is attached to a deterministic devloop implement/fix branch (round-trips through the prefix);
 --   (3) that branch is ABSENT from the live-branch set;
---   (4) [v1 containment] its path is NOT under the current runtime root (old-RT / restart-orphan only),
---       which is the primary "registry leak #500" and is structurally free of the creation race
---       (nothing new creates worktrees under a dead runtime root).
+--   (4) it is either under an old runtime root, or a trusted terminal issue marker proves
+--       the current-runtime worktree has reached a terminal lifecycle row.
 -- Everything else is skipped with a positive reason and never force-removed.
-function M.classify(worktrees, live, current_runtime_root)
+function M.classify(worktrees, live, current_runtime_root, opts)
   local removable, skipped = {}, {}
+  local terminal_issues = opts and opts.terminal_issues or nil
   local function skip(w, reason)
     skipped[#skipped + 1] = { path = w.path, branch = w.branch, reason = reason }
   end
@@ -130,7 +149,12 @@ function M.classify(worktrees, live, current_runtime_root)
     elseif live.set[w.branch] then
       skip(w, "live-branch")
     elseif base.path_under_runtime_root(current_runtime_root, w.path) then
-      skip(w, "current-runtime-root")
+      local issue_ref = M.issue_ref_from_branch(w.branch)
+      if issue_ref ~= nil and terminal_issues ~= nil and terminal_issues[issue_ref.proposal_id] == true then
+        removable[#removable + 1] = { path = w.path, branch = w.branch, issue_ref = issue_ref }
+      else
+        skip(w, terminal_issues ~= nil and "current-runtime-terminal-unverified" or "current-runtime-root")
+      end
     else
       removable[#removable + 1] = { path = w.path, branch = w.branch }
     end
