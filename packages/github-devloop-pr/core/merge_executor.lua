@@ -79,6 +79,7 @@ local function raise_fixing(repo, issue_number, merge_ready, current_state, curr
   reason = admission.reason or reason
   local fix_version = admission.version
   local ci_failure_key = admission.ci_failure_key
+  local gate_failure_excerpt = admission.gate_failure_excerpt or reason
   local gate_baseline_sha = gate_baseline_sha_from_pr(current_pr)
   local predecessor_set = nil
   if queue_position ~= nil then
@@ -96,6 +97,7 @@ local function raise_fixing(repo, issue_number, merge_ready, current_state, curr
   end
   local comment_request = requests_review.build_merge_gate_fix_comment_request(core, repo, issue_number, merge_ready, fix_version, reason, gate_baseline_sha, source_ref, predecessor_set, {
     ci_failure_key = ci_failure_key,
+    gate_failure_excerpt = gate_failure_excerpt,
   })
   local label_request = issue_number ~= nil and requests_labels.build_state_label_request(repo,
     issue_number,
