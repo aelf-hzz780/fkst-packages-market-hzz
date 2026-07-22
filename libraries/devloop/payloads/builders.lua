@@ -209,10 +209,6 @@ function C.build_devloop_fixing_payload(origin, pr_number, review_fact, source_r
   if framing ~= nil then
     payload.framing = framing
   end
-  local blocking_gap = shared.bounded_control_text(review_fact.blocking_gap, devloop_base._max_blocking_gap_len)
-  if blocking_gap ~= nil then
-    payload.blocking_gap = blocking_gap
-  end
   if review_fact.gate_baseline_sha ~= nil then
     if not forge_validators.is_git_sha(review_fact.gate_baseline_sha) then
       error("github-devloop: invalid gate baseline sha")
@@ -232,6 +228,10 @@ function C.build_devloop_fixing_payload(origin, pr_number, review_fact, source_r
   local gate_failure_excerpt = shared.bounded_control_text(review_fact.gate_failure_excerpt, parsers_misc.max_rollup_failure_summary_len)
   if gate_failure_excerpt ~= nil then
     payload.gate_failure_excerpt = gate_failure_excerpt
+  end
+  local blocking_gap = shared.bounded_control_text(review_fact.blocking_gap, devloop_base._max_blocking_gap_len)
+  if blocking_gap ~= nil then
+    payload.blocking_gap = blocking_gap
   end
   return payload
 end
@@ -255,7 +255,7 @@ function C.build_replayed_fixing_payload(origin, pr_number, feedback, source_ref
     gate_baseline_sha = feedback.gate_baseline_sha,
     predecessor_set = feedback.predecessor_set,
     ci_failure_key = feedback.ci_failure_key,
-    gate_failure_excerpt = feedback.reason or feedback.review_reason,
+    gate_failure_excerpt = feedback.gate_failure_excerpt or feedback.reason or feedback.review_reason,
   }, source_ref)
   if payload.repair_input ~= "ci-failure" then
     payload.dedup_key = base_ids.dedup_key({

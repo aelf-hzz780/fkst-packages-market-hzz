@@ -173,6 +173,7 @@ function C.admit_own_ci_continuation(state, classification, ctx)
   decision.current_pr = current_pr
   decision.reason = classification.reason
   decision.ci_failure_key = classification.ci_failure_key
+  decision.gate_failure_excerpt = classification.gate_failure_excerpt or classification.reason
   decision.bound_head_sha = bound_head_sha
   return decision
 end

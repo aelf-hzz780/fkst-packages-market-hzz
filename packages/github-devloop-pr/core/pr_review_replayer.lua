@@ -587,7 +587,10 @@ local function replay_merging_state(dept, issue, state, row, facts, tools)
         end
         if admission.kind ~= "admit" then return true end
         local current = admission.current_pr
-        local request = requests_review.build_merge_gate_fix_comment_request(M, issue.repo, issue.number, merge_ready, admission.version, admission.reason, current.base_ref_oid, source_ref, nil, { ci_failure_key = admission.ci_failure_key })
+        local request = requests_review.build_merge_gate_fix_comment_request(M, issue.repo, issue.number, merge_ready, admission.version, admission.reason, current.base_ref_oid, source_ref, nil, {
+          ci_failure_key = admission.ci_failure_key,
+          gate_failure_excerpt = admission.gate_failure_excerpt,
+        })
         local effects = { { queue = "github-proxy.github_pr_comment_request", payload = request } }
         add_issue_label_effect(issue, proposal_id, "fixing", admission.version, issue_source_ref(issue), effects,
           { "merging", "label", "fixing", tostring(proposal_id), tostring(admission.version), tostring(link.pr_number) },
