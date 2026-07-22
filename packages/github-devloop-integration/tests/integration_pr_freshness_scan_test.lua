@@ -30,10 +30,11 @@ local function opts(name, extra)
   return { env = env }
 end
 
-local function mock_env(write_mode, integration)
+local function mock_env(write_mode, integration, repo)
+  local target_repo = repo or "owner/repo"
   t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', { stdout = "dev", stderr = "", exit_code = 0 })
   t.mock_command('printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"', { stdout = integration or "integration/dev", stderr = "", exit_code = 0 })
-  t.mock_command('printf %s "$FKST_GITHUB_REPO"', { stdout = "owner/repo", stderr = "", exit_code = 0 })
+  t.mock_command('printf %s "$FKST_GITHUB_REPO"', { stdout = target_repo, stderr = "", exit_code = 0 })
   t.mock_command('printf %s "$FKST_GITHUB_WRITE"', { stdout = write_mode or "", stderr = "", exit_code = 0 })
   t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', { stdout = "dev", stderr = "", exit_code = 0 })
   t.mock_command('printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"', { stdout = integration or "integration/dev", stderr = "", exit_code = 0 })
@@ -59,12 +60,12 @@ local function render_comments(comments)
   return table.concat(rendered, ",")
 end
 
-local function mock_pr_list(is_draft)
-  t.mock_command("repos/owner/repo/pulls?state=open", {
+local function mock_pr_list(is_draft, managed_branch, repo)
+  t.mock_command("repos/" .. (repo or "owner/repo") .. "/pulls?state=open", {
     stdout = string.format(
       '[[{"number":7,"headRefOid":"%s","headRefName":"%s","baseRefName":"integration/dev","state":"OPEN","isDraft":%s}]]\n',
       branch_sha,
-      encode_json_string(branch),
+      encode_json_string(managed_branch or branch),
       is_draft and "true" or "false"
     ),
     stderr = "",
@@ -103,14 +104,17 @@ local function mock_pr_view(state, comments, extra)
   })
 end
 
-local function mock_issue_view(labels, comments, owner_login)
+local function mock_issue_view(labels, comments, owner_login, repo)
+  local target_repo = repo or "owner/repo"
   entity_read_mocks.mock_issue_view_selector(t, {
+    repo = target_repo,
     labels = labels,
     comments = comments,
     assignees = owner_login ~= nil and { owner_login } or nil,
     author_login = owner_login,
   }, "labels,comments")
   entity_read_mocks.mock_issue_view_selector(t, {
+    repo = target_repo,
     assignees = owner_login ~= nil and { owner_login } or nil,
     author_login = owner_login,
   }, "assignees,author")
@@ -125,11 +129,12 @@ local function mock_issue_view_other_owned()
   })
 end
 
-local function mock_fetch_and_heads(current_branch_sha)
+local function mock_fetch_and_heads(current_branch_sha, managed_branch)
+  local target_branch = managed_branch or branch
   t.mock_command("git fetch 'origin' 'integration/dev'", { stdout = "", stderr = "", exit_code = 0 })
-  t.mock_command("git fetch 'origin' '" .. branch .. "'", { stdout = "", stderr = "", exit_code = 0 })
+  t.mock_command("git fetch 'origin' '" .. target_branch .. "'", { stdout = "", stderr = "", exit_code = 0 })
   t.mock_command("refs/remotes/'origin'/'integration/dev'^{commit}", { stdout = integration_sha .. "\n", stderr = "", exit_code = 0 })
-  t.mock_command("refs/remotes/'origin'/'" .. branch .. "'^{commit}", { stdout = (current_branch_sha or branch_sha) .. "\n", stderr = "", exit_code = 0 })
+  t.mock_command("refs/remotes/'origin'/'" .. target_branch .. "'^{commit}", { stdout = (current_branch_sha or branch_sha) .. "\n", stderr = "", exit_code = 0 })
 end
 
 local function mock_worktree_merge(exit_code, unmerged_stdout)
@@ -144,6 +149,33 @@ local function mock_worktree_merge(exit_code, unmerged_stdout)
 end
 
 return {
+  test_pr_freshness_scan_accepts_maximum_length_managed_branch = function()
+    local repo = "the-omega-institute/trureturing"
+    local prefix = "devloop/issue/the-omega-institute/trureturing/42/ready-"
+    local managed_branch = prefix .. string.rep("x", 160 - #prefix)
+    local issue_proposal = "github-devloop/issue/" .. repo .. "/42"
+    local scan_review_proposal = devloop_base.pr_review_proposal_id(repo, 7, version, branch_sha)
+    local scan_review_dedup = "consensus:" .. scan_review_proposal .. "/review"
+    local comments = {
+      { body = m_builders.pr_origin_marker(issue_proposal, 42, managed_branch, version, "integration/dev"), author_login = core._test_bot_login },
+      { body = core.state_marker(issue_proposal, "merge-ready", version), author_login = core._test_bot_login },
+      { body = m_builders.review_result_marker(scan_review_proposal, issue_proposal, "approve", scan_review_dedup), author_login = core._test_bot_login },
+      { body = m_builders.merge_ready_marker(issue_proposal, 7, version, scan_review_proposal, scan_review_dedup, branch_sha), author_login = core._test_bot_login },
+    }
+    t.eq(#managed_branch, 160)
+
+    mock_env("", nil, repo)
+    mock_pr_list(false, managed_branch, repo)
+    mock_pr_view("merge-ready", comments, { head = managed_branch, head_repo = repo })
+    mock_issue_view({}, nil, nil, repo)
+    mock_fetch_and_heads(nil, managed_branch)
+    t.mock_command("merge-base --is-ancestor", { stdout = "", stderr = "", exit_code = 0 })
+
+    local result = run_scan(opts("pr-freshness-maximum-branch", { FKST_GITHUB_REPO = repo }))
+    t.eq(result.exit_code, 0)
+    t.eq(h.count_calls("git fetch"), 2)
+  end,
+
   test_pr_freshness_approved_pr_from_production_bot_merges_and_pushes = function()
     mock_env("1")
     mock_pr_list(false)
