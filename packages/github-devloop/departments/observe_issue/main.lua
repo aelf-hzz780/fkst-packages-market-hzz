@@ -1,6 +1,7 @@
 local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
+local context_bundle = require("devloop.context_bundle")
 local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
 local requests_lifecycle = require("devloop.requests.lifecycle")
@@ -12,19 +13,20 @@ local contract_time = require("contract.time")
 local operator_commands = require("devloop.operator_commands")
 local queue = require("devloop.queue")
 local transition_version = require("contract.transition_version")
-local context_bundle = require("devloop.context_bundle")
+local observe_issue_caps = require("observe_issue_department_caps")
 local replayer = require("devloop.replayer")
 local awaiting_pr_replay = require("awaiting_pr_replay")
 
 local payloads_builders = require("devloop.payloads.builders")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local v_issue = require("devloop.validators.issue")
-local v_validate_proposal = require("devloop.validators.validate_proposal")
 local v_pr = require("devloop.validators.pr")
+local v_validate_proposal = require("devloop.validators.validate_proposal")
 local m_builders = require("devloop.markers.builders")
 local devloop_entity_view = require("devloop.github_proxy_entity_view")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
+local log = log
 local M = {}
 
 local spec = {
@@ -782,19 +784,47 @@ local function process_issue_event(event)
         return
       end
     end
-    local transition = devloop_state.versioned_transition_status(state, { "unmanaged" }, "thinking", issue.dedup_key)
-    if transition == "stale" then
-      devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", devloop_state.cas_outcome(state, transition, issue.dedup_key), "current marker is not an unmanaged start")
+    local grant_version = state.version or issue.dedup_key
+    local snapshot = observe_issue_caps.restart_effects.seal_snapshot({
+      owner = observe_issue_caps.restart_package_name,
+      entity = { kind = "issue", repo = issue.repo, number = issue.number },
+      proposal_id = proposal_id,
+      current = { state = state.state, version = grant_version },
+      snapshot_fingerprint = table.concat({
+        "observe-issue-entry", proposal_id, state.state or "unmanaged", grant_version,
+      }, "|"),
+      lock_epoch = lock_key .. "@" .. grant_version,
+      generation = grant_version,
+    })
+    local decision = observe_issue_caps.restart_effects.decide_transition(snapshot, {
+      semantic_variant = "unmanaged_issue",
+      source_boundary = "github-proxy.github_entity_changed",
+      target = "thinking",
+      incoming_version = issue.dedup_key,
+    })
+    if decision.status == "stale" then
+      devloop_logging.log_cas_decision("observe_issue", proposal_id, state,
+        "unmanaged", "thinking", decision.cas_outcome,
+        "current marker is not an unmanaged start")
       return
     end
-    if transition == "pending" then
-      devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", devloop_state.cas_outcome(state, transition, issue.dedup_key), "unmanaged state marker pending for observe")
+    if decision.status == "pending" then
+      devloop_logging.log_cas_decision("observe_issue", proposal_id, state,
+        "unmanaged", "thinking", decision.cas_outcome,
+        "unmanaged state marker pending for observe")
       error("github-devloop: state-marker-pending: unmanaged state marker pending for observe; retrying")
     end
-    if not m_claims.claim_issue_for_management(core, "observe_issue", issue.repo, issue.number, current, proposal_id) then
+    if decision.status ~= "apply" and decision.status ~= "idempotent" then
+      error("github-devloop: restart-effect-decision-illegal: observe issue entry decision rejected: "
+        .. tostring(decision.reason_code))
+    end
+    if not m_claims.claim_issue_for_management(core, "observe_issue", issue.repo,
+      issue.number, current, proposal_id) then
       return
     end
-    devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", devloop_state.cas_outcome(state, transition, issue.dedup_key), "starting consensus for opted-in issue")
+    devloop_logging.log_cas_decision("observe_issue", proposal_id, state,
+      "unmanaged", "thinking", decision.cas_outcome,
+      "starting consensus for opted-in issue")
 
     issue.content_fetch = context_bundle.context_fetch_ref_from_bundle(core, {
       dept = "observe_issue",
@@ -806,21 +836,44 @@ local function process_issue_event(event)
     })
     local proposal = payloads_builders.build_board_proposal(core, issue, event.ts)
     if not v_validate_proposal.validate_proposal(proposal) then
-      log.warn("github-devloop dept=observe_issue proposal_id=" .. tostring(proposal_id) .. " tag=SKIP reason=cannot-build-valid-proposal")
+      log.warn("github-devloop dept=observe_issue proposal_id=" .. tostring(proposal_id)
+        .. " tag=SKIP reason=cannot-build-valid-proposal")
       return
     end
-
-    local comment_request = requests_lifecycle.build_observe_comment_request(core, issue, proposal)
-    local label_request = requests_labels.build_thinking_label_request(issue, proposal)
-    local add_labels, remove_labels = devloop_state.state_label_changes("thinking")
-    devloop_logging.log_apply("observe_issue", proposal_id, "thinking", proposal.dedup_key, { add = add_labels, remove = remove_labels }, {
-      "consensus.proposal",
-      "github-proxy.github_issue_comment_request",
-      "github-proxy.github_issue_label_request",
+    local grant = observe_issue_caps.restart_effects.mint_grant(
+      snapshot, decision, "comment:issue:thinking-state")
+    if grant == nil then
+      error("github-devloop: restart-effect-grant-mint-failed: observe issue entry grant was not minted")
+    end
+    local facade = observe_issue_caps.restart_effect_facade.make({
+      family = "observe-issue-entry",
+      verify_grant = observe_issue_caps.restart_effects.verify_grant,
+      sink_inventory = observe_issue_caps.sink_inventory,
     })
-    devloop_logging.log_raise("observe_issue", proposal_id, "consensus.proposal", proposal)
-    devloop_logging.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", comment_request)
-    devloop_logging.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_label_request", label_request)
+    if type(facade.emit) ~= "function" then
+      error("github-devloop: restart-effect-facade-invalid: observe issue entry facade emit is unavailable")
+    end
+
+    local effects = {}
+    local serializer_args = { core = core, issue = issue, proposal = proposal }
+    for _, effect_id in ipairs(decision.granted_effect_ids) do
+      local payload, rejection = facade.emit(grant, effect_id, snapshot, serializer_args)
+      if payload == nil then
+        error("github-devloop: restart-effect-facade-rejected: observe issue entry effect "
+          .. tostring(effect_id) .. " rejected: " .. tostring(rejection))
+      end
+      table.insert(effects, { queue = effect_id, payload = payload })
+    end
+    local add_labels, remove_labels = devloop_state.state_label_changes("thinking")
+    devloop_logging.log_apply("observe_issue", proposal_id, "thinking", proposal.dedup_key, {
+      add = add_labels,
+      remove = remove_labels,
+    }, decision.granted_effect_ids)
+    for _, effect in ipairs(effects) do
+      devloop_logging.log_raise("observe_issue", proposal_id, effect.queue, effect.payload)
+    end
+
+
   end)
 end
 
