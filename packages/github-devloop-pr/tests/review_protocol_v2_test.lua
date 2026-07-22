@@ -158,9 +158,13 @@ return {
     local ci_prompt = core.build_fix_prompt(h.fixing({
       repair_input = "ci-failure",
       ci_failure_key = "head:def456/checks:digest-0000000101",
+      gate_failure_excerpt = "own-ci-red: check=test conclusion=FAILURE output=SL-003: directory contains 14 files maximum 12",
     }), { title = "Fix parser" }, "own-ci-red", nil, manifest)
     t.is_true(ci_prompt:find("terminal own-CI failure key head:def456/checks:digest-0000000101", 1, true) ~= nil)
     t.is_true(ci_prompt:find("fix the failing own-CI test", 1, true) ~= nil)
+    t.is_true(ci_prompt:find("Own-CI gate diagnostic: own-ci-red: check=test conclusion=FAILURE output=SL-003: directory contains 14 files maximum 12", 1, true) ~= nil)
+    t.is_true(ci_prompt:find("split the overflowing file or directory using repository-local conventions", 1, true) ~= nil)
+    t.is_true(ci_prompt:find("do not raise capacity limits", 1, true) ~= nil)
 
     local conflict_prompt = core.build_fix_prompt(fix, {
       title = "Fix parser",

@@ -1,6 +1,7 @@
 local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
+local parsers_misc = require("devloop.parsers.misc")
 local strings = require("contract.strings")
 local S = {}
 local config = require("devloop.config")
@@ -99,10 +100,30 @@ local function bounded_gap(M, gap)
   return value
 end
 
-local function repair_input_instruction(fix)
+local function bounded_optional_gap(gap, limit)
+  local value = devloop_base.neutralize_untrusted_prompt_text(gap or "")
+  value = value:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+  if value == "" then
+    return nil
+  end
+  if #value > limit then
+    value = base_ids.truncate_utf8(value, limit)
+  end
+  return value
+end
+
+local function repair_input_instruction(M, fix)
   if type(fix) == "table" and fix.repair_input == "ci-failure" then
-    return "This fix round is for terminal own-CI failure key " .. devloop_base.neutralize_untrusted_prompt_text(fix.ci_failure_key or "")
-      .. "; reproduce with the configured local iteration command, then fix the failing own-CI test."
+    local lines = {
+      "This fix round is for terminal own-CI failure key " .. devloop_base.neutralize_untrusted_prompt_text(fix.ci_failure_key or "")
+        .. "; reproduce with the configured local iteration command, then fix the failing own-CI test.",
+    }
+    local gate_failure = bounded_optional_gap(fix.gate_failure_excerpt, parsers_misc.max_rollup_failure_summary_len)
+    if gate_failure ~= nil then
+      table.insert(lines, "Own-CI gate diagnostic: " .. gate_failure)
+    end
+    table.insert(lines, "If the diagnostic reports structural capacity, split the overflowing file or directory using repository-local conventions; do not raise capacity limits or resubmit the same overflowing layout.")
+    return table.concat(lines, "\n")
   end
   return "This fix round is for review-feedback; address the named review blocking gap."
 end
@@ -178,7 +199,7 @@ function M.build_fix_prompt(fix, current_issue, review_reason, framing, content_
     reviewed_head_sha = devloop_base.neutralize_untrusted_prompt_text(fix.reviewed_head_sha),
     framing = bounded_framing(M, framing),
     blocking_gap = bounded_gap(M, fix.blocking_gap),
-    repair_input_instruction = repair_input_instruction(fix),
+    repair_input_instruction = repair_input_instruction(M, fix),
     title = devloop_base.neutralize_untrusted_prompt_text(current_issue.title),
     local_test_command = config.local_iteration_test_command(),
     target_merge_context = target_merge_context(M, merge_context),
