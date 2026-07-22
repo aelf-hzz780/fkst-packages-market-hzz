@@ -10,12 +10,18 @@ function PrFreshness.install(M, shared)
   local runtime_root_path = shared.runtime_root_path
 
   function M.pr_freshness_lock_key(repo, branch)
-    local key = "github-devloop/pr-freshness/"
-      .. base_ids.safe_repo(require_safe_repo(repo))
-      .. "/"
-      .. require_safe_branch("managed branch", branch)
+    local prefix = "github-devloop/pr-freshness/"
+    local safe_repo = base_ids.safe_repo(require_safe_repo(repo))
+    local safe_branch = require_safe_branch("managed branch", branch)
+    local key = prefix .. safe_repo .. "/" .. safe_branch
     if not strings.is_path_safe_key(key, M._max_key_len) then
-      error("github-devloop: lock-key-invalid: invalid PR freshness lock key")
+      -- HOTFIX (upstream ChronoAIProject/fkst-packages#2603): bound long branch
+      -- names via truncate+checksum (mirrors branch_train bounded_lock_key) instead
+      -- of fail-closed. Short branches keep their exact key (no lock churn).
+      local budget = M._max_key_len - #prefix - #safe_repo - 1
+      local checksum = decimal_checksum(safe_branch)
+      local readable = strings.sanitize_key(safe_branch, false):gsub("/", "-"):sub(1, budget - #checksum - 1)
+      key = prefix .. safe_repo .. "/" .. readable .. "-" .. checksum
     end
     return key
   end
