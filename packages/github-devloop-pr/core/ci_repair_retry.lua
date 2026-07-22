@@ -347,7 +347,7 @@ raise_admitted_round = function(M, dept, issue, state, proposal_id, link, feedba
     gate_baseline_sha = current_pr.base_ref_oid,
     predecessor_set = feedback.predecessor_set,
     ci_failure_key = decision.ci_failure_key,
-    gate_failure_excerpt = decision.reason,
+    gate_failure_excerpt = decision.gate_failure_excerpt or decision.reason,
   }, source_ref)
   local request = requests_review.build_merge_gate_fix_comment_request(M,
     issue.repo,
@@ -367,7 +367,7 @@ raise_admitted_round = function(M, dept, issue, state, proposal_id, link, feedba
     feedback.predecessor_set,
     {
       blocking_gap = feedback.blocking_gap,
-      gate_failure_excerpt = decision.reason,
+      gate_failure_excerpt = decision.gate_failure_excerpt or decision.reason,
       ci_failure_key = decision.ci_failure_key,
       current_head_sha = current_pr.head_sha,
     }
