@@ -137,6 +137,14 @@ local function mock_fetch_and_heads(current_branch_sha, managed_branch)
   t.mock_command("refs/remotes/'origin'/'" .. target_branch .. "'^{commit}", { stdout = (current_branch_sha or branch_sha) .. "\n", stderr = "", exit_code = 0 })
 end
 
+local function mock_missing_integration_fetch()
+  t.mock_command("git fetch 'origin' 'integration/dev'", {
+    stdout = "",
+    stderr = "fatal: couldn't find remote ref integration/dev\n",
+    exit_code = 128,
+  })
+end
+
 local function mock_worktree_merge(exit_code, unmerged_stdout)
   t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-rt", stderr = "", exit_code = 0 })
   t.mock_command("mkdir -p", { stdout = "", stderr = "", exit_code = 0 })
@@ -205,6 +213,21 @@ return {
     t.eq(#result.raises, 0)
     t.eq(h.count_calls("merge --no-ff --no-commit"), 1)
     t.eq(h.count_calls("--force-with-lease=refs/heads/" .. branch .. ":" .. branch_sha), 1)
+  end,
+
+  test_pr_freshness_missing_integration_branch_holds_without_dlq = function()
+    mock_env("")
+    mock_pr_list(false)
+    mock_pr_view("merge-ready")
+    mock_issue_view({})
+    mock_missing_integration_fetch()
+
+    local result = run_scan(opts("pr-freshness-missing-integration"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(h.count_calls("git fetch 'origin' '" .. branch .. "'"), 0)
+    t.eq(h.count_calls("merge-base --is-ancestor"), 0)
+    t.eq(h.count_calls("--force-with-lease"), 0)
   end,
 
   test_pr_freshness_skips_arbitrating_fixing_state = function()
