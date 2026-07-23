@@ -1,4 +1,5 @@
 local pending_projection = require("devloop.restart_pending_projection")
+local restart_cas_catalog = require("devloop.restart_cas_catalog")
 local restart_edges = require("devloop.restart_edges")
 local restart_metadata = require("devloop.restart_metadata")
 
@@ -71,6 +72,11 @@ local owner_sources = {
   },
 }
 
+local edge_witness_sources = {
+  ["github-devloop"] = "packages/github-devloop/tests/restart_edges_conformance_test.lua",
+  ["github-devloop-pr"] = "packages/github-devloop-pr/tests/restart_edges_conformance_test.lua",
+}
+
 local entitlement_witness_sources = {
   ["github-devloop"] = {
     extraction = "packages/github-devloop/tests/restart_edges_conformance_test.lua",
@@ -124,6 +130,55 @@ local function expected_owner_projection(owner)
   return projection
 end
 
+function M.frozen_edge_witness_index(owner, edges)
+  local source_path = edge_witness_sources[owner]
+  if source_path == nil then
+    error("devloop.restart_owner_pending_projection: unknown lifecycle owner " .. tostring(owner))
+  end
+  if type(edges) ~= "table" then
+    error("devloop.restart_owner_pending_projection: edges must be an array")
+  end
+
+  local witnesses = {}
+  for _, edge in ipairs(edges) do
+    local pending_order = type(edge) == "table" and edge.pending_order or nil
+    local predecessor_state = type(pending_order) == "table"
+      and pending_order.predecessor_state or nil
+    if type(edge) ~= "table"
+        or edge.owner ~= owner
+        or type(edge.id) ~= "string" or edge.id == ""
+        or type(pending_order) ~= "table"
+        or type(pending_order.participates) ~= "boolean"
+        or (predecessor_state ~= nil
+          and (type(predecessor_state) ~= "string" or predecessor_state == ""))
+        or (pending_order.participates and predecessor_state == nil)
+        or type(edge.target) ~= "string" or edge.target == ""
+        or type(edge.kind) ~= "string" or edge.kind == "" then
+      error("devloop.restart_owner_pending_projection: edge witness identity is invalid")
+    end
+    if witnesses[edge.id] ~= nil then
+      error("devloop.restart_owner_pending_projection: duplicate edge witness id " .. edge.id)
+    end
+    witnesses[edge.id] = {
+      owner = owner,
+      edge_id = edge.id,
+      predecessor_state = predecessor_state,
+      target = edge.target,
+      kind = edge.kind,
+      input_fixture_id = edge.id,
+      expected_decision = {
+        predecessor_state = predecessor_state,
+        target = edge.target,
+        kind = edge.kind,
+      },
+      expected_effect_ids = {},
+      expected_payload_obligations = {},
+      witness_id = source_path .. "#edge:" .. edge.id,
+    }
+  end
+  return witnesses
+end
+
 function M.frozen_pending_witness_index(owner, edges)
   if owner_sources[owner] == nil then
     error("devloop.restart_owner_pending_projection: unknown lifecycle owner " .. tostring(owner))
@@ -159,6 +214,69 @@ function M.frozen_pending_witness_index(owner, edges)
           expected_payload_obligations = {},
           witness_id = "libraries/devloop/restart_owner_pending_projection.lua#"
             .. owner .. "/" .. fixture_id,
+        }
+      end
+    end
+  end
+  return witnesses
+end
+
+local function variant_count(variants)
+  local count = 0
+  for variant, definition in pairs(variants or {}) do
+    if type(variant) ~= "string" or variant == "" or type(definition) ~= "table" then
+      return 0
+    end
+    count = count + 1
+  end
+  return count
+end
+
+function M.frozen_family_variant_witness_index(owner, edges)
+  if owner_sources[owner] == nil then
+    error("devloop.restart_owner_pending_projection: unknown lifecycle owner " .. tostring(owner))
+  end
+  if type(edges) ~= "table" then
+    error("devloop.restart_owner_pending_projection: edges must be an array")
+  end
+
+  local witnesses = {}
+  for _, edge in ipairs(edges) do
+    if type(edge) ~= "table" or edge.owner ~= owner
+        or type(edge.id) ~= "string" or edge.id == "" then
+      error("devloop.restart_owner_pending_projection: family variant edge identity is invalid")
+    end
+    if edge.cas_policy_id ~= nil and edge.cas_variant ~= nil then
+      if type(edge.cas_policy_id) ~= "string" or edge.cas_policy_id == ""
+          or type(edge.cas_variant) ~= "string" or edge.cas_variant == "" then
+        error("devloop.restart_owner_pending_projection: family variant identity is invalid")
+      end
+      local definition = restart_cas_catalog.definition(edge.cas_policy_id)
+      local variants = type(definition) == "table" and definition.variants or nil
+      local variant = type(variants) == "table" and variants[edge.cas_variant] or nil
+      if variant_count(variants) > 1
+          and type(variant) == "table"
+          and variant.target_state == edge.target then
+        if witnesses[edge.id] ~= nil then
+          error("devloop.restart_owner_pending_projection: duplicate family variant edge id " .. edge.id)
+        end
+        witnesses[edge.id] = {
+          owner = owner,
+          edge_id = edge.id,
+          family_id = edge.cas_policy_id,
+          variant = edge.cas_variant,
+          target = edge.target,
+          input_fixture_id = edge.id .. "/family-variant",
+          expected_decision = {
+            family_id = edge.cas_policy_id,
+            variant = edge.cas_variant,
+            source_states = deep_copy(variant.source_states),
+            target_state = variant.target_state,
+          },
+          expected_effect_ids = {},
+          expected_payload_obligations = {},
+          witness_id = "libraries/devloop/restart_cas_catalog.lua#"
+            .. edge.cas_policy_id .. "/variants/" .. edge.cas_variant,
         }
       end
     end
