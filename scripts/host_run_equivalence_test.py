@@ -65,7 +65,7 @@ def write_executable(path: Path, content: str) -> None:
 def kill_process_group(process: subprocess.Popen[str]) -> None:
     try:
         os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
+    except (PermissionError, ProcessLookupError):
         pass
 
 
@@ -452,18 +452,17 @@ class HostRunEquivalenceTest(unittest.TestCase):
                 started_at = time.monotonic()
                 try:
                     if mode == "timeout":
-                        # Deadline must comfortably exceed the fixture's pid-file write, else under load the
-                        # tree is killed before line writes "$1" and the read below FileNotFoundErrors (flake
-                        # observed 2026-07-22: 1.0s raced the write under contention). 3.0s stays well under
-                        # the <5.0s bound below while giving the sub-second write ample scheduling margin.
+                        # Deadline must comfortably exceed the fixture's pid-file write. cmd_check runs this
+                        # test beside many other process-group fixtures, and on macOS a 3s timeout can still
+                        # kill the tree before the shell is scheduled far enough to write "$1".
                         with self.assertRaises(subprocess.TimeoutExpired):
                             run_bounded(
                                 [str(script), str(pid_file), mode],
                                 cwd=root,
                                 env=os.environ.copy(),
-                                timeout=3.0,
+                                timeout=10.0,
                             )
-                        self.assertLess(time.monotonic() - started_at, 8.0)
+                        self.assertLess(time.monotonic() - started_at, 15.0)
                     else:
                         result = run_bounded(
                             [str(script), str(pid_file), mode], cwd=root, env=os.environ.copy(), timeout=5.0

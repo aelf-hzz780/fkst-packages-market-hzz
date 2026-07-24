@@ -7,6 +7,7 @@ full run never samples (a full run only walks the all-pass path). Without this, 
 edit that neutered `return "$fails"` or the rc-missing fail-closed fallback would keep CI
 green while silently deadening the parallel gate."""
 import subprocess
+import time
 import unittest
 from pathlib import Path
 
@@ -96,6 +97,22 @@ class RunUnitsParallelTest(unittest.TestCase):
             "run_units_parallel 2 'true' 'exit 0' 'true'; echo \"rc=$?\""
         )
         self.assertIn("rc=1", result.stdout)
+
+    def test_waits_only_for_owned_unit_jobs(self) -> None:
+        # run.sh arms a deadline watchdog as an unrelated background job before cmd_check
+        # dispatches run_units_parallel. The unit pool must wait only for the unit
+        # subshells it starts, not every background job in the sourced shell.
+        started = time.monotonic()
+        result = _run(
+            "sleep 1.5 & bg=$!; "
+            "run_units_parallel 1 'echo unit'; rc=$?; "
+            "kill \"$bg\" 2>/dev/null || true; wait \"$bg\" 2>/dev/null || true; "
+            "echo \"rc=$rc\""
+        )
+        elapsed = time.monotonic() - started
+        self.assertIn("unit", result.stdout)
+        self.assertIn("rc=0", result.stdout)
+        self.assertLess(elapsed, 1.0, "run_units_parallel waited for an unrelated background job")
 
 
 if __name__ == "__main__":

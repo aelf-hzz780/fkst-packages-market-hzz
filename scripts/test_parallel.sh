@@ -44,17 +44,22 @@ run_units_parallel() {
     echo "error: run_units_parallel could not create its work directory" >&2
     return 1
   fi
-  local i j fails=0 rc running
+  local i j fails=0 rc next_wait=0
+  local -a unit_pids=()
   for (( i=0; i<n; i++ )); do
-    # Throttle: launch the next unit only once a worker slot frees (true work-stealing).
-    while :; do
-      running="$(jobs -pr | wc -l | tr -d ' ')"
-      [ "${running:-0}" -lt "$pool" ] && break
-      sleep 0.05
+    # Throttle only on unit jobs owned by this pool. Do not use bare `jobs`/`wait`:
+    # run.sh may have unrelated background jobs in the same sourced shell, such as
+    # the test deadline watchdog, and those must never block the unit pool.
+    while [ $(( i - next_wait )) -ge "$pool" ]; do
+      wait "${unit_pids[$next_wait]}" 2>/dev/null || true
+      next_wait=$(( next_wait + 1 ))
     done
     ( set +e; eval "${cmds[$i]}" >"$dir/$i.out" 2>&1; printf '%s' "$?" >"$dir/$i.rc" ) &
+    unit_pids[$i]=$!
   done
-  wait
+  for (( j=next_wait; j<n; j++ )); do
+    wait "${unit_pids[$j]}" 2>/dev/null || true
+  done
   for (( j=0; j<n; j++ )); do
     cat "$dir/$j.out" 2>/dev/null || true
     rc="$(cat "$dir/$j.rc" 2>/dev/null || printf '1')"

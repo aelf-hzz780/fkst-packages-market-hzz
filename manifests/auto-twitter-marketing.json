@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "name": "auto-twitter-marketing",
+  "description": "GitHub issue driven Auto Twitter marketing preview workflow. Live X credentials are brokered by NyxID in the host egress layer.",
+  "packages": [
+    "aelf-hzz780/fkst-packages-market-hzz@chore/bootstrap-auto-twitter-marketing:packages/github-proxy",
+    "aelf-hzz780/fkst-packages-market-hzz@chore/bootstrap-auto-twitter-marketing:packages/github-auto-twitter-marketing",
+    "aelf-hzz780/fkst-packages-market-hzz@chore/bootstrap-auto-twitter-marketing:packages/x-publisher",
+    "aelf-hzz780/fkst-packages-market-hzz@chore/bootstrap-auto-twitter-marketing:packages/lark-approval",
+    "aelf-hzz780/fkst-packages-market-hzz@chore/bootstrap-auto-twitter-marketing:packages/social-metrics"
+  ],
+  "github": {
+    "workLabels": [
+      "auto-twitter-marketing"
+    ]
+  },
+  "nyxid": {
+    "xPublishCredential": "host-brokered",
+    "rawTokenPolicy": "forbidden-in-repo-manifest-issue-payload"
+  }
+}

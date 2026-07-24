@@ -1,0 +1,15 @@
+kind = "package.composed"
+name = "github-auto-twitter-marketing"
+persistence_class = "composed_judgment_pipeline"
+
+[code]
+root = "."
+
+[lib_deps]
+libraries = ["contract", "workflow", "workflow_internal", "testkit", "testkit_internal", "forge"]
+
+[event_deps]
+packages = ["github-proxy", "x-publisher", "lark-approval", "social-metrics"]
+
+[github]
+work_labels = ["auto-twitter-marketing"]
