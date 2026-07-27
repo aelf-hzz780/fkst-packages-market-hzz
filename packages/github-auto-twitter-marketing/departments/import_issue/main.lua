@@ -33,23 +33,39 @@ local function status_for(item)
   return "schedule publish preview requested"
 end
 
-local function needs_issue_fetch(payload)
-  return type(payload) == "table"
-    and payload.body == nil
-    and payload.controls == nil
-    and type(payload.source_ref) == "table"
-    and type(payload.source_ref.ref) == "string"
-    and payload.source_ref.ref ~= ""
+local function issue_source_ref(source_ref)
+  local ref = type(source_ref) == "table" and (source_ref.ref or source_ref.reference) or nil
+  if type(source_ref) ~= "table"
+      or source_ref.kind ~= "external"
+      or type(ref) ~= "string"
+      or ref:match("^[^#]+#issue/%d+$") == nil then
+    return nil
+  end
+  return {
+    kind = "external",
+    ref = ref,
+    reference = ref,
+  }
 end
 
 local function fetched_issue_body(github, payload)
-  if not needs_issue_fetch(payload) then
+  if type(payload) ~= "table" or payload.body ~= nil or payload.controls ~= nil then
     return nil
   end
-  local issue = github.read_issue(payload.source_ref, {
-    updated_at = payload.updated_at,
-    consumer = "github-auto-twitter-marketing",
-  })
+  local source_ref = issue_source_ref(payload.source_ref)
+  if source_ref == nil then
+    return nil
+  end
+  local ok, issue = pcall(function()
+    return github.read_issue(source_ref, {
+      updated_at = payload.updated_at,
+      consumer = "github-auto-twitter-marketing",
+    })
+  end)
+  if not ok then
+    log.warn("github-auto-twitter-marketing dept=import_issue tag=FETCH_SKIP reason=github issue read failed")
+    return nil
+  end
   return issue and issue.body or nil
 end
 

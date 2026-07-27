@@ -248,4 +248,22 @@ FKST live publish verification for hzz780 via NyxID. Test post.
     t.eq(receipt.payload.platform_post_id, "2071886153800929439")
     t.eq(receipt.payload.account_username, "hzz780")
   end,
+
+  test_non_issue_source_ref_skips_without_github_read = function()
+    mock_env()
+    local event = issue_event(10)
+    event.payload.body = nil
+    event.payload.controls = nil
+    event.payload.source_ref = {
+      kind = "external",
+      ref = repo .. "#session/10",
+      reference = repo .. "#session/10",
+    }
+
+    local trace = graph.require_quiescent(graph.run(event, { max_steps = 4 }))
+
+    t.is_nil(graph.find_raise(trace, "github-auto-twitter-marketing.strategy_imported"))
+    t.is_nil(graph.find_raise(trace, "github-auto-twitter-marketing.weekly_content_imported"))
+    t.is_nil(graph.find_raise(trace, "x-publisher.x_publish_request"))
+  end,
 }
