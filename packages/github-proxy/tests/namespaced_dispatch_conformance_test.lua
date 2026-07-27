@@ -12,6 +12,7 @@ end
 local departments = conformance.loaded_departments({
   load_department("departments/github_comment/main.lua", "departments.github_comment.main"),
   load_department("departments/github_issue_blocked_by/main.lua", "departments.github_issue_blocked_by.main"),
+  load_department("departments/github_issue_create_anchor/main.lua", "departments.github_issue_create_anchor.main"),
   load_department("departments/github_issue_create/main.lua", "departments.github_issue_create.main"),
   load_department("departments/github_issue_label/main.lua", "departments.github_issue_label.main"),
   load_department("departments/github_poll/main.lua", "departments.github_poll.main"),
@@ -96,6 +97,22 @@ local function entity_view_probe_payload()
   }
 end
 
+local function issue_observed_payload()
+  return {
+    schema = "github-proxy.v1",
+    type = "issue",
+    repo = "owner/x",
+    number = 42,
+    title = "Namespaced dispatch probe",
+    state = "OPEN",
+    labels = {},
+    assignees = {},
+    updated_at = "2026-06-03T01:02:03Z",
+    source_ref = source_ref("owner/x#issue/42"),
+    dedup_key = "github-proxy/namespaced/issue-observed",
+  }
+end
+
 local function payload_for_queue(_path, queue)
   local payloads = {
     entity_view_probe = entity_view_probe_payload(),
@@ -103,6 +120,7 @@ local function payload_for_queue(_path, queue)
     github_issue_comment_request = issue_comment_payload(),
     github_issue_create_request = issue_create_payload(),
     github_issue_label_request = label_payload(),
+    github_issue_observed = issue_observed_payload(),
     github_poll_tick = { schema = "github-proxy.poll-tick.v1" },
     github_pr_comment_request = pr_comment_payload(),
   }
