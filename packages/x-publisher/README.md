@@ -1,18 +1,65 @@
 # x-publisher
 
-General X release package - **contract + preview implementation.** A reusable publish lane for X
-that any host repo composes via `pkg.queue`: consume a safe publish request, validate that only
-small control fields and a `source_ref` pointer are present, and emit a preview receipt.
+General X release package - **contract + shadow-first live implementation.** A reusable publish lane
+for X that any host repo composes via `pkg.queue`: consume a safe publish request, validate that only
+small control fields plus source pointers are present, and emit a receipt.
 
-- **consumes** `x_publish_request` - `{ artifact_id, source_ref, platform?, channel?, dedup_key?,
-  trace_id?, approval_id?, scheduled_at?, metadata? }`.
-- **produces** `x_published` - `{ artifact_id, platform = "x", status = "preview", post_uri = nil,
-  source_ref, dedup_key?, trace_id?, approval_id?, ... }` for valid preview requests.
+- **consumes** `x_publish_request` - `{ artifact_id, source_ref, content_ref?, platform?, channel?,
+  dedup_key?, trace_id?, approval_id?, scheduled_at?, metadata? }`.
+- **produces** `x_published` - preview receipts in shadow mode, blocked receipts when a requested
+  live write is not authorized, and published receipts after NyxID returns an X tweet id.
 - **payload boundary** body/content fields (`tweet`, `body`, `text`, `message`, `media_bytes`,
   provider raw responses) and sensitive fields (`token`, `bearer`, `oauth`, `secret`,
   `credential`, authorization-like names) are rejected fail-closed.
-- **posture** shadow-first: this package posts nothing. A real X write must be injected by a
-  host-pinned egress skill such as `FKST_SKILL_PUBLISH_X` plus the host write switch.
+- **posture** shadow-first: live writes require all of `channel = "live"`,
+  `FKST_X_PUBLISH_WRITE=1`, and `FKST_NYXID_X_SERVICE_SLUG=<service-slug>`.
+
+## Live X write contract
+
+`x-publisher` uses NyxID as the only credential path. It never accepts or stores raw X tokens.
+
+Required host env for live mode:
+
+```sh
+FKST_X_PUBLISH_WRITE=1
+FKST_NYXID_X_SERVICE_SLUG=api-twitter-2-media
+FKST_X_PUBLISH_EXPECTED_USERNAME=hzz780
+```
+
+When `FKST_X_PUBLISH_EXPECTED_USERNAME` is set, the package first calls:
+
+```text
+nyxid proxy request <slug> /users/me?user.fields=id,name,username -m GET
+```
+
+The returned username must match before the package can post to:
+
+```text
+nyxid proxy request <slug> /tweets -m POST -d {"text":"..."}
+```
+
+The `/tweets` path is relative to the NyxID service base URL `https://api.x.com/2`; do not use
+`/2/tweets`.
+
+## Content resolution
+
+The publish payload stays pointer-only. For GitHub issue driven workflows, `content_ref` points to
+the weekly content issue, typically `#42` relative to the schedule issue repo. The weekly content
+issue must contain one explicit tweet text field, for example:
+
+````md
+type: weekly-content
+project: chronoai
+week: 2026-W31
+
+tweet-text:
+```
+FKST live publish verification for hzz780 via NyxID. Test post.
+```
+````
+
+MVP live publishing supports one text-only X post up to 280 characters. Media upload and thread
+publication are intentionally separate follow-up capabilities.
 
 Invalid requests are skipped with a greppable log and never masquerade as successful publishes.
 `core.preview_receipt(payload, "skipped")` exists as a safe shape helper for hosts/tests that need

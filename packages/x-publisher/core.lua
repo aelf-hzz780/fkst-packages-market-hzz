@@ -1,10 +1,12 @@
 -- x-publisher/core.lua - pure, side-effect-free publish contract helpers. Payloads carry only
 -- small control fields and a source_ref pointer; post content is re-fetched by the host seam.
 local M = {}
+local strings = require("contract.strings")
 
 local TOP_LEVEL_FIELDS = {
   artifact_id = true,
   source_ref = true,
+  content_ref = true,
   platform = true,
   channel = true,
   dedup_key = true,
@@ -145,6 +147,14 @@ local function source_ref_reference(source_ref)
   return reference
 end
 
+local function source_ref_repo(source_ref)
+  local reference = source_ref_reference(source_ref)
+  if reference == nil then
+    return nil
+  end
+  return reference:match("^([^#]+)#issue/%d+$")
+end
+
 local function normalized_platform(platform)
   if platform == nil or platform == "" then
     return "x"
@@ -196,6 +206,9 @@ function M.validate_publish_request(payload)
       return false, "invalid " .. field
     end
   end
+  if payload.content_ref ~= nil and not is_small_scalar(payload.content_ref) then
+    return false, "invalid content_ref"
+  end
   return true, nil
 end
 
@@ -220,6 +233,7 @@ function M.preview_receipt(payload, status)
     status = status or "preview",
     post_uri = nil,
     source_ref = source_ref,
+    content_ref = payload.content_ref,
     channel = payload.channel,
     dedup_key = payload.dedup_key,
     trace_id = payload.trace_id,
@@ -227,6 +241,180 @@ function M.preview_receipt(payload, status)
     scheduled_at = payload.scheduled_at,
     metadata = copy_allowed_scalars(payload.metadata, METADATA_FIELDS),
   }
+end
+
+local function normalized_channel(payload)
+  if type(payload) ~= "table" then
+    return "shadow"
+  end
+  local channel = tostring(payload.channel or ""):lower()
+  if channel == "live" then
+    return "live"
+  end
+  local metadata = payload.metadata
+  if type(metadata) == "table" and tostring(metadata.variant or ""):lower() == "live" then
+    return "live"
+  end
+  return "shadow"
+end
+
+local function safe_service_slug(value)
+  local slug = strings.trim(value)
+  if slug == "" then
+    return nil
+  end
+  if slug:find("secret://", 1, true) or slug:find("token", 1, true) then
+    return nil
+  end
+  if not slug:match("^[%w._-]+$") then
+    return nil
+  end
+  return slug
+end
+
+function M.live_gate(payload, opts)
+  local options = opts or {}
+  local service_slug = safe_service_slug(options.nyxid_x_service)
+  if normalized_channel(payload) ~= "live" then
+    return false, "not live"
+  end
+  if options.live_write_enabled ~= true then
+    return false, "live gate disabled"
+  end
+  if service_slug == nil then
+    return false, "missing nyxid x service"
+  end
+  return true, nil
+end
+
+local function metadata_tag_content_ref(payload)
+  if type(payload) ~= "table" or type(payload.metadata) ~= "table" then
+    return nil
+  end
+  local tag = tostring(payload.metadata.tag or "")
+  return tag:match("^calendar:(.+)$")
+end
+
+function M.content_source_ref(payload)
+  if type(payload) ~= "table" then
+    return nil, "invalid payload"
+  end
+  local raw_ref = strings.trim(payload.content_ref or metadata_tag_content_ref(payload))
+  if raw_ref == "" then
+    return nil, "missing content_ref"
+  end
+
+  local direct_repo, direct_number = raw_ref:match("^([^#]+)#issue/(%d+)$")
+  if direct_repo ~= nil then
+    local reference = direct_repo .. "#issue/" .. direct_number
+    return { kind = "external", ref = reference, reference = reference }, nil
+  end
+
+  local url_repo, url_issue = raw_ref:match("^https://github%.com/([^/]+/[^/]+)/issues/(%d+)")
+  if url_repo ~= nil then
+    local reference = url_repo .. "#issue/" .. url_issue
+    return { kind = "external", ref = reference, reference = reference }, nil
+  end
+
+  local number = raw_ref:match("^#(%d+)$") or raw_ref:match("^(%d+)$")
+  if number ~= nil then
+    local repo = source_ref_repo(payload.source_ref)
+    if repo == nil then
+      return nil, "content_ref requires issue source_ref repo"
+    end
+    local reference = repo .. "#issue/" .. number
+    return { kind = "external", ref = reference, reference = reference }, nil
+  end
+
+  return nil, "unsupported content_ref"
+end
+
+local function normalize_tweet_text(text)
+  local cleaned = strings.trim(tostring(text or ""):gsub("\r\n", "\n"):gsub("\r", "\n"))
+  if cleaned == "" then
+    return nil, "missing tweet text"
+  end
+  if #cleaned > 280 then
+    return nil, "tweet text too long"
+  end
+  return cleaned, nil
+end
+
+function M.extract_tweet_text(body)
+  local text = tostring(body or "")
+  for _, marker in ipairs({ "tweet%-text", "tweet", "x%-post", "post" }) do
+    local fenced = text:match(marker .. "%s*:%s*```[^\n]*\n(.-)\n```")
+    if fenced ~= nil then
+      return normalize_tweet_text(fenced)
+    end
+  end
+  for line in text:gmatch("[^\r\n]+") do
+    for _, marker in ipairs({ "tweet%-text", "tweet", "x%-post", "post" }) do
+      local inline = line:match("^%s*" .. marker .. "%s*:%s*(.-)%s*$")
+      if inline ~= nil and strings.trim(inline) ~= "" and inline:sub(1, 3) ~= "```" then
+        return normalize_tweet_text(inline)
+      end
+    end
+  end
+  return nil, "missing tweet text"
+end
+
+local function json_escape(value)
+  local text = tostring(value or "")
+  text = text:gsub("\\", "\\\\")
+  text = text:gsub('"', '\\"')
+  text = text:gsub("\n", "\\n")
+  text = text:gsub("\r", "\\r")
+  text = text:gsub("\t", "\\t")
+  return text
+end
+
+function M.tweet_body_json(text)
+  return '{"text":"' .. json_escape(text) .. '"}'
+end
+
+local function decode_json(stdout)
+  if type(json) ~= "table" or type(json.decode) ~= "function" then
+    return nil
+  end
+  local ok, decoded = pcall(json.decode, tostring(stdout or ""))
+  if not ok or type(decoded) ~= "table" then
+    return nil
+  end
+  return decoded
+end
+
+function M.parse_nyxid_username(stdout)
+  local decoded = decode_json(stdout)
+  local data = type(decoded) == "table" and decoded.data or nil
+  return type(data) == "table" and data.username or nil
+end
+
+function M.parse_nyxid_tweet_id(stdout)
+  local decoded = decode_json(stdout)
+  local data = type(decoded) == "table" and decoded.data or nil
+  local post_id = type(data) == "table" and data.id or nil
+  if type(post_id) == "string" and post_id ~= "" then
+    return post_id
+  end
+  return nil
+end
+
+function M.blocked_receipt(payload, reason)
+  local receipt = M.preview_receipt(payload, "blocked")
+  receipt.blocked_reason = reason
+  return receipt
+end
+
+function M.live_receipt(payload, opts)
+  local options = opts or {}
+  local receipt = M.preview_receipt(payload, "published")
+  local post_id = tostring(options.id or "")
+  receipt.platform_post_id = post_id
+  receipt.post_uri = post_id ~= "" and ("https://x.com/i/web/status/" .. post_id) or nil
+  receipt.account_username = options.username
+  receipt.nyxid_x_service = safe_service_slug(options.nyxid_x_service)
+  return receipt
 end
 
 return M

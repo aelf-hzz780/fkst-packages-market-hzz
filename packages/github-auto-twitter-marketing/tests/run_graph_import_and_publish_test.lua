@@ -32,7 +32,11 @@ local function issue_rest_json(issue_number, body)
   )
 end
 
-local function mock_env()
+local function mock_env(opts)
+  local options = opts or {}
+  local write_value = options.live == true and "1" or ""
+  local service_value = options.live == true and "api-twitter-2-media" or ""
+  local username_value = options.live == true and "hzz780" or ""
   for _ = 1, 8 do
     t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
       stdout = "fkst-test-bot",
@@ -51,6 +55,21 @@ local function mock_env()
     })
     t.mock_command('printf %s "$FKST_GITHUB_WRITE"', {
       stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command('printf %s "$FKST_X_PUBLISH_WRITE"', {
+      stdout = write_value,
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command('printf %s "$FKST_NYXID_X_SERVICE_SLUG"', {
+      stdout = service_value,
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command('printf %s "$FKST_X_PUBLISH_EXPECTED_USERNAME"', {
+      stdout = username_value,
       stderr = "",
       exit_code = 0,
     })
@@ -156,6 +175,7 @@ scheduled-at: 2026-07-25T09:00:00Z
     local request = graph.require_raise(trace, "x-publisher.x_publish_request")
     t.eq(request.payload.platform, "x")
     t.eq(request.payload.channel, "shadow")
+    t.eq(request.payload.content_ref, "#42")
     t.eq(request.payload.source_ref.ref, repo .. "#issue/43")
     t.eq(request.payload.scheduled_at, "2026-07-25T09:00:00Z")
 
@@ -163,5 +183,54 @@ scheduled-at: 2026-07-25T09:00:00Z
     t.eq(receipt.payload.status, "preview")
     t.eq(receipt.payload.platform, "x")
     t.eq(receipt.payload.source_ref.ref, repo .. "#issue/43")
+  end,
+
+  test_live_schedule_publish_issue_flows_to_x_publisher_live_request = function()
+    mock_env({ live = true })
+    mock_issue_read(44, [[
+type: schedule-publish
+project: chronoai
+week: 2026-W31
+calendar-ref: #42
+mode: live
+scheduled-at: 2026-07-25T09:00:00Z
+]])
+    mock_issue_read(42, [[
+type: weekly-content
+project: chronoai
+week: 2026-W31
+
+tweet-text:
+```
+FKST live publish verification for hzz780 via NyxID. Test post.
+```
+]])
+    t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
+      stdout = '{"data":{"id":"955688313951698945","name":"黄宗哲","username":"hzz780"}}',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("nyxid proxy request api-twitter-2-media /tweets -m POST", {
+      stdout = '{"data":{"id":"2071886153800929439","text":"FKST live publish verification for hzz780 via NyxID. Test post."}}',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local trace = graph.require_quiescent(graph.run(issue_event(44), { max_steps = 10 }))
+
+    graph.assert_covers(trace, {
+      "github-proxy.github_entity_changed -> github-auto-twitter-marketing.import_issue",
+      "x-publisher.x_publish_request -> x-publisher.publish_x",
+    })
+
+    local request = graph.require_raise(trace, "x-publisher.x_publish_request")
+    t.eq(request.payload.channel, "live")
+    t.eq(request.payload.content_ref, "#42")
+    t.eq(request.payload.metadata.variant, "live")
+
+    local receipt = graph.require_raise(trace, "x-publisher.x_published")
+    t.eq(receipt.payload.status, "published")
+    t.eq(receipt.payload.platform_post_id, "2071886153800929439")
+    t.eq(receipt.payload.account_username, "hzz780")
   end,
 }

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "auto-twitter-marketing",
-  "description": "GitHub issue driven Auto Twitter marketing preview workflow. Live X credentials are brokered by NyxID in the host egress layer.",
+  "description": "GitHub issue driven Auto Twitter marketing workflow. Shadow mode previews by default; live text-only X publishing is gated by host env and brokered by NyxID.",
   "packages": [
     "aelf-hzz780/fkst-packages-market-hzz@chore/bootstrap-auto-twitter-marketing:packages/github-proxy",
     "aelf-hzz780/fkst-packages-market-hzz@chore/bootstrap-auto-twitter-marketing:packages/github-auto-twitter-marketing",
@@ -16,6 +16,18 @@
   },
   "nyxid": {
     "xPublishCredential": "host-brokered",
+    "xPublishServiceEnv": "FKST_NYXID_X_SERVICE_SLUG",
+    "xPublishWriteSwitchEnv": "FKST_X_PUBLISH_WRITE",
+    "xPublishExpectedUsernameEnv": "FKST_X_PUBLISH_EXPECTED_USERNAME",
+    "verifiedHzz780Service": "api-twitter-2-media",
     "rawTokenPolicy": "forbidden-in-repo-manifest-issue-payload"
+  },
+  "workflow": {
+    "strategyIssueType": "strategy",
+    "weeklyContentIssueType": "weekly-content",
+    "schedulePublishIssueType": "schedule-publish",
+    "livePublishMode": "live",
+    "contentRefField": "calendar-ref",
+    "mvpPublishSurface": "text-only-tweet"
   }
 }

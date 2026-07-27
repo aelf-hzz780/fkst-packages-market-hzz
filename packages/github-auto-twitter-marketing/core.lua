@@ -316,6 +316,7 @@ function M.x_publish_request(item, opts)
   return {
     artifact_id = M.artifact_id(item),
     source_ref = copy_source_ref(item.source_ref),
+    content_ref = item.calendar_ref,
     platform = "x",
     channel = live and "live" or "shadow",
     dedup_key = item.dedup_key .. "/x-publish",

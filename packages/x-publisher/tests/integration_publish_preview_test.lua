@@ -1,5 +1,7 @@
 local t = fkst.test
 
+local repo = "owner/repo"
+
 local function event(payload)
   return {
     queue = "x_publish_request",
@@ -7,7 +9,23 @@ local function event(payload)
   }
 end
 
-local function run_publish(payload)
+local function run_publish(payload, env)
+  local env_values = env or {}
+  t.mock_command('printf %s "$FKST_X_PUBLISH_WRITE"', {
+    stdout = env_values.FKST_X_PUBLISH_WRITE or "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_NYXID_X_SERVICE_SLUG"', {
+    stdout = env_values.FKST_NYXID_X_SERVICE_SLUG or "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_X_PUBLISH_EXPECTED_USERNAME"', {
+    stdout = env_values.FKST_X_PUBLISH_EXPECTED_USERNAME or "",
+    stderr = "",
+    exit_code = 0,
+  })
   return t.run_department("departments/publish_x/main.lua", event(payload), {
     env = {
       FKST_RUNTIME_ROOT = "/tmp/fkst-marketing-test/x-publisher/preview",
@@ -16,11 +34,77 @@ local function run_publish(payload)
   })
 end
 
+local function json_escape(value)
+  local text = tostring(value or "")
+  text = text:gsub("\\", "\\\\")
+  text = text:gsub('"', '\\"')
+  text = text:gsub("\n", "\\n")
+  text = text:gsub("\r", "\\r")
+  return text
+end
+
+local function issue_rest_json(issue_number, body)
+  return string.format(
+    '{"number":%d,"title":"Auto Twitter marketing content %d","body":"%s","html_url":"https://github.example/%s/issues/%d","updated_at":"2026-07-24T09:00:00Z","state":"open","labels":[{"name":"auto-twitter-marketing"}],"assignees":[],"user":{"login":"fkst-test-bot"}}\n',
+    issue_number,
+    issue_number,
+    json_escape(body),
+    repo,
+    issue_number
+  )
+end
+
+local function mock_author_env()
+  t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
+    stdout = "fkst-test-bot",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', {
+    stdout = "fkst-test-bot",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', {
+    stdout = "fkst-test-bot",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_content_issue(issue_number, body)
+  t.mock_command("gh api repos/" .. repo .. "/issues/" .. tostring(issue_number), {
+    stdout = issue_rest_json(issue_number, body),
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("gh api --paginate --slurp 'repos/" .. repo .. "/issues/" .. tostring(issue_number) .. "/comments?per_page=100'", {
+    stdout = "[]\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function count_calls(needle)
+  local count = 0
+  for _, call in ipairs(t.command_calls()) do
+    local rendered = tostring(call.rendered or call.command or call.cmd or "")
+    if rendered == "" and type(call.argv) == "table" then
+      rendered = table.concat(call.argv, " ")
+    end
+    if rendered:find(needle, 1, true) then
+      count = count + 1
+    end
+  end
+  return count
+end
+
 return {
   test_publish_request_raises_preview_receipt = function()
     local result = run_publish({
       artifact_id = "artifact-1",
       source_ref = { kind = "draft", ref = "drafts/artifact-1" },
+      content_ref = "#42",
       platform = "x",
       channel = "main",
       dedup_key = "dedup-1",
@@ -44,6 +128,7 @@ return {
     t.eq(raised.payload.trace_id, "trace-1")
     t.eq(raised.payload.approval_id, "approval-1")
     t.eq(raised.payload.metadata.campaign_id, "campaign-1")
+    t.eq(raised.payload.content_ref, "#42")
   end,
 
   test_publish_request_skips_invalid_content_payload = function()
@@ -55,5 +140,73 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
+  end,
+
+  test_live_publish_fails_closed_without_write_gate = function()
+    local result = run_publish({
+      artifact_id = "artifact-1",
+      source_ref = { kind = "external", ref = repo .. "#issue/43" },
+      content_ref = "#42",
+      platform = "x",
+      channel = "live",
+      trace_id = "trace-1",
+    }, {
+      FKST_X_PUBLISH_WRITE = "",
+      FKST_NYXID_X_SERVICE_SLUG = "api-twitter-2-media",
+      FKST_X_PUBLISH_EXPECTED_USERNAME = "hzz780",
+    })
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "x_published")
+    t.eq(result.raises[1].payload.status, "blocked")
+    t.eq(result.raises[1].payload.blocked_reason, "live gate disabled")
+    t.eq(count_calls("nyxid proxy request"), 0)
+  end,
+
+  test_live_publish_uses_nyxid_after_account_preflight_and_calendar_ref_resolution = function()
+    mock_author_env()
+    mock_content_issue(42, [[
+type: weekly-content
+week: 2026-W31
+
+tweet-text:
+```
+FKST live publish verification for hzz780 via NyxID. Test post.
+```
+]])
+    t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
+      stdout = '{"data":{"id":"955688313951698945","name":"黄宗哲","username":"hzz780"}}',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("nyxid proxy request api-twitter-2-media /tweets -m POST", {
+      stdout = '{"data":{"id":"2071886153800929439","text":"FKST live publish verification for hzz780 via NyxID. Test post."}}',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_publish({
+      artifact_id = "artifact-1",
+      source_ref = { kind = "external", ref = repo .. "#issue/43" },
+      content_ref = "#42",
+      platform = "x",
+      channel = "live",
+      trace_id = "trace-1",
+    }, {
+      FKST_X_PUBLISH_WRITE = "1",
+      FKST_NYXID_X_SERVICE_SLUG = "api-twitter-2-media",
+      FKST_X_PUBLISH_EXPECTED_USERNAME = "hzz780",
+    })
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local receipt = result.raises[1].payload
+    t.eq(receipt.status, "published")
+    t.eq(receipt.platform_post_id, "2071886153800929439")
+    t.eq(receipt.post_uri, "https://x.com/i/web/status/2071886153800929439")
+    t.eq(receipt.account_username, "hzz780")
+    t.eq(count_calls("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET"), 1)
+    t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 1)
   end,
 }

@@ -2,6 +2,7 @@ local caps = require("import_issue_caps")
 local ports_lib = require("forge.ports")
 local saga = require("workflow.saga")
 local env = require("workflow_internal.env")
+local strings = require("contract.strings")
 
 local spec = {
   consumes = { "github-proxy.github_entity_changed" },
@@ -26,6 +27,9 @@ local function status_for(item)
   if item.kind == "weekly-content" then
     return "weekly content imported"
   end
+  if item.mode == "live" then
+    return "schedule publish live requested"
+  end
   return "schedule publish preview requested"
 end
 
@@ -49,6 +53,8 @@ local function fetched_issue_body(github, payload)
   return issue and issue.body or nil
 end
 
+local live_options
+
 local function make_department(ports)
   local handles = ports or {}
   local github = handles.github
@@ -71,7 +77,7 @@ local function make_department(ports)
     elseif item.kind == "weekly-content" then
       raise("weekly_content_imported", caps.weekly_content_imported(item))
     elseif item.kind == "schedule-publish" then
-      raise("x-publisher.x_publish_request", caps.x_publish_request(item))
+      raise("x-publisher.x_publish_request", caps.x_publish_request(item, live_options()))
     else
       error("github-auto-twitter-marketing: unknown-kind: " .. tostring(item.kind), 0)
     end
@@ -89,13 +95,24 @@ end
 local function read_env_command(name)
   if name ~= "FKST_GITHUB_BOT_LOGIN"
     and name ~= "FKST_DEVLOOP_MANAGED_BOT_LOGINS"
-    and name ~= "FKST_GITHUB_AUTHORIZED_LOGINS" then
+    and name ~= "FKST_GITHUB_AUTHORIZED_LOGINS"
+    and name ~= "FKST_NYXID_X_SERVICE_SLUG"
+    and name ~= "FKST_X_PUBLISH_EXPECTED_USERNAME"
+    and name ~= "FKST_X_PUBLISH_WRITE" then
     error("github-auto-twitter-marketing: invalid-env-name: " .. tostring(name), 0)
   end
   return 'printf %s "$' .. name .. '"'
 end
 
 local read_env = env.read_env(read_env_command, { propagate_exec_errors = true })
+live_options = function()
+  return {
+    live_write_enabled = strings.trim(read_env("FKST_X_PUBLISH_WRITE") or "") == "1",
+    nyxid_x_service = strings.trim(read_env("FKST_NYXID_X_SERVICE_SLUG") or ""),
+    expected_username = strings.trim(read_env("FKST_X_PUBLISH_EXPECTED_USERNAME") or ""),
+  }
+end
+
 local github_author_policy_env = {
   bot_login_env = "FKST_GITHUB_BOT_LOGIN",
   extra_login_envs = {

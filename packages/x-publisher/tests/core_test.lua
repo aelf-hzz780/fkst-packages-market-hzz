@@ -9,6 +9,7 @@ return {
     local ok, why = core.is_usable_request({
       artifact_id = "cmp_1:twitter:3",
       source_ref = { kind = "draft", ref = "ref-1" },
+      content_ref = "#42",
       platform = "twitter",
       channel = "main",
       dedup_key = "dedup-1",
@@ -57,6 +58,7 @@ return {
     local receipt = core.preview_receipt({
       artifact_id = "artifact-1",
       source_ref = { kind = "draft", ref = "ref-1" },
+      content_ref = "#42",
       dedup_key = "dedup-1",
       trace_id = "trace-1",
       approval_id = "approval-1",
@@ -68,6 +70,7 @@ return {
     t.is_nil(receipt.post_uri)
     t.eq(receipt.source_ref.ref, "ref-1")
     t.eq(receipt.source_ref.reference, "ref-1")
+    t.eq(receipt.content_ref, "#42")
     t.eq(receipt.dedup_key, "dedup-1")
     t.eq(receipt.trace_id, "trace-1")
     t.eq(receipt.approval_id, "approval-1")
@@ -79,5 +82,67 @@ return {
     t.eq(receipt.platform, "x")
     t.eq(receipt.status, "skipped")
     t.is_nil(receipt.post_uri)
+  end,
+  test_live_gate_requires_live_channel_write_flag_and_service_slug = function()
+    local payload = {
+      artifact_id = "artifact-1",
+      source_ref = { kind = "external", ref = "owner/repo#issue/43" },
+      content_ref = "#42",
+      channel = "live",
+    }
+
+    t.eq(core.live_gate(payload, { live_write_enabled = true, nyxid_x_service = "api-twitter-2-media" }), true)
+    t.eq(core.live_gate(payload, { live_write_enabled = false, nyxid_x_service = "api-twitter-2-media" }), false)
+    t.eq(core.live_gate(payload, { live_write_enabled = true, nyxid_x_service = "" }), false)
+    t.eq(core.live_gate({ channel = "shadow" }, { live_write_enabled = true, nyxid_x_service = "api-twitter-2-media" }), false)
+  end,
+  test_calendar_issue_ref_resolves_against_schedule_issue_repo = function()
+    local ref, why = core.content_source_ref({
+      source_ref = { kind = "external", ref = "owner/repo#issue/43" },
+      content_ref = "#42",
+    })
+
+    t.eq(why, nil)
+    t.eq(ref.kind, "external")
+    t.eq(ref.ref, "owner/repo#issue/42")
+  end,
+  test_extract_tweet_text_prefers_explicit_fenced_tweet_text = function()
+    local text, why = core.extract_tweet_text([[
+type: weekly-content
+week: 2026-W31
+
+tweet-text:
+```
+FKST live publish verification for hzz780 via NyxID. Test post.
+```
+]])
+
+    t.eq(why, nil)
+    t.eq(text, "FKST live publish verification for hzz780 via NyxID. Test post.")
+  end,
+  test_extract_tweet_text_rejects_oversized_text = function()
+    local text, why = core.extract_tweet_text("tweet: " .. string.rep("x", 281))
+
+    t.is_nil(text)
+    t.eq(why, "tweet text too long")
+  end,
+  test_live_receipt_shape_contains_x_uri_without_raw_response = function()
+    local receipt = core.live_receipt({
+      artifact_id = "artifact-1",
+      source_ref = { kind = "external", ref = "owner/repo#issue/43" },
+      content_ref = "#42",
+      trace_id = "trace-1",
+    }, {
+      id = "2071886153800929439",
+      username = "hzz780",
+      nyxid_x_service = "api-twitter-2-media",
+    })
+
+    t.eq(receipt.status, "published")
+    t.eq(receipt.platform_post_id, "2071886153800929439")
+    t.eq(receipt.post_uri, "https://x.com/i/web/status/2071886153800929439")
+    t.eq(receipt.account_username, "hzz780")
+    t.eq(receipt.nyxid_x_service, "api-twitter-2-media")
+    t.is_nil(receipt.provider_response)
   end,
 }
