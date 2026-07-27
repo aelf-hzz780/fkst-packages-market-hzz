@@ -16,9 +16,9 @@
   },
   "nyxid": {
     "xPublishCredential": "host-brokered",
-    "xPublishServiceEnv": "FKST_NYXID_X_SERVICE_SLUG",
-    "xPublishWriteSwitchEnv": "FKST_X_PUBLISH_WRITE",
-    "xPublishExpectedUsernameEnv": "FKST_X_PUBLISH_EXPECTED_USERNAME",
+    "xPublishServiceEnv": "NYXID_X_SERVICE_SLUG",
+    "xPublishWriteSwitchEnv": "X_PUBLISH_WRITE",
+    "xPublishExpectedUsernameEnv": "X_PUBLISH_EXPECTED_USERNAME",
     "verifiedHzz780Service": "api-twitter-2-media",
     "rawTokenPolicy": "forbidden-in-repo-manifest-issue-payload"
   },

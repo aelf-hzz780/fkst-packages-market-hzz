@@ -98,18 +98,32 @@ local function read_env_command(name)
     and name ~= "FKST_GITHUB_AUTHORIZED_LOGINS"
     and name ~= "FKST_NYXID_X_SERVICE_SLUG"
     and name ~= "FKST_X_PUBLISH_EXPECTED_USERNAME"
-    and name ~= "FKST_X_PUBLISH_WRITE" then
+    and name ~= "FKST_X_PUBLISH_WRITE"
+    and name ~= "NYXID_X_SERVICE_SLUG"
+    and name ~= "X_PUBLISH_EXPECTED_USERNAME"
+    and name ~= "X_PUBLISH_WRITE" then
     error("github-auto-twitter-marketing: invalid-env-name: " .. tostring(name), 0)
   end
   return 'printf %s "$' .. name .. '"'
 end
 
 local read_env = env.read_env(read_env_command, { propagate_exec_errors = true })
+local function first_non_empty_env(names)
+  for _, name in ipairs(names) do
+    local value = strings.trim(read_env(name) or "")
+    if value ~= "" then
+      return value
+    end
+  end
+  return ""
+end
+
 live_options = function()
+  local write_gate = first_non_empty_env({ "X_PUBLISH_WRITE", "FKST_X_PUBLISH_WRITE" })
   return {
-    live_write_enabled = strings.trim(read_env("FKST_X_PUBLISH_WRITE") or "") == "1",
-    nyxid_x_service = strings.trim(read_env("FKST_NYXID_X_SERVICE_SLUG") or ""),
-    expected_username = strings.trim(read_env("FKST_X_PUBLISH_EXPECTED_USERNAME") or ""),
+    live_write_enabled = write_gate == "1",
+    nyxid_x_service = first_non_empty_env({ "NYXID_X_SERVICE_SLUG", "FKST_NYXID_X_SERVICE_SLUG" }),
+    expected_username = first_non_empty_env({ "X_PUBLISH_EXPECTED_USERNAME", "FKST_X_PUBLISH_EXPECTED_USERNAME" }),
   }
 end
 

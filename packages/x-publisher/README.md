@@ -12,7 +12,7 @@ small control fields plus source pointers are present, and emit a receipt.
   provider raw responses) and sensitive fields (`token`, `bearer`, `oauth`, `secret`,
   `credential`, authorization-like names) are rejected fail-closed.
 - **posture** shadow-first: live writes require all of `channel = "live"`,
-  `FKST_X_PUBLISH_WRITE=1`, and `FKST_NYXID_X_SERVICE_SLUG=<service-slug>`.
+  `X_PUBLISH_WRITE=1`, and `NYXID_X_SERVICE_SLUG=<service-slug>`.
 
 ## Live X write contract
 
@@ -21,12 +21,17 @@ small control fields plus source pointers are present, and emit a receipt.
 Required host env for live mode:
 
 ```sh
-FKST_X_PUBLISH_WRITE=1
-FKST_NYXID_X_SERVICE_SLUG=api-twitter-2-media
-FKST_X_PUBLISH_EXPECTED_USERNAME=hzz780
+X_PUBLISH_WRITE=1
+NYXID_X_SERVICE_SLUG=api-twitter-2-media
+X_PUBLISH_EXPECTED_USERNAME=hzz780
 ```
 
-When `FKST_X_PUBLISH_EXPECTED_USERNAME` is set, the package first calls:
+Legacy `FKST_X_PUBLISH_WRITE` / `FKST_NYXID_X_SERVICE_SLUG` /
+`FKST_X_PUBLISH_EXPECTED_USERNAME` names are still accepted for older non-hosted runners. Hosted
+Environment profiles reserve the `FKST_*` prefix, so hosted installs should use the non-reserved
+names above.
+
+When `X_PUBLISH_EXPECTED_USERNAME` is set, the package first calls:
 
 ```text
 nyxid proxy request <slug> /users/me?user.fields=id,name,username -m GET

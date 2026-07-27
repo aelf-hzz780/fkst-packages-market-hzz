@@ -64,9 +64,9 @@ to the schedule issue repo and reads the weekly content issue through the GitHub
 Live mode requires host env:
 
 ```sh
-FKST_X_PUBLISH_WRITE=1
-FKST_NYXID_X_SERVICE_SLUG=api-twitter-2-media
-FKST_X_PUBLISH_EXPECTED_USERNAME=hzz780
+X_PUBLISH_WRITE=1
+NYXID_X_SERVICE_SLUG=api-twitter-2-media
+X_PUBLISH_EXPECTED_USERNAME=hzz780
 ```
 
 The username preflight is a safety guard: if NyxID resolves to any account other than `hzz780`, the

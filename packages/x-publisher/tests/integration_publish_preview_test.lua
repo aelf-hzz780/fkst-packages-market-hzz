@@ -11,13 +11,28 @@ end
 
 local function run_publish(payload, env)
   local env_values = env or {}
+  t.mock_command('printf %s "$X_PUBLISH_WRITE"', {
+    stdout = env_values.X_PUBLISH_WRITE or "",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command('printf %s "$FKST_X_PUBLISH_WRITE"', {
     stdout = env_values.FKST_X_PUBLISH_WRITE or "",
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command('printf %s "$NYXID_X_SERVICE_SLUG"', {
+    stdout = env_values.NYXID_X_SERVICE_SLUG or "",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command('printf %s "$FKST_NYXID_X_SERVICE_SLUG"', {
     stdout = env_values.FKST_NYXID_X_SERVICE_SLUG or "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$X_PUBLISH_EXPECTED_USERNAME"', {
+    stdout = env_values.X_PUBLISH_EXPECTED_USERNAME or "",
     stderr = "",
     exit_code = 0,
   })
@@ -162,6 +177,49 @@ return {
     t.eq(result.raises[1].payload.status, "blocked")
     t.eq(result.raises[1].payload.blocked_reason, "live gate disabled")
     t.eq(count_calls("nyxid proxy request"), 0)
+  end,
+
+  test_live_publish_accepts_non_reserved_environment_names = function()
+    mock_author_env()
+    mock_content_issue(42, [[
+type: weekly-content
+week: 2026-W31
+
+tweet-text:
+```
+FKST live publish verification for hzz780 via NyxID. Test post.
+```
+]])
+    t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
+      stdout = '{"data":{"id":"955688313951698945","name":"黄宗哲","username":"hzz780"}}',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("nyxid proxy request api-twitter-2-media /tweets -m POST", {
+      stdout = '{"data":{"id":"2071886153800929439","text":"FKST live publish verification for hzz780 via NyxID. Test post."}}',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_publish({
+      artifact_id = "artifact-1",
+      source_ref = { kind = "external", ref = repo .. "#issue/43" },
+      content_ref = "#42",
+      platform = "x",
+      channel = "live",
+      trace_id = "trace-1",
+    }, {
+      X_PUBLISH_WRITE = "1",
+      NYXID_X_SERVICE_SLUG = "api-twitter-2-media",
+      X_PUBLISH_EXPECTED_USERNAME = "hzz780",
+    })
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local receipt = result.raises[1].payload
+    t.eq(receipt.status, "published")
+    t.eq(receipt.platform_post_id, "2071886153800929439")
+    t.eq(receipt.account_username, "hzz780")
   end,
 
   test_live_publish_uses_nyxid_after_account_preflight_and_calendar_ref_resolution = function()

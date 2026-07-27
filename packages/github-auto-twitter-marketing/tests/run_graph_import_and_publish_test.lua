@@ -58,18 +58,33 @@ local function mock_env(opts)
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command('printf %s "$FKST_X_PUBLISH_WRITE"', {
+    t.mock_command('printf %s "$X_PUBLISH_WRITE"', {
       stdout = write_value,
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command('printf %s "$FKST_NYXID_X_SERVICE_SLUG"', {
+    t.mock_command('printf %s "$FKST_X_PUBLISH_WRITE"', {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command('printf %s "$NYXID_X_SERVICE_SLUG"', {
       stdout = service_value,
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command('printf %s "$FKST_X_PUBLISH_EXPECTED_USERNAME"', {
+    t.mock_command('printf %s "$FKST_NYXID_X_SERVICE_SLUG"', {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command('printf %s "$X_PUBLISH_EXPECTED_USERNAME"', {
       stdout = username_value,
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command('printf %s "$FKST_X_PUBLISH_EXPECTED_USERNAME"', {
+      stdout = "",
       stderr = "",
       exit_code = 0,
     })
