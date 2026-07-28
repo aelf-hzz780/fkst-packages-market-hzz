@@ -10,6 +10,7 @@ local function load_department(path, module_name)
 end
 
 local departments = conformance.loaded_departments({
+  load_department("departments/entity_view_probe_result_sink/main.lua", "departments.entity_view_probe_result_sink.main"),
   load_department("departments/github_comment/main.lua", "departments.github_comment.main"),
   load_department("departments/github_issue_blocked_by/main.lua", "departments.github_issue_blocked_by.main"),
   load_department("departments/github_issue_create_anchor/main.lua", "departments.github_issue_create_anchor.main"),
@@ -116,6 +117,11 @@ end
 local function payload_for_queue(_path, queue)
   local payloads = {
     entity_view_probe = entity_view_probe_payload(),
+    entity_view_probe_result = {
+      schema = "github-proxy.entity-view-probe-result.v1",
+      source_ref = source_ref("owner/x#issue/42"),
+      dedup_key = "github-proxy/namespaced/entity-view-probe-result",
+    },
     github_issue_blocked_by_request = blocked_by_payload(),
     github_issue_comment_request = issue_comment_payload(),
     github_issue_create_request = issue_create_payload(),

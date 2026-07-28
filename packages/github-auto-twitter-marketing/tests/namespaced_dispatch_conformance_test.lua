@@ -64,11 +64,46 @@ end
 
 local departments = conformance.loaded_departments({
   load_department(),
+  load_sink_department("optional_receipt_sink"),
   load_sink_department("strategy_import_sink"),
   load_sink_department("weekly_content_sink"),
 })
 
 local function payload_for_queue(_path, queue)
+  if queue == "github-proxy.github_comment_written" then
+    return {
+      schema = "github-proxy.comment-written.v1",
+      comment_id = "comment-1",
+      source_ref = source_ref(),
+      dedup_key = "github-comment-written/1",
+    }
+  end
+  if queue == "x-publisher.x_published" then
+    return {
+      schema = "x-publisher.x-published.v1",
+      artifact_id = "auto-twitter-marketing/chronoai/2026-W31/schedule",
+      status = "published",
+      source_ref = source_ref(),
+      dedup_key = "x-published/1",
+    }
+  end
+  if queue == "lark-approval.approval_decided" then
+    return {
+      schema = "lark-approval.approval-decided.v1",
+      decision_id = "approval-1",
+      status = "approved",
+      source_ref = source_ref(),
+      dedup_key = "approval-decided/1",
+    }
+  end
+  if queue == "social-metrics.social_metric" then
+    return {
+      schema = "social-metrics.social-metric.v1",
+      metric_id = "metric-1",
+      source_ref = source_ref(),
+      dedup_key = "social-metric/1",
+    }
+  end
   if queue == "strategy_imported" or queue == "github-auto-twitter-marketing.strategy_imported" then
     return {
       schema = "auto-twitter-marketing.strategy-imported.v1",

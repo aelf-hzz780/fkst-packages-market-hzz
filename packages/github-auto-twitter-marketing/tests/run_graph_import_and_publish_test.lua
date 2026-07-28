@@ -143,6 +143,16 @@ local function observed_issue_event(issue_number)
   return event
 end
 
+local function receipt_event(queue, payload)
+  payload.source_ref = payload.source_ref or source_ref(90)
+  payload.dedup_key = payload.dedup_key or queue .. "/dedup"
+  return {
+    queue = queue,
+    payload = payload,
+    source_ref = payload.source_ref,
+  }
+end
+
 local function run_issue(issue_number, body)
   mock_env()
   mock_issue_read(issue_number, body)
@@ -150,6 +160,42 @@ local function run_issue(issue_number, body)
 end
 
 return {
+  test_optional_receipt_sink_acks_optional_cross_package_outputs = function()
+    local comment_trace = graph.require_quiescent(graph.run(receipt_event("github-proxy.github_comment_written", {
+      schema = "github-proxy.comment-written.v1",
+      comment_id = "comment-1",
+    }), { max_steps = 4 }))
+    graph.assert_covers(comment_trace, {
+      "github-proxy.github_comment_written -> github-auto-twitter-marketing.optional_receipt_sink",
+    })
+
+    local x_trace = graph.require_quiescent(graph.run(receipt_event("x-publisher.x_published", {
+      schema = "x-publisher.x-published.v1",
+      artifact_id = "auto-twitter-marketing/chronoai/2026-W31/schedule",
+      status = "published",
+    }), { max_steps = 4 }))
+    graph.assert_covers(x_trace, {
+      "x-publisher.x_published -> github-auto-twitter-marketing.optional_receipt_sink",
+    })
+
+    local approval_trace = graph.require_quiescent(graph.run(receipt_event("lark-approval.approval_decided", {
+      schema = "lark-approval.approval-decided.v1",
+      decision_id = "approval-1",
+      status = "approved",
+    }), { max_steps = 4 }))
+    graph.assert_covers(approval_trace, {
+      "lark-approval.approval_decided -> github-auto-twitter-marketing.optional_receipt_sink",
+    })
+
+    local metrics_trace = graph.require_quiescent(graph.run(receipt_event("social-metrics.social_metric", {
+      schema = "social-metrics.social-metric.v1",
+      metric_id = "metric-1",
+    }), { max_steps = 4 }))
+    graph.assert_covers(metrics_trace, {
+      "social-metrics.social_metric -> github-auto-twitter-marketing.optional_receipt_sink",
+    })
+  end,
+
   test_strategy_issue_imports_strategy_and_comments_receipt = function()
     local trace = run_issue(41, [[
 type: strategy
