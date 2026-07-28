@@ -5,7 +5,7 @@ local env = require("workflow_internal.env")
 local strings = require("contract.strings")
 
 local spec = {
-  consumes = { "github-proxy.github_entity_changed" },
+  consumes = { "github-proxy.github_entity_changed", "github-proxy.github_issue_observed" },
   produces = {
     "strategy_imported",
     "weekly_content_imported",
@@ -33,6 +33,10 @@ local function status_for(item)
   return "schedule publish preview requested"
 end
 
+local function pending_status(decision)
+  return "schedule publish pending until " .. tostring(decision and decision.scheduled_at or "unknown")
+end
+
 local function issue_source_ref(source_ref)
   local ref = type(source_ref) == "table" and (source_ref.ref or source_ref.reference) or nil
   if type(source_ref) ~= "table"
@@ -48,7 +52,7 @@ local function issue_source_ref(source_ref)
   }
 end
 
-local function fetched_issue_body(github, payload)
+local function fetched_issue(github, payload)
   if type(payload) ~= "table" or payload.body ~= nil or payload.controls ~= nil then
     return nil
   end
@@ -66,7 +70,20 @@ local function fetched_issue_body(github, payload)
     log.warn("github-auto-twitter-marketing dept=import_issue tag=FETCH_SKIP reason=github issue read failed")
     return nil
   end
-  return issue and issue.body or nil
+  return issue
+end
+
+local function observed_event(event)
+  return event and event.queue == "github-proxy.github_issue_observed"
+end
+
+local function classify_event(payload, current_issue)
+  local opts = {}
+  if current_issue ~= nil then
+    opts.issue_body = current_issue.body
+    opts.issue_labels = current_issue.labels
+  end
+  return caps.classify_issue(payload, opts)
 end
 
 local live_options
@@ -77,14 +94,18 @@ local function make_department(ports)
 
   local function act(event)
     local payload = event.payload or {}
-    local issue_body = nil
+    local current_issue = nil
     if github ~= nil then
-      issue_body = fetched_issue_body(github, payload)
+      current_issue = fetched_issue(github, payload)
     end
 
-    local item, why = caps.classify_issue(payload, { issue_body = issue_body })
+    local item, why = classify_event(payload, current_issue)
     if item == nil then
       log.info("github-auto-twitter-marketing dept=import_issue tag=SKIP reason=" .. tostring(why))
+      return
+    end
+    if observed_event(event) and item.kind ~= "schedule-publish" then
+      log.info("github-auto-twitter-marketing dept=import_issue tag=SKIP reason=observed non-schedule")
       return
     end
 
@@ -93,7 +114,24 @@ local function make_department(ports)
     elseif item.kind == "weekly-content" then
       raise("weekly_content_imported", caps.weekly_content_imported(item))
     elseif item.kind == "schedule-publish" then
-      raise("x-publisher.x_publish_request", caps.x_publish_request(item, live_options()))
+      local decision = caps.schedule_decision(item, now())
+      if not decision.due then
+        log.info("github-auto-twitter-marketing dept=import_issue tag=SCHEDULE_WAIT reason=" .. tostring(decision.reason)
+          .. " scheduled_at=" .. tostring(decision.scheduled_at))
+        if not observed_event(event) then
+          raise("github-proxy.github_issue_comment_request", caps.status_comment(item, pending_status(decision)))
+        end
+        return
+      end
+      local ran = once(caps.schedule_once_key(item, decision), function()
+        raise("x-publisher.x_publish_request", caps.x_publish_request(item, live_options(), decision))
+        raise("github-proxy.github_issue_comment_request", caps.status_comment(item, status_for(item)))
+      end)
+      if not ran then
+        log.info("github-auto-twitter-marketing dept=import_issue tag=SCHEDULE_SKIP reason=already-dispatched occurrence="
+          .. tostring(decision.occurrence_id))
+      end
+      return
     else
       error("github-auto-twitter-marketing: unknown-kind: " .. tostring(item.kind), 0)
     end

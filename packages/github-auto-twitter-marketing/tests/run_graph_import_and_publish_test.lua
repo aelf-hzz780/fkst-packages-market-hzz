@@ -127,6 +127,22 @@ local function issue_event(issue_number)
   }
 end
 
+local function observed_issue_event(issue_number)
+  local event = issue_event(issue_number)
+  event.queue = "github-proxy.github_issue_observed"
+  event.payload = {
+    schema = "github-proxy.issue-observed.v1",
+    type = "issue",
+    repo = repo,
+    number = issue_number,
+    updated_at = "2026-07-24T09:00:0" .. tostring(issue_number % 10) .. "Z",
+    dedup_key = "github-issue-observed/" .. repo .. "/" .. tostring(issue_number) .. "/probe",
+    source = "gh",
+    source_ref = source_ref(issue_number),
+  }
+  return event
+end
+
 local function run_issue(issue_number, body)
   mock_env()
   mock_issue_read(issue_number, body)
@@ -198,6 +214,52 @@ scheduled-at: 2026-07-25T09:00:00Z
     t.eq(receipt.payload.status, "preview")
     t.eq(receipt.payload.platform, "x")
     t.eq(receipt.payload.source_ref.ref, repo .. "#issue/43")
+  end,
+
+  test_future_schedule_publish_issue_waits_without_x_request = function()
+    local trace = run_issue(45, [[
+type: schedule-publish
+project: chronoai
+week: 2026-W31
+calendar-ref: #42
+mode: shadow
+scheduled-at: 2099-07-25T09:00:00Z
+]])
+
+    graph.assert_covers(trace, {
+      "github-proxy.github_entity_changed -> github-auto-twitter-marketing.import_issue",
+    })
+
+    t.is_nil(graph.find_raise(trace, "x-publisher.x_publish_request"))
+    local comment = graph.require_raise(trace, "github-proxy.github_issue_comment_request")
+    t.is_true(comment.payload.body:find("schedule publish pending until 2099-07-25T09:00:00Z", 1, true) ~= nil)
+  end,
+
+  test_observed_daily_schedule_issue_dispatches_when_due = function()
+    mock_env()
+    mock_issue_read(46, [[
+type: schedule-publish
+project: chronoai
+week: 2026-W31
+calendar-ref: #42
+mode: shadow
+recurrence: daily
+time: 00:00
+timezone: Asia/Shanghai
+]])
+
+    local trace = graph.require_quiescent(graph.run(observed_issue_event(46), { max_steps = 10 }))
+
+    graph.assert_covers(trace, {
+      "github-proxy.github_issue_observed -> github-auto-twitter-marketing.import_issue",
+      "x-publisher.x_publish_request -> x-publisher.publish_x",
+    })
+
+    local request = graph.require_raise(trace, "x-publisher.x_publish_request")
+    t.eq(request.payload.channel, "shadow")
+    t.eq(request.payload.metadata.schedule_type, "daily")
+    t.is_true(tostring(request.payload.scheduled_at or ""):find("T00:00:00+08:00", 1, true) ~= nil)
+    t.is_true(tostring(request.payload.dedup_key or ""):find("/x-publish", 1, true) ~= nil)
   end,
 
   test_live_schedule_publish_issue_flows_to_x_publisher_live_request = function()

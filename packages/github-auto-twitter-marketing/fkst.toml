@@ -1,6 +1,6 @@
 kind = "package.composed"
 name = "github-auto-twitter-marketing"
-persistence_class = "composed_judgment_pipeline"
+persistence_class = "saga"
 
 [code]
 root = "."
@@ -10,6 +10,9 @@ libraries = ["contract", "workflow", "workflow_internal", "testkit", "testkit_in
 
 [event_deps]
 packages = ["github-proxy", "x-publisher", "lark-approval", "social-metrics"]
+
+[conformance]
+function = "core.saga_conformance_errors"
 
 [github]
 work_labels = ["auto-twitter-marketing"]

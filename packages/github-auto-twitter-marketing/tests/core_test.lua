@@ -37,6 +37,9 @@ week: 2026-W31
 calendar-ref: #124
 mode: shadow
 scheduled-at: 2026-07-25T09:00:00Z
+recurrence: daily
+time: 11:10
+timezone: Asia/Shanghai
 ]])
 
     t.eq(fields.type, "schedule-publish")
@@ -45,6 +48,9 @@ scheduled-at: 2026-07-25T09:00:00Z
     t.eq(fields["calendar-ref"], "#124")
     t.eq(fields.mode, "shadow")
     t.eq(fields["scheduled-at"], "2026-07-25T09:00:00Z")
+    t.eq(fields.recurrence, "daily")
+    t.eq(fields.time, "11:10")
+    t.eq(fields.timezone, "Asia/Shanghai")
   end,
 
   test_classify_strategy_issue_from_body = function()
@@ -126,6 +132,72 @@ scheduled-at: 2026-07-25T09:00:00Z
     t.is_nil(request.body)
     t.is_nil(request.text)
     t.is_nil(request.token)
+  end,
+
+  test_one_shot_schedule_waits_until_scheduled_at = function()
+    local classified = core.classify_issue(issue(), {
+      issue_body = [[
+type: schedule-publish
+project: chronoai
+week: 2026-W31
+calendar-ref: #124
+mode: shadow
+scheduled-at: 2026-07-25T09:00:00Z
+]],
+    })
+
+    local before = core.schedule_decision(classified, core.parse_iso8601_seconds("2026-07-25T08:59:59Z"))
+    local at_time = core.schedule_decision(classified, core.parse_iso8601_seconds("2026-07-25T09:00:00Z"))
+
+    t.eq(before.due, false)
+    t.eq(before.reason, "not due")
+    t.eq(at_time.due, true)
+    t.eq(at_time.occurrence_id, "2026-07-25T09:00:00Z")
+  end,
+
+  test_daily_schedule_uses_timezone_local_occurrence = function()
+    local classified = core.classify_issue(issue(), {
+      issue_body = [[
+type: schedule-publish
+project: chronoai
+week: 2026-W31
+calendar-ref: #124
+mode: shadow
+recurrence: daily
+time: 11:10
+timezone: Asia/Shanghai
+]],
+    })
+
+    local before = core.schedule_decision(classified, core.parse_iso8601_seconds("2026-07-28T03:09:59Z"))
+    local due = core.schedule_decision(classified, core.parse_iso8601_seconds("2026-07-28T03:10:00Z"))
+    local request = core.x_publish_request(classified, nil, due)
+
+    t.eq(classified.recurrence, "daily")
+    t.eq(before.due, false)
+    t.eq(due.due, true)
+    t.eq(due.scheduled_at, "2026-07-28T11:10:00+08:00")
+    t.eq(due.occurrence_id, "2026-07-28T11:10:00+08:00")
+    t.eq(request.scheduled_at, "2026-07-28T11:10:00+08:00")
+    t.eq(request.metadata.schedule_type, "daily")
+    t.eq(request.metadata.occurrence_id, "2026-07-28T11:10:00+08:00")
+    t.is_true(request.dedup_key:find("2026-07-28T11-10-00-08-00", 1, true) ~= nil)
+  end,
+
+  test_daily_schedule_requires_explicit_timezone = function()
+    local classified, why = core.classify_issue(issue(), {
+      issue_body = [[
+type: schedule-publish
+project: chronoai
+week: 2026-W31
+calendar-ref: #124
+recurrence: daily
+time: 11:10
+]],
+    })
+
+    t.is_nil(classified)
+    t.eq(why, "missing recurring schedule fields")
   end,
 
   test_live_publish_requires_nyxid_service_gate = function()

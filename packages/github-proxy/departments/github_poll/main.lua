@@ -4,6 +4,7 @@ local saga = require("workflow.saga")
 local spec = {
   consumes = { "github_poll_tick" },
   produces = { "github_entity_changed", "github_issue_observed" },
+  fanout = { "github_entity_changed", "github_issue_observed" },
   stall_window = "30s",
 }
 

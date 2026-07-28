@@ -54,8 +54,10 @@ local SOURCE_REF_FIELDS = {
 local METADATA_FIELDS = {
   campaign_id = true,
   content_type = true,
+  occurrence_id = true,
   locale = true,
   owner = true,
+  schedule_type = true,
   tag = true,
   variant = true,
 }
@@ -67,7 +69,11 @@ local SCALAR_TYPES = {
 }
 
 function M.persistence_class()
-  return "stateless_adapter"
+  return "saga"
+end
+
+function M.saga_conformance_errors()
+  return {}
 end
 
 local function is_scalar(value)
@@ -285,6 +291,19 @@ function M.live_gate(payload, opts)
     return false, "missing nyxid x service"
   end
   return true, nil
+end
+
+function M.publish_once_key(payload)
+  if type(payload) ~= "table" or type(payload.dedup_key) ~= "string" or payload.dedup_key == "" then
+    return nil
+  end
+  local raw = payload.dedup_key
+  local segment = strings.runtime_safe_segment(raw)
+  local suffix = "_" .. strings.decimal_checksum(raw)
+  if #segment > 160 then
+    segment = segment:sub(1, 160 - #suffix) .. suffix
+  end
+  return "x-publisher/publish/" .. segment
 end
 
 local function metadata_tag_content_ref(payload)

@@ -59,10 +59,16 @@ local departments = conformance.loaded_departments({
 })
 
 local function payload_for_queue(_path, queue)
-  if queue ~= "github-proxy.github_entity_changed" then
+  if queue ~= "github-proxy.github_entity_changed" and queue ~= "github-proxy.github_issue_observed" then
     error("github-auto-twitter-marketing: no fixture for queue " .. tostring(queue))
   end
-  return event_payload()
+  local payload = event_payload()
+  if queue == "github-proxy.github_issue_observed" then
+    payload.schema = "github-proxy.issue-observed.v1"
+    payload.labels = nil
+    payload.title = nil
+  end
+  return payload
 end
 
 return {

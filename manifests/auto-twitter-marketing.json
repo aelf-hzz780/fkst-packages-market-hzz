@@ -26,8 +26,13 @@
     "strategyIssueType": "strategy",
     "weeklyContentIssueType": "weekly-content",
     "schedulePublishIssueType": "schedule-publish",
+    "recurringSchedulePublishIssueType": "recurring-schedule-publish",
+    "recurrenceField": "recurrence",
+    "dailyPublishTimeField": "time",
+    "timezoneField": "timezone",
     "livePublishMode": "live",
     "contentRefField": "calendar-ref",
-    "mvpPublishSurface": "text-only-tweet"
+    "mvpPublishSurface": "text-only-tweet",
+    "scheduleDispatch": "github-observed-resync"
   }
 }

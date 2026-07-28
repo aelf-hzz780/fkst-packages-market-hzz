@@ -72,6 +72,13 @@ local function block(payload, reason)
   raise("x_published", publish_caps.blocked_receipt(payload, reason))
 end
 
+local function skip_duplicate(payload)
+  local receipt = publish_caps.preview_receipt(payload, "skipped")
+  receipt.skipped_reason = "duplicate publish dedup_key"
+  log.info("x-publisher dept=publish_x tag=SKIP_DUPLICATE artifact_id=" .. tostring(payload.artifact_id))
+  raise("x_published", receipt)
+end
+
 local function preflight_username(payload, options)
   if options.expected_username == "" then
     return nil, nil
@@ -169,6 +176,12 @@ local function make_department(ports)
       return
     end
 
+    local publish_once_key = publish_caps.publish_once_key(payload)
+    if publish_once_key == nil then
+      block(payload, "missing dedup_key")
+      return
+    end
+
     local username, username_why = preflight_username(payload, options)
     if username_why ~= nil then
       block(payload, username_why)
@@ -181,14 +194,19 @@ local function make_department(ports)
       return
     end
 
-    local receipt, publish_why = publish_tweet(payload, options, username, tweet_text)
-    if receipt == nil then
-      block(payload, publish_why)
-      return
+    local ran = once(publish_once_key, function()
+      local receipt, publish_why = publish_tweet(payload, options, username, tweet_text)
+      if receipt == nil then
+        block(payload, publish_why)
+        return
+      end
+      log.info("x-publisher dept=publish_x tag=PUBLISHED artifact_id=" .. tostring(payload.artifact_id)
+        .. " post_uri=" .. tostring(receipt.post_uri))
+      raise("x_published", receipt)
+    end)
+    if not ran then
+      skip_duplicate(payload)
     end
-    log.info("x-publisher dept=publish_x tag=PUBLISHED artifact_id=" .. tostring(payload.artifact_id)
-      .. " post_uri=" .. tostring(receipt.post_uri))
-    raise("x_published", receipt)
   end
 
   return saga.department(spec, { done = done, act = act, name = "publish_x" })

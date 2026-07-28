@@ -164,6 +164,7 @@ return {
       content_ref = "#42",
       platform = "x",
       channel = "live",
+      dedup_key = "dedup-live-missing-gate",
       trace_id = "trace-1",
     }, {
       FKST_X_PUBLISH_WRITE = "",
@@ -207,6 +208,7 @@ FKST live publish verification for hzz780 via NyxID. Test post.
       content_ref = "#42",
       platform = "x",
       channel = "live",
+      dedup_key = "dedup-live-env",
       trace_id = "trace-1",
     }, {
       X_PUBLISH_WRITE = "1",
@@ -250,6 +252,7 @@ FKST live publish verification for hzz780 via NyxID. Test post.
       content_ref = "#42",
       platform = "x",
       channel = "live",
+      dedup_key = "dedup-live-calendar",
       trace_id = "trace-1",
     }, {
       FKST_X_PUBLISH_WRITE = "1",
@@ -265,6 +268,68 @@ FKST live publish verification for hzz780 via NyxID. Test post.
     t.eq(receipt.post_uri, "https://x.com/i/web/status/2071886153800929439")
     t.eq(receipt.account_username, "hzz780")
     t.eq(count_calls("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET"), 1)
+    t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 1)
+  end,
+
+  test_live_publish_duplicate_dedup_key_skips_second_post = function()
+    local suffix = tostring(now())
+    local runtime_root = "/tmp/fkst-marketing-test/x-publisher/live-once-" .. suffix
+    local dedup_key = "dedup-live-once-" .. suffix
+    local function run_once()
+      mock_author_env()
+      mock_content_issue(42, [[
+type: weekly-content
+week: 2026-W31
+
+tweet-text:
+```
+FKST live publish verification for hzz780 via NyxID. Test post.
+```
+]])
+      t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
+        stdout = '{"data":{"id":"955688313951698945","name":"黄宗哲","username":"hzz780"}}',
+        stderr = "",
+        exit_code = 0,
+      })
+      t.mock_command("nyxid proxy request api-twitter-2-media /tweets -m POST", {
+        stdout = '{"data":{"id":"2071886153800929439","text":"FKST live publish verification for hzz780 via NyxID. Test post."}}',
+        stderr = "",
+        exit_code = 0,
+      })
+      local env_values = {
+        FKST_X_PUBLISH_WRITE = "1",
+        FKST_NYXID_X_SERVICE_SLUG = "api-twitter-2-media",
+        FKST_X_PUBLISH_EXPECTED_USERNAME = "hzz780",
+      }
+      t.mock_command('printf %s "$X_PUBLISH_WRITE"', { stdout = "", stderr = "", exit_code = 0 })
+      t.mock_command('printf %s "$FKST_X_PUBLISH_WRITE"', { stdout = env_values.FKST_X_PUBLISH_WRITE, stderr = "", exit_code = 0 })
+      t.mock_command('printf %s "$NYXID_X_SERVICE_SLUG"', { stdout = "", stderr = "", exit_code = 0 })
+      t.mock_command('printf %s "$FKST_NYXID_X_SERVICE_SLUG"', { stdout = env_values.FKST_NYXID_X_SERVICE_SLUG, stderr = "", exit_code = 0 })
+      t.mock_command('printf %s "$X_PUBLISH_EXPECTED_USERNAME"', { stdout = "", stderr = "", exit_code = 0 })
+      t.mock_command('printf %s "$FKST_X_PUBLISH_EXPECTED_USERNAME"', { stdout = env_values.FKST_X_PUBLISH_EXPECTED_USERNAME, stderr = "", exit_code = 0 })
+      return t.run_department("departments/publish_x/main.lua", event({
+        artifact_id = "artifact-once",
+        source_ref = { kind = "external", ref = repo .. "#issue/43" },
+        content_ref = "#42",
+        platform = "x",
+        channel = "live",
+        dedup_key = dedup_key,
+        trace_id = "trace-once",
+      }), {
+        env = {
+          FKST_RUNTIME_ROOT = runtime_root,
+          FKST_DURABLE_ROOT = "/tmp/fkst-marketing-test/x-publisher/live-once-durable",
+        },
+      })
+    end
+
+    local first = run_once()
+    local second = run_once()
+
+    t.eq(first.exit_code, 0)
+    t.eq(second.exit_code, 0)
+    t.eq(first.raises[1].payload.status, "published")
+    t.eq(second.raises[1].payload.status, "skipped")
     t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 1)
   end,
 }

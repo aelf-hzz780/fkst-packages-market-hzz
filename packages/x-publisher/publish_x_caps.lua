@@ -9,6 +9,7 @@ return {
   parse_nyxid_tweet_id = core.parse_nyxid_tweet_id,
   parse_nyxid_username = core.parse_nyxid_username,
   preview_receipt = core.preview_receipt,
+  publish_once_key = core.publish_once_key,
   tweet_body_json = core.tweet_body_json,
   validate_publish_request = core.validate_publish_request,
 }

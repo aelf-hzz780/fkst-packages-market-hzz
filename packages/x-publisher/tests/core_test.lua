@@ -2,8 +2,8 @@ local core = require("core")
 local t = fkst.test
 
 return {
-  test_persistence_class_is_stateless_adapter = function()
-    t.eq(core.persistence_class(), "stateless_adapter")
+  test_persistence_class_is_saga = function()
+    t.eq(core.persistence_class(), "saga")
   end,
   test_usable_request_accepts_complete_payload = function()
     local ok, why = core.is_usable_request({
@@ -16,7 +16,13 @@ return {
       trace_id = "trace-1",
       approval_id = "approval-1",
       scheduled_at = "2026-06-24T12:00:00Z",
-      metadata = { campaign_id = "camp-1", locale = "en-US", variant = "a" },
+      metadata = {
+        campaign_id = "camp-1",
+        locale = "en-US",
+        occurrence_id = "2026-07-28T11:10:00+08:00",
+        schedule_type = "daily",
+        variant = "a",
+      },
     })
     t.eq(ok, true)
     t.is_nil(why)
@@ -95,6 +101,16 @@ return {
     t.eq(core.live_gate(payload, { live_write_enabled = false, nyxid_x_service = "api-twitter-2-media" }), false)
     t.eq(core.live_gate(payload, { live_write_enabled = true, nyxid_x_service = "" }), false)
     t.eq(core.live_gate({ channel = "shadow" }, { live_write_enabled = true, nyxid_x_service = "api-twitter-2-media" }), false)
+  end,
+  test_publish_once_key_is_runtime_safe = function()
+    local key = core.publish_once_key({
+      dedup_key = "auto-twitter-marketing/chronoai/2026-W31/schedule/owner/repo#issue/43/2026-07-28T11:10:00+08:00/x-publish",
+    })
+
+    t.is_true(key:find("^x%-publisher/publish/") ~= nil)
+    t.is_true(key:find("#", 1, true) == nil)
+    t.is_true(key:find(":", 1, true) == nil)
+    t.is_true(key:find("+", 1, true) == nil)
   end,
   test_calendar_issue_ref_resolves_against_schedule_issue_repo = function()
     local ref, why = core.content_source_ref({

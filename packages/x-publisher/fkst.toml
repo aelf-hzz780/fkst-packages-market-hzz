@@ -1,6 +1,6 @@
 kind = "package"
 name = "x-publisher"
-persistence_class = "stateless_adapter"
+persistence_class = "saga"
 
 [code]
 root = "."
@@ -11,4 +11,5 @@ libraries = ["contract", "forge", "workflow", "workflow_internal", "testkit"]
 # Package-owned conformance — travels with the package; the engine runs it whenever x-publisher
 # is an active package root (fkst-packages self-conformance AND any host repo that composes it).
 [conformance]
+function = "core.saga_conformance_errors"
 pack = "conformance/pack.toml"
