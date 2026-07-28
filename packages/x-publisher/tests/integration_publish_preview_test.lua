@@ -1,6 +1,13 @@
 local t = fkst.test
 
 local repo = "owner/repo"
+local run_counter = 0
+
+local function unique_root(label)
+  run_counter = run_counter + 1
+  return "/tmp/fkst-marketing-test/x-publisher/" .. tostring(label)
+    .. "-" .. tostring(now()) .. "-" .. tostring(run_counter)
+end
 
 local function event(payload)
   return {
@@ -43,8 +50,8 @@ local function run_publish(payload, env)
   })
   return t.run_department("departments/publish_x/main.lua", event(payload), {
     env = {
-      FKST_RUNTIME_ROOT = "/tmp/fkst-marketing-test/x-publisher/preview",
-      FKST_DURABLE_ROOT = "/tmp/fkst-marketing-test/x-publisher/durable",
+      FKST_RUNTIME_ROOT = unique_root("preview-rt"),
+      FKST_DURABLE_ROOT = unique_root("preview-durable"),
     },
   })
 end
@@ -274,6 +281,7 @@ FKST live publish verification for hzz780 via NyxID. Test post.
   test_live_publish_duplicate_dedup_key_skips_second_post = function()
     local suffix = tostring(now())
     local runtime_root = "/tmp/fkst-marketing-test/x-publisher/live-once-" .. suffix
+    local durable_root = "/tmp/fkst-marketing-test/x-publisher/live-once-durable-" .. suffix
     local dedup_key = "dedup-live-once-" .. suffix
     local function run_once()
       mock_author_env()
@@ -318,7 +326,7 @@ FKST live publish verification for hzz780 via NyxID. Test post.
       }), {
         env = {
           FKST_RUNTIME_ROOT = runtime_root,
-          FKST_DURABLE_ROOT = "/tmp/fkst-marketing-test/x-publisher/live-once-durable",
+          FKST_DURABLE_ROOT = durable_root,
         },
       })
     end
