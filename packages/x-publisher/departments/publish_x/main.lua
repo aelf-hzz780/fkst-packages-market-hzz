@@ -15,17 +15,20 @@ local spec = {
   retry = false,
 }
 
-local ALLOWED_ENV = {
+local VALUE_ENV = {
   FKST_DEVLOOP_MANAGED_BOT_LOGINS = true,
   FKST_GITHUB_AUTHORIZED_LOGINS = true,
   FKST_GITHUB_BOT_LOGIN = true,
   FKST_NYXID_X_SERVICE_SLUG = true,
   FKST_X_PUBLISH_EXPECTED_USERNAME = true,
   FKST_X_PUBLISH_WRITE = true,
-  NYXID_ACCESS_TOKEN = true,
   NYXID_X_SERVICE_SLUG = true,
   X_PUBLISH_EXPECTED_USERNAME = true,
   X_PUBLISH_WRITE = true,
+}
+
+local PRESENCE_ENV = {
+  ["NYXID_ACCESS_TOKEN"] = true,
 }
 
 local function done(_event)
@@ -33,7 +36,7 @@ local function done(_event)
 end
 
 local function read_env_command(name)
-  if not ALLOWED_ENV[name] then
+  if not VALUE_ENV[name] then
     error("x-publisher: invalid-env-name: " .. tostring(name), 0)
   end
   return 'printf %s "$' .. name .. '"'
@@ -42,7 +45,7 @@ end
 local read_env = env.read_env(read_env_command, { propagate_exec_errors = true })
 
 local function read_env_presence_command(name)
-  if not ALLOWED_ENV[name] then
+  if not PRESENCE_ENV[name] then
     error("x-publisher: invalid-env-name: " .. tostring(name), 0)
   end
   return 'if [ -n "$' .. name .. '" ]; then printf 1; else printf 0; fi'

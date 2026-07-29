@@ -243,7 +243,7 @@ return {
       X_PUBLISH_WRITE = "1",
       NYXID_X_SERVICE_SLUG = "api-twitter-2-media",
       X_PUBLISH_EXPECTED_USERNAME = "hzz780",
-      NYXID_ACCESS_TOKEN = "test-agent-key",
+      ["NYXID_ACCESS_TOKEN"] = "test-agent-key",
     })
 
     t.eq(result.exit_code, 0)
@@ -251,6 +251,7 @@ return {
     t.eq(result.raises[1].queue, "x_published")
     t.eq(result.raises[1].payload.status, "blocked")
     t.eq(result.raises[1].payload.blocked_reason, "nyxid cli unavailable")
+    t.eq(count_calls('printf %s "$NYXID_ACCESS_TOKEN"'), 0)
     t.eq(count_calls("nyxid proxy request"), 0)
   end,
 
@@ -289,7 +290,7 @@ FKST live publish verification for hzz780 via NyxID. Test post.
       X_PUBLISH_WRITE = "1",
       NYXID_X_SERVICE_SLUG = "api-twitter-2-media",
       X_PUBLISH_EXPECTED_USERNAME = "hzz780",
-      NYXID_ACCESS_TOKEN = "test-agent-key",
+      ["NYXID_ACCESS_TOKEN"] = "test-agent-key",
     })
 
     t.eq(result.exit_code, 0)
@@ -335,7 +336,7 @@ FKST live publish verification for hzz780 via NyxID. Test post.
       FKST_X_PUBLISH_WRITE = "1",
       FKST_NYXID_X_SERVICE_SLUG = "api-twitter-2-media",
       FKST_X_PUBLISH_EXPECTED_USERNAME = "hzz780",
-      NYXID_ACCESS_TOKEN = "test-agent-key",
+      ["NYXID_ACCESS_TOKEN"] = "test-agent-key",
     })
 
     t.eq(result.exit_code, 0)
@@ -380,7 +381,7 @@ FKST live publish verification for hzz780 via NyxID. Test post.
         FKST_X_PUBLISH_WRITE = "1",
         FKST_NYXID_X_SERVICE_SLUG = "api-twitter-2-media",
         FKST_X_PUBLISH_EXPECTED_USERNAME = "hzz780",
-        NYXID_ACCESS_TOKEN = "test-agent-key",
+        ["NYXID_ACCESS_TOKEN"] = "test-agent-key",
       }
       t.mock_command('printf %s "$X_PUBLISH_WRITE"', { stdout = "", stderr = "", exit_code = 0 })
       t.mock_command('printf %s "$FKST_X_PUBLISH_WRITE"', { stdout = env_values.FKST_X_PUBLISH_WRITE, stderr = "", exit_code = 0 })
