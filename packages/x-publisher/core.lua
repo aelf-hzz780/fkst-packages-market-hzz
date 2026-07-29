@@ -349,8 +349,65 @@ function M.content_source_ref(payload)
   return nil, "unsupported content_ref"
 end
 
-local function normalize_tweet_text(text)
-  local cleaned = strings.trim(tostring(text or ""):gsub("\r\n", "\n"):gsub("\r", "\n"))
+local TWEET_PLACEHOLDERS = {
+  interval_minutes = true,
+  occurrence_id = true,
+  scheduled_at = true,
+  schedule_type = true,
+}
+
+local function template_scalar(value)
+  local value_type = type(value)
+  if value_type == "string" or value_type == "number" or value_type == "boolean" then
+    return strings.trim(value)
+  end
+  return ""
+end
+
+local function tweet_placeholder_value(name, payload)
+  local data = type(payload) == "table" and payload or {}
+  local metadata = type(data.metadata) == "table" and data.metadata or {}
+  if name == "scheduled_at" then
+    return template_scalar(data.scheduled_at)
+  end
+  if name == "occurrence_id" then
+    return template_scalar(metadata.occurrence_id or data.scheduled_at)
+  end
+  if name == "interval_minutes" then
+    return template_scalar(metadata.interval_minutes)
+  end
+  if name == "schedule_type" then
+    return template_scalar(metadata.schedule_type)
+  end
+  return ""
+end
+
+local function render_tweet_template(text, payload)
+  local failure = nil
+  local rendered = tostring(text or ""):gsub("{{%s*([%w_%-]+)%s*}}", function(name)
+    if not TWEET_PLACEHOLDERS[name] then
+      failure = "unsupported tweet placeholder"
+      return ""
+    end
+    local value = tweet_placeholder_value(name, payload)
+    if value == "" then
+      failure = "missing tweet placeholder value"
+      return ""
+    end
+    return value
+  end)
+  if failure ~= nil then
+    return nil, failure
+  end
+  return rendered, nil
+end
+
+local function normalize_tweet_text(text, payload)
+  local rendered, template_why = render_tweet_template(text, payload)
+  if rendered == nil then
+    return nil, template_why
+  end
+  local cleaned = strings.trim(rendered:gsub("\r\n", "\n"):gsub("\r", "\n"))
   if cleaned == "" then
     return nil, "missing tweet text"
   end
@@ -360,19 +417,19 @@ local function normalize_tweet_text(text)
   return cleaned, nil
 end
 
-function M.extract_tweet_text(body)
+function M.extract_tweet_text(body, payload)
   local text = tostring(body or "")
   for _, marker in ipairs({ "tweet%-text", "tweet", "x%-post", "post" }) do
     local fenced = text:match(marker .. "%s*:%s*```[^\n]*\n(.-)\n```")
     if fenced ~= nil then
-      return normalize_tweet_text(fenced)
+      return normalize_tweet_text(fenced, payload)
     end
   end
   for line in text:gmatch("[^\r\n]+") do
     for _, marker in ipairs({ "tweet%-text", "tweet", "x%-post", "post" }) do
       local inline = line:match("^%s*" .. marker .. "%s*:%s*(.-)%s*$")
       if inline ~= nil and strings.trim(inline) ~= "" and inline:sub(1, 3) ~= "```" then
-        return normalize_tweet_text(inline)
+        return normalize_tweet_text(inline, payload)
       end
     end
   end

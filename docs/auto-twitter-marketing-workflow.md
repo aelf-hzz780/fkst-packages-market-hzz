@@ -117,6 +117,11 @@ Expected outcome:
 - `github-auto-twitter-marketing.weekly_content_imported`
 - GitHub comment: `weekly content imported`
 
+For recurring publish acceptance, `tweet-text` may include
+`{{occurrence_id}}`, `{{scheduled_at}}`, `{{interval_minutes}}`, and
+`{{schedule_type}}`; `x-publisher` renders them from the schedule payload before
+posting so each X post can be unique.
+
 ### One-shot publish
 
 ```md

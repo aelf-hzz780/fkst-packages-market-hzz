@@ -137,6 +137,32 @@ FKST live publish verification for hzz780 via NyxID. Test post.
     t.eq(why, nil)
     t.eq(text, "FKST live publish verification for hzz780 via NyxID. Test post.")
   end,
+  test_extract_tweet_text_renders_schedule_placeholders = function()
+    local text, why = core.extract_tweet_text([[
+type: weekly-content
+week: 2026-W31
+
+tweet-text:
+```
+FKST interval recurring verification for hzz780. occurrence={{occurrence_id}}, scheduled={{scheduled_at}}, interval={{interval_minutes}}m.
+```
+]], {
+      scheduled_at = "2026-07-29T11:35:00+08:00",
+      metadata = {
+        interval_minutes = 10,
+        occurrence_id = "2026-07-29T11:35:00+08:00",
+      },
+    })
+
+    t.eq(why, nil)
+    t.eq(text, "FKST interval recurring verification for hzz780. occurrence=2026-07-29T11:35:00+08:00, scheduled=2026-07-29T11:35:00+08:00, interval=10m.")
+  end,
+  test_extract_tweet_text_fails_closed_when_placeholder_value_missing = function()
+    local text, why = core.extract_tweet_text("tweet: FKST interval {{occurrence_id}}")
+
+    t.is_nil(text)
+    t.eq(why, "missing tweet placeholder value")
+  end,
   test_extract_tweet_text_rejects_oversized_text = function()
     local text, why = core.extract_tweet_text("tweet: " .. string.rep("x", 281))
 

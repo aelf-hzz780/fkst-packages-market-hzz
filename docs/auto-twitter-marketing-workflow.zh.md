@@ -110,6 +110,11 @@ FKST live publish verification for hzz780 via NyxID.
 - `github-auto-twitter-marketing.weekly_content_imported`
 - GitHub 评论：`weekly content imported`
 
+用于 recurring 发布验收时，`tweet-text` 可以包含
+`{{occurrence_id}}`、`{{scheduled_at}}`、`{{interval_minutes}}` 和
+`{{schedule_type}}`；`x-publisher` 会在发布前用 schedule payload 渲染这些
+占位符，保证每次真实 X 内容唯一。
+
 ### 单次发布
 
 ```md

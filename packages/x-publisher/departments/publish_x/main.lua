@@ -121,7 +121,7 @@ local function resolve_tweet_text(github, payload)
   if not ok or type(issue) ~= "table" then
     return nil, "github content read failed"
   end
-  return publish_caps.extract_tweet_text(issue.body)
+  return publish_caps.extract_tweet_text(issue.body, payload)
 end
 
 local function publish_tweet(payload, options, username, tweet_text)
