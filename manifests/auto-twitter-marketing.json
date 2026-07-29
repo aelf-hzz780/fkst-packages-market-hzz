@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "auto-twitter-marketing",
-  "description": "GitHub issue driven Auto Twitter marketing workflow. Shadow mode previews by default; live text-only X publishing is gated by host env and brokered by NyxID.",
+  "description": "GitHub issue driven Auto Twitter marketing workflow. Shadow mode previews by default; live text-only X publishing is gated by the user's Environment Profile and brokered by NyxID.",
   "packages": [
     "aelf-hzz780/fkst-packages-market-hzz@chore/bootstrap-auto-twitter-marketing:packages/github-proxy",
     "aelf-hzz780/fkst-packages-market-hzz@chore/bootstrap-auto-twitter-marketing:packages/marketing-radar",
@@ -16,11 +16,13 @@
     ]
   },
   "nyxid": {
-    "xPublishCredential": "host-brokered",
+    "xPublishCredential": "user-environment-profile",
+    "xPublishRuntimeDependency": "nyxid-cli-on-path",
+    "xPublishAccessTokenEnv": "NYXID_ACCESS_TOKEN",
+    "xPublishBaseUrlEnv": "NYXID_URL",
     "xPublishServiceEnv": "NYXID_X_SERVICE_SLUG",
     "xPublishWriteSwitchEnv": "X_PUBLISH_WRITE",
     "xPublishExpectedUsernameEnv": "X_PUBLISH_EXPECTED_USERNAME",
-    "verifiedHzz780Service": "api-twitter-2-media",
     "rawTokenPolicy": "forbidden-in-repo-manifest-issue-payload"
   },
   "workflow": {

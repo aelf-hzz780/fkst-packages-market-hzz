@@ -9,7 +9,8 @@
 - 使用 GitHub Issue 作为运营输入面。
 - 业务能力放在 `fkst-packages-market-hzz`，不改 `fkst-hosted` 核心。
 - 让 `fkst-hosted` 从 public package repo 组合 package。
-- 发布 X 时只通过 host broker 的 NyxID 服务，并强校验目标账号是 `hzz780`。
+- 发布 X 时只通过用户自己的 Environment Profile：用户提供 `nyxid` CLI、NyxID
+  agent key、X service slug，以及目标 X 账号校验。
 
 非目标：
 
@@ -55,15 +56,20 @@ FKST_DEVLOOP_MANAGED_BOT_LOGINS=<github-app-bot-login>
 FKST_GITHUB_AUTHORIZED_LOGINS=<allowed-human-or-bot-logins>
 ```
 
-真实 X 发布独立控制：
+真实 X 发布由用户自己的 Environment Profile 独立控制：
 
 ```sh
 X_PUBLISH_WRITE=1
-NYXID_X_SERVICE_SLUG=api-twitter-2-media
-X_PUBLISH_EXPECTED_USERNAME=hzz780
+NYXID_URL=https://nyx-api.chrono-ai.fun
+NYXID_X_SERVICE_SLUG=<user-owned-x-service-slug>
+X_PUBLISH_EXPECTED_USERNAME=<x-username>
+NYXID_ACCESS_TOKEN=<secret-user-owned-nyxid-agent-key>
 ```
 
-`x-publisher` 会先通过 NyxID 调 `/users/me`。如果解析出来的 username 不是 `hzz780`，live 发布会被阻断。
+Profile 还必须把 `nyxid` CLI 安装到 `PATH` 可见的位置；`fkst-hosted`
+不会全局内置。`x-publisher` 会先检查 `NYXID_ACCESS_TOKEN` 是否存在、
+`nyxid --version` 是否可执行，然后通过 NyxID 调 `/users/me`。如果解析出来的
+username 不是 `X_PUBLISH_EXPECTED_USERNAME`，live 发布会被阻断。
 
 LLM 配置属于 host 环境，不进入 package 源码：
 

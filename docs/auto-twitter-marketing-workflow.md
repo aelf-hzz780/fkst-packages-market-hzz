@@ -12,8 +12,9 @@ Goal:
 - Keep business capability in `fkst-packages-market-hzz`, not in
   `fkst-hosted`.
 - Let `fkst-hosted` compose packages from the public package repository.
-- Publish to X only through the host-brokered NyxID service for the expected
-  `hzz780` account.
+- Publish to X only through the user's Environment Profile: the user provides
+  `nyxid` CLI, a NyxID agent key, an X service slug, and the expected X account
+  guard.
 
 Non-goal:
 
@@ -61,16 +62,21 @@ FKST_DEVLOOP_MANAGED_BOT_LOGINS=<github-app-bot-login>
 FKST_GITHUB_AUTHORIZED_LOGINS=<allowed-human-or-bot-logins>
 ```
 
-Live X publishing is controlled separately:
+Live X publishing is controlled separately by the user's Environment Profile:
 
 ```sh
 X_PUBLISH_WRITE=1
-NYXID_X_SERVICE_SLUG=api-twitter-2-media
-X_PUBLISH_EXPECTED_USERNAME=hzz780
+NYXID_URL=https://nyx-api.chrono-ai.fun
+NYXID_X_SERVICE_SLUG=<user-owned-x-service-slug>
+X_PUBLISH_EXPECTED_USERNAME=<x-username>
+NYXID_ACCESS_TOKEN=<secret-user-owned-nyxid-agent-key>
 ```
 
-`x-publisher` preflights the NyxID service with `/users/me`. If the resolved
-username is not `hzz780`, the package blocks the live write.
+The profile must also install the `nyxid` CLI into a directory visible on
+`PATH`; `fkst-hosted` does not bundle it globally. `x-publisher` first checks
+that `NYXID_ACCESS_TOKEN` exists and `nyxid --version` works, then preflights
+the NyxID service with `/users/me`. If the resolved username is not
+`X_PUBLISH_EXPECTED_USERNAME`, the package blocks the live write.
 
 LLM configuration belongs in the host environment, not in package source:
 

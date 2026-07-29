@@ -88,6 +88,11 @@ local function mock_env(opts)
       stderr = "",
       exit_code = 0,
     })
+    t.mock_command('if [ -n "$NYXID_ACCESS_TOKEN" ]; then printf 1; else printf 0; fi', {
+      stdout = options.live == true and "1" or "0",
+      stderr = "",
+      exit_code = 0,
+    })
   end
 end
 
@@ -356,6 +361,11 @@ tweet-text:
 FKST live publish verification for hzz780 via NyxID. Test post.
 ```
 ]])
+    t.mock_command("nyxid --version", {
+      stdout = "nyxid 0.8.0\n",
+      stderr = "",
+      exit_code = 0,
+    })
     t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
       stdout = '{"data":{"id":"955688313951698945","name":"黄宗哲","username":"hzz780"}}',
       stderr = "",

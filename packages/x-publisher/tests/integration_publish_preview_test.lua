@@ -48,6 +48,11 @@ local function run_publish(payload, env)
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command('if [ -n "$NYXID_ACCESS_TOKEN" ]; then printf 1; else printf 0; fi', {
+    stdout = env_values.NYXID_ACCESS_TOKEN and "1" or "0",
+    stderr = "",
+    exit_code = 0,
+  })
   return t.run_department("departments/publish_x/main.lua", event(payload), {
     env = {
       FKST_RUNTIME_ROOT = unique_root("preview-rt"),
@@ -102,6 +107,14 @@ local function mock_content_issue(issue_number, body)
   })
   t.mock_command("gh api --paginate --slurp 'repos/" .. repo .. "/issues/" .. tostring(issue_number) .. "/comments?per_page=100'", {
     stdout = "[]\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_nyxid_cli_available()
+  t.mock_command("nyxid --version", {
+    stdout = "nyxid 0.8.0\n",
     stderr = "",
     exit_code = 0,
   })
@@ -187,6 +200,60 @@ return {
     t.eq(count_calls("nyxid proxy request"), 0)
   end,
 
+  test_live_publish_fails_closed_without_nyxid_access_token = function()
+    local result = run_publish({
+      artifact_id = "artifact-1",
+      source_ref = { kind = "external", ref = repo .. "#issue/43" },
+      content_ref = "#42",
+      platform = "x",
+      channel = "live",
+      dedup_key = "dedup-live-missing-token",
+      trace_id = "trace-1",
+    }, {
+      X_PUBLISH_WRITE = "1",
+      NYXID_X_SERVICE_SLUG = "api-twitter-2-media",
+      X_PUBLISH_EXPECTED_USERNAME = "hzz780",
+    })
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "x_published")
+    t.eq(result.raises[1].payload.status, "blocked")
+    t.eq(result.raises[1].payload.blocked_reason, "nyxid access token missing")
+    t.eq(count_calls("nyxid --version"), 0)
+    t.eq(count_calls("nyxid proxy request"), 0)
+  end,
+
+  test_live_publish_fails_closed_without_nyxid_cli = function()
+    t.mock_command("nyxid --version", {
+      stdout = "",
+      stderr = "nyxid: command not found",
+      exit_code = 127,
+    })
+
+    local result = run_publish({
+      artifact_id = "artifact-1",
+      source_ref = { kind = "external", ref = repo .. "#issue/43" },
+      content_ref = "#42",
+      platform = "x",
+      channel = "live",
+      dedup_key = "dedup-live-missing-cli",
+      trace_id = "trace-1",
+    }, {
+      X_PUBLISH_WRITE = "1",
+      NYXID_X_SERVICE_SLUG = "api-twitter-2-media",
+      X_PUBLISH_EXPECTED_USERNAME = "hzz780",
+      NYXID_ACCESS_TOKEN = "test-agent-key",
+    })
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "x_published")
+    t.eq(result.raises[1].payload.status, "blocked")
+    t.eq(result.raises[1].payload.blocked_reason, "nyxid cli unavailable")
+    t.eq(count_calls("nyxid proxy request"), 0)
+  end,
+
   test_live_publish_accepts_non_reserved_environment_names = function()
     mock_author_env()
     mock_content_issue(42, [[
@@ -198,6 +265,7 @@ tweet-text:
 FKST live publish verification for hzz780 via NyxID. Test post.
 ```
 ]])
+    mock_nyxid_cli_available()
     t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
       stdout = '{"data":{"id":"955688313951698945","name":"黄宗哲","username":"hzz780"}}',
       stderr = "",
@@ -221,6 +289,7 @@ FKST live publish verification for hzz780 via NyxID. Test post.
       X_PUBLISH_WRITE = "1",
       NYXID_X_SERVICE_SLUG = "api-twitter-2-media",
       X_PUBLISH_EXPECTED_USERNAME = "hzz780",
+      NYXID_ACCESS_TOKEN = "test-agent-key",
     })
 
     t.eq(result.exit_code, 0)
@@ -242,6 +311,7 @@ tweet-text:
 FKST live publish verification for hzz780 via NyxID. Test post.
 ```
 ]])
+    mock_nyxid_cli_available()
     t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
       stdout = '{"data":{"id":"955688313951698945","name":"黄宗哲","username":"hzz780"}}',
       stderr = "",
@@ -265,6 +335,7 @@ FKST live publish verification for hzz780 via NyxID. Test post.
       FKST_X_PUBLISH_WRITE = "1",
       FKST_NYXID_X_SERVICE_SLUG = "api-twitter-2-media",
       FKST_X_PUBLISH_EXPECTED_USERNAME = "hzz780",
+      NYXID_ACCESS_TOKEN = "test-agent-key",
     })
 
     t.eq(result.exit_code, 0)
@@ -294,6 +365,7 @@ tweet-text:
 FKST live publish verification for hzz780 via NyxID. Test post.
 ```
 ]])
+      mock_nyxid_cli_available()
       t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
         stdout = '{"data":{"id":"955688313951698945","name":"黄宗哲","username":"hzz780"}}',
         stderr = "",
@@ -308,6 +380,7 @@ FKST live publish verification for hzz780 via NyxID. Test post.
         FKST_X_PUBLISH_WRITE = "1",
         FKST_NYXID_X_SERVICE_SLUG = "api-twitter-2-media",
         FKST_X_PUBLISH_EXPECTED_USERNAME = "hzz780",
+        NYXID_ACCESS_TOKEN = "test-agent-key",
       }
       t.mock_command('printf %s "$X_PUBLISH_WRITE"', { stdout = "", stderr = "", exit_code = 0 })
       t.mock_command('printf %s "$FKST_X_PUBLISH_WRITE"', { stdout = env_values.FKST_X_PUBLISH_WRITE, stderr = "", exit_code = 0 })
@@ -315,6 +388,7 @@ FKST live publish verification for hzz780 via NyxID. Test post.
       t.mock_command('printf %s "$FKST_NYXID_X_SERVICE_SLUG"', { stdout = env_values.FKST_NYXID_X_SERVICE_SLUG, stderr = "", exit_code = 0 })
       t.mock_command('printf %s "$X_PUBLISH_EXPECTED_USERNAME"', { stdout = "", stderr = "", exit_code = 0 })
       t.mock_command('printf %s "$FKST_X_PUBLISH_EXPECTED_USERNAME"', { stdout = env_values.FKST_X_PUBLISH_EXPECTED_USERNAME, stderr = "", exit_code = 0 })
+      t.mock_command('if [ -n "$NYXID_ACCESS_TOKEN" ]; then printf 1; else printf 0; fi', { stdout = "1", stderr = "", exit_code = 0 })
       return t.run_department("departments/publish_x/main.lua", event({
         artifact_id = "artifact-once",
         source_ref = { kind = "external", ref = repo .. "#issue/43" },

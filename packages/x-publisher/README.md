@@ -12,24 +12,40 @@ small control fields plus source pointers are present, and emit a receipt.
   provider raw responses) and sensitive fields (`token`, `bearer`, `oauth`, `secret`,
   `credential`, authorization-like names) are rejected fail-closed.
 - **posture** shadow-first: live writes require all of `channel = "live"`,
-  `X_PUBLISH_WRITE=1`, and `NYXID_X_SERVICE_SLUG=<service-slug>`.
+  `X_PUBLISH_WRITE=1`, `NYXID_X_SERVICE_SLUG=<service-slug>`,
+  `NYXID_ACCESS_TOKEN`, and a `nyxid` CLI available on `PATH`.
 
 ## Live X write contract
 
 `x-publisher` uses NyxID as the only credential path. It never accepts or stores raw X tokens.
 
-Required host env for live mode:
+Required user Environment Profile for live mode:
+
+- install the `nyxid` CLI into a directory visible on `PATH`, for example the
+  profile's tool/bin directory;
+- provide a user-owned NyxID agent key as the secret `NYXID_ACCESS_TOKEN`;
+- provide the user's X service slug and optional expected account guard as env
+  variables.
 
 ```sh
 X_PUBLISH_WRITE=1
-NYXID_X_SERVICE_SLUG=api-twitter-2-media
-X_PUBLISH_EXPECTED_USERNAME=hzz780
+NYXID_URL=https://nyx-api.chrono-ai.fun
+NYXID_X_SERVICE_SLUG=<user-owned-x-service-slug>
+X_PUBLISH_EXPECTED_USERNAME=<x-username>
+NYXID_ACCESS_TOKEN=<secret-user-owned-nyxid-agent-key>
 ```
+
+`NYXID_ACCESS_TOKEN` is checked for presence only; the package does not read,
+log, persist, or include the token in receipts. The `nyxid` CLI consumes it from
+the environment when making proxy requests.
 
 Legacy `FKST_X_PUBLISH_WRITE` / `FKST_NYXID_X_SERVICE_SLUG` /
 `FKST_X_PUBLISH_EXPECTED_USERNAME` names are still accepted for older non-hosted runners. Hosted
 Environment profiles reserve the `FKST_*` prefix, so hosted installs should use the non-reserved
 names above.
+
+If a live request is missing the access token or cannot execute `nyxid --version`, the package emits
+an `x_published` receipt with `status = "blocked"` and does not call the X API.
 
 When `X_PUBLISH_EXPECTED_USERNAME` is set, the package first calls:
 

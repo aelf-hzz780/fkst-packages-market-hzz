@@ -17,9 +17,11 @@ control fields either from a trusted `payload.controls` map or from simple
 post content remain behind `source_ref`.
 
 Live X writes are not authorized by this package. `mode: live` is only allowed
-to become a live channel after a host/egress layer supplies both an explicit live
-write switch and a NyxID X service slug. Without that gate, the package emits a
-preview/shadow request only.
+to become a live channel after the user's Environment Profile supplies an
+explicit live write switch and a NyxID X service slug. The downstream
+`x-publisher` package then performs the final live preflight: `NYXID_ACCESS_TOKEN`
+must be present and `nyxid` must be available on `PATH`. Without those gates, the
+workflow emits either a preview/shadow request or a blocked publish receipt.
 
 ## Issue formats
 
@@ -59,15 +61,22 @@ scheduled-at: 2026-07-25T09:00:00Z
 `calendar-ref` becomes the downstream `content_ref`. For `#42`, `x-publisher` resolves it relative
 to the schedule issue repo and reads the weekly content issue through the GitHub adapter.
 
-## Live env contract
+## Live Environment Profile contract
 
-Live mode requires host env:
+Live mode requires user-owned profile configuration, not host-owned X
+credentials:
 
 ```sh
 X_PUBLISH_WRITE=1
-NYXID_X_SERVICE_SLUG=api-twitter-2-media
-X_PUBLISH_EXPECTED_USERNAME=hzz780
+NYXID_URL=https://nyx-api.chrono-ai.fun
+NYXID_X_SERVICE_SLUG=<user-owned-x-service-slug>
+X_PUBLISH_EXPECTED_USERNAME=<x-username>
+NYXID_ACCESS_TOKEN=<secret-user-owned-nyxid-agent-key>
 ```
 
-The username preflight is a safety guard: if NyxID resolves to any account other than `hzz780`, the
-publish request is blocked and no tweet is created.
+The profile must also install the `nyxid` CLI into a directory visible on `PATH`.
+Hosted runtimes are not expected to bundle it globally.
+
+The username preflight is a safety guard: if NyxID resolves to any account other than
+`X_PUBLISH_EXPECTED_USERNAME`, the publish request is blocked and no tweet is created.
+Raw X tokens must never appear in issues, manifests, package source, or logs.

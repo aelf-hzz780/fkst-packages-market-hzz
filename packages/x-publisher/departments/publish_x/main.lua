@@ -22,6 +22,7 @@ local ALLOWED_ENV = {
   FKST_NYXID_X_SERVICE_SLUG = true,
   FKST_X_PUBLISH_EXPECTED_USERNAME = true,
   FKST_X_PUBLISH_WRITE = true,
+  NYXID_ACCESS_TOKEN = true,
   NYXID_X_SERVICE_SLUG = true,
   X_PUBLISH_EXPECTED_USERNAME = true,
   X_PUBLISH_WRITE = true,
@@ -40,6 +41,15 @@ end
 
 local read_env = env.read_env(read_env_command, { propagate_exec_errors = true })
 
+local function read_env_presence_command(name)
+  if not ALLOWED_ENV[name] then
+    error("x-publisher: invalid-env-name: " .. tostring(name), 0)
+  end
+  return 'if [ -n "$' .. name .. '" ]; then printf 1; else printf 0; fi'
+end
+
+local read_env_presence = env.read_env(read_env_presence_command, { propagate_exec_errors = true })
+
 local function first_non_empty_env(names)
   for _, name in ipairs(names) do
     local value = strings.trim(read_env(name) or "")
@@ -56,6 +66,7 @@ local function live_options()
     live_write_enabled = write_gate == "1",
     nyxid_x_service = first_non_empty_env({ "NYXID_X_SERVICE_SLUG", "FKST_NYXID_X_SERVICE_SLUG" }),
     expected_username = first_non_empty_env({ "X_PUBLISH_EXPECTED_USERNAME", "FKST_X_PUBLISH_EXPECTED_USERNAME" }),
+    nyxid_access_token_present = strings.trim(read_env_presence("NYXID_ACCESS_TOKEN") or "") == "1",
   }
 end
 
@@ -64,6 +75,17 @@ local function nyxid_request(argv, timeout)
     return { exit_code = 127, stdout = "", stderr = "exec_argv unavailable" }
   end
   return exec_argv({ argv = argv, timeout = timeout or 60 })
+end
+
+local function live_environment_ready(options)
+  if options.nyxid_access_token_present ~= true then
+    return false, "nyxid access token missing"
+  end
+  local result = nyxid_request({ "nyxid", "--version" }, 10)
+  if type(result) ~= "table" or result.exit_code ~= 0 then
+    return false, "nyxid cli unavailable"
+  end
+  return true, nil
 end
 
 local function block(payload, reason)
@@ -179,6 +201,12 @@ local function make_department(ports)
     local publish_once_key = publish_caps.publish_once_key(payload)
     if publish_once_key == nil then
       block(payload, "missing dedup_key")
+      return
+    end
+
+    local environment_ok, environment_why = live_environment_ready(options)
+    if not environment_ok then
+      block(payload, environment_why)
       return
     end
 
