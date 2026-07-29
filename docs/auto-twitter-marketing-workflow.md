@@ -9,9 +9,9 @@ recurring schedules, and the new marketing radar capability.
 Goal:
 
 - Use GitHub issues as the operational input surface.
-- Keep business capability in `ChronoAIProject/fkst-packages`, not in
-  `fkst-hosted`.
-- Let `fkst-hosted` compose packages from the public package repository.
+- Keep marketing business capability in this public marketing package repository,
+  not in `fkst-hosted` and not in the official generic `fkst-packages` merge path.
+- Let `fkst-hosted` compose the marketing workflow from a user-supplied manifest.
 - Publish to X only through the user's Environment Profile: the user provides
   `nyxid` CLI, a NyxID agent key, an X service slug, and the expected X account
   guard.
@@ -32,14 +32,24 @@ Use the manifest:
 manifests/auto-twitter-marketing.json
 ```
 
-It composes these packages:
+Current `fkst-hosted` session pods have a v1 single-workspace fetch constraint:
+all effective package refs for one session must share the same `owner/repo@ref`.
+Because both `github-auto-twitter-marketing` and `marketing-radar` consume
+`github-proxy` issue events, this standalone manifest includes the `github-proxy`
+package from the same public marketing workspace.
+
+It composes these package roots:
 
 ```text
 packages/github-proxy
+packages/x-publisher
 packages/marketing-radar
 packages/github-auto-twitter-marketing
-packages/x-publisher
 ```
+
+Once `fkst-hosted` supports multi-workspace package fetch, the cleaner production
+shape is: hosted defaults load the official generic manifest, and users import a
+business-only marketing manifest from this repo.
 
 The GitHub work label is:
 

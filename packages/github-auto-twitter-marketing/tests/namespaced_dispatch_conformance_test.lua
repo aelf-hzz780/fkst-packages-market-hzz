@@ -69,6 +69,15 @@ local departments = conformance.loaded_departments({
   load_sink_department("weekly_content_sink"),
 })
 
+local function contains(values, needle)
+  for _, value in ipairs(values or {}) do
+    if value == needle then
+      return true
+    end
+  end
+  return false
+end
+
 local function payload_for_queue(_path, queue)
   if queue == "github-proxy.github_comment_written" then
     return {
@@ -119,6 +128,12 @@ local function payload_for_queue(_path, queue)
 end
 
 return {
+  test_import_issue_declares_observed_resync_as_fanout = function()
+    local import_issue = departments["departments/import_issue/main.lua"]
+    t.is_true(contains(import_issue.spec.fanout, "github-proxy.github_issue_changed"))
+    t.is_true(contains(import_issue.spec.fanout, "github-proxy.github_issue_observed"))
+  end,
+
   test_all_departments_accept_production_namespaced_consumed_queues = function()
     conformance.assert_all_consumed_queues_route({
       t = t,

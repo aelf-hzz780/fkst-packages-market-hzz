@@ -1,4 +1,17 @@
-# fkst-packages
+# fkst-packages market workspace
+
+This branch is a public marketing-package workspace for FKST hosted validation.
+It is not the official generic `ChronoAIProject/fkst-packages` merge path. The
+marketing workflow is imported by users through
+`manifests/auto-twitter-marketing.json`; user-owned credentials stay in FKST
+Environment Profiles / NyxID, never in package source or manifests.
+
+这个分支是用于 FKST hosted 验证的 public marketing package workspace，不是官方通用
+`ChronoAIProject/fkst-packages` 的合入路径。Marketing workflow 通过
+`manifests/auto-twitter-marketing.json` 由用户额外导入；用户自己的权限配置放在
+FKST Environment Profile / NyxID 中，不能进入 package 源码或 manifest。
+
+## Upstream package-library notes
 
 `fkst-packages` is the official package library for `fkst`: reusable Lua packages that run on the
 separate `fkst-substrate` engine. The repository contains behavior-layer packages, tests, and

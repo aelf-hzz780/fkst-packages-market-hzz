@@ -14,6 +14,15 @@ local departments = conformance.loaded_departments({
   load_department("departments/dead_letter/main.lua", "departments.dead_letter.main"),
 })
 
+local function contains(values, needle)
+  for _, value in ipairs(values or {}) do
+    if value == needle then
+      return true
+    end
+  end
+  return false
+end
+
 local function source_ref(issue_number)
   local ref = "owner/repo#issue/" .. tostring(issue_number or 42)
   return {
@@ -115,6 +124,12 @@ local function opts_for_case(_path, queue)
 end
 
 return {
+  test_import_issue_declares_observed_resync_as_fanout = function()
+    local import_issue = departments["departments/import_issue/main.lua"]
+    t.is_true(contains(import_issue.spec.fanout, "github-proxy.github_issue_changed"))
+    t.is_true(contains(import_issue.spec.fanout, "github-proxy.github_issue_observed"))
+  end,
+
   test_all_departments_accept_production_namespaced_consumed_queues = function()
     conformance.assert_all_consumed_queues_route({
       t = t,
