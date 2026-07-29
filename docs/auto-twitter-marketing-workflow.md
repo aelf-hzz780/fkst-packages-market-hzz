@@ -32,24 +32,22 @@ Use the manifest:
 manifests/auto-twitter-marketing.json
 ```
 
-Current `fkst-hosted` session pods have a v1 single-workspace fetch constraint:
-all effective package refs for one session must share the same `owner/repo@ref`.
-Because both `github-auto-twitter-marketing` and `marketing-radar` consume
-`github-proxy` issue events, this standalone manifest includes the `github-proxy`
-package from the same public marketing workspace.
+This manifest is business-only and expects `fkst-hosted` to support
+multi-workspace package fetch. The host/session must also load the official
+generic FKST packages, including `github-proxy`, from the official package
+manifest or explicit package refs.
 
 It composes these package roots:
 
 ```text
-packages/github-proxy
 packages/x-publisher
-packages/marketing-radar
 packages/github-auto-twitter-marketing
+packages/marketing-radar
 ```
 
-Once `fkst-hosted` supports multi-workspace package fetch, the cleaner production
-shape is: hosted defaults load the official generic manifest, and users import a
-business-only marketing manifest from this repo.
+The intended production shape is: hosted defaults load the official generic
+manifest, and users import this business-only marketing manifest from the public
+marketing package repository.
 
 The GitHub work label is:
 
@@ -74,7 +72,7 @@ Live X publishing is controlled separately by the user's Environment Profile:
 
 ```sh
 X_PUBLISH_WRITE=1
-NYXID_URL=https://nyx-api.chrono-ai.fun
+NYXID_URL=<nyxid-api-url>
 NYXID_X_SERVICE_SLUG=<user-owned-x-service-slug>
 X_PUBLISH_EXPECTED_USERNAME=<x-username>
 NYXID_ACCESS_TOKEN=<secret-user-owned-nyxid-agent-key>
@@ -89,7 +87,7 @@ the NyxID service with `/users/me`. If the resolved username is not
 LLM configuration belongs in the host environment, not in package source:
 
 ```sh
-LLM_BASE_URL=https://llm.aelf.dev/v1
+LLM_BASE_URL=<llm-base-url>
 LLM_MODEL=gpt-5.5
 LLM_API_KEY=<secret>
 ```

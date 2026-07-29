@@ -27,24 +27,20 @@
 manifests/auto-twitter-marketing.json
 ```
 
-当前 `fkst-hosted` session pod 仍有 v1 单 workspace fetch 限制：同一个
-session 的所有 effective package refs 必须来自同一个 `owner/repo@ref`。
-因为 `github-auto-twitter-marketing` 和 `marketing-radar` 都消费
-`github-proxy` 的 issue event，这个 standalone manifest 会同时包含同一个
-public marketing workspace 里的 `github-proxy`。
+这个 manifest 是 business-only，要求 `fkst-hosted` 已支持 multi-workspace
+package fetch。host/session 还需要从官方 package manifest 或显式 package refs
+加载官方通用能力，包括 `github-proxy`。
 
 组合 package roots：
 
 ```text
-packages/github-proxy
 packages/x-publisher
-packages/marketing-radar
 packages/github-auto-twitter-marketing
+packages/marketing-radar
 ```
 
-等 `fkst-hosted` 支持 multi-workspace package fetch 后，正式更干净的形态是：
-hosted 默认加载官方通用 manifest，用户再额外导入这个 repo 里的 business-only
-marketing manifest。
+正式形态是：hosted 默认加载官方通用 manifest，用户再额外导入这个 public
+marketing package repo 里的 business-only marketing manifest。
 
 GitHub 工作 label：
 
@@ -69,7 +65,7 @@ FKST_GITHUB_AUTHORIZED_LOGINS=<allowed-human-or-bot-logins>
 
 ```sh
 X_PUBLISH_WRITE=1
-NYXID_URL=https://nyx-api.chrono-ai.fun
+NYXID_URL=<nyxid-api-url>
 NYXID_X_SERVICE_SLUG=<user-owned-x-service-slug>
 X_PUBLISH_EXPECTED_USERNAME=<x-username>
 NYXID_ACCESS_TOKEN=<secret-user-owned-nyxid-agent-key>
@@ -83,7 +79,7 @@ username 不是 `X_PUBLISH_EXPECTED_USERNAME`，live 发布会被阻断。
 LLM 配置属于 host 环境，不进入 package 源码：
 
 ```sh
-LLM_BASE_URL=https://llm.aelf.dev/v1
+LLM_BASE_URL=<llm-base-url>
 LLM_MODEL=gpt-5.5
 LLM_API_KEY=<secret>
 ```

@@ -29,7 +29,7 @@ Required user Environment Profile for live mode:
 
 ```sh
 X_PUBLISH_WRITE=1
-NYXID_URL=https://nyx-api.chrono-ai.fun
+NYXID_URL=<nyxid-api-url>
 NYXID_X_SERVICE_SLUG=<user-owned-x-service-slug>
 X_PUBLISH_EXPECTED_USERNAME=<x-username>
 NYXID_ACCESS_TOKEN=<secret-user-owned-nyxid-agent-key>
