@@ -35,6 +35,8 @@
     "radarGeneratedScheduleWhenCalendarRefKnown": true,
     "radarGeneratedIssueNumberReturn": false,
     "recurrenceField": "recurrence",
+    "intervalMinutesField": "interval-minutes",
+    "intervalRecurringScheduleType": "every-minutes",
     "dailyPublishTimeField": "time",
     "timezoneField": "timezone",
     "livePublishMode": "live",

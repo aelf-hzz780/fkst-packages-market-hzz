@@ -148,6 +148,28 @@ timezone: Asia/Shanghai
 - 同一天同一 occurrence 有 dedup，不会重复发。
 - 测试完成后关闭该 schedule issue，避免第二天继续发。
 
+### 间隔定时发布
+
+本地验收如果不想等一整天，可以使用这个协议跑短窗口多 occurrence：
+
+```md
+type: schedule-publish
+project: chronoai
+week: 2026-W31
+calendar-ref: #25
+mode: live
+recurrence: every-minutes
+interval-minutes: 10
+scheduled-at: 2026-07-29T11:20:00+08:00
+```
+
+预期结果：
+
+- `scheduled-at` 是第一次 occurrence 的 anchor。
+- `interval-minutes` 是 1 到 1440 的正整数。
+- 每个到期 occurrence 都有独立 occurrence id 和 publish dedup key。
+- issue 保持 open，直到观察到目标 occurrence 数；测试完成后关闭 issue，避免继续发。
+
 ### 雷达配置
 
 ```md
@@ -252,11 +274,13 @@ github-proxy.github_issue_created
 2. 创建 `weekly-content` issue，确认导入评论。
 3. 创建到期的单次 `schedule-publish` issue，确认 hzz780 发出一条真实 X。
 4. 创建接近当前时间的 daily `schedule-publish` issue，确认当前 occurrence 只发一次；测试后关闭 issue。
-5. 创建 `radar-config` issue，确认雷达配置导入评论。
-6. 创建 `radar-signal` issue，确认雷达信号导入评论。
-7. 创建不带 `calendar-ref` 的 `radar-run` issue，确认自动生成新的 `weekly-content` issue，并被 auto-twitter 导入。
-8. 创建带 `calendar-ref` 的 `radar-run` issue，确认自动生成新的 `schedule-publish` issue。
-9. 用雷达生成的内容跑 live 发布，通过 NyxID 查询并确认 X tweet id。
+5. 创建 `every-minutes` 的 `schedule-publish` issue，确认两个不同 occurrence id 至少发出两条真实 X。
+6. 创建 daily recurring 的 `schedule-publish` issue，保持 open 过夜，确认跨两个日期发出真实 X 后关闭。
+7. 创建 `radar-config` issue，确认雷达配置导入评论。
+8. 创建 `radar-signal` issue，确认雷达信号导入评论。
+9. 创建不带 `calendar-ref` 的 `radar-run` issue，确认自动生成新的 `weekly-content` issue，并被 auto-twitter 导入。
+10. 创建带 `calendar-ref` 的 `radar-run` issue，确认自动生成新的 `schedule-publish` issue。
+11. 用雷达生成的内容跑 live 发布，通过 NyxID 查询并确认 X tweet id。
 
 ## 运维说明
 

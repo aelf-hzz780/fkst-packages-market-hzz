@@ -184,6 +184,40 @@ timezone: Asia/Shanghai
     t.is_true(request.dedup_key:find("2026-07-28T11-10-00-08-00", 1, true) ~= nil)
   end,
 
+  test_every_minutes_schedule_uses_anchor_and_interval_occurrence = function()
+    local classified = core.classify_issue(issue(), {
+      issue_body = [[
+type: schedule-publish
+project: chronoai
+week: 2026-W31
+calendar-ref: #124
+mode: shadow
+recurrence: every-minutes
+interval-minutes: 10
+scheduled-at: 2026-07-29T10:50:00+08:00
+]],
+    })
+
+    local before = core.schedule_decision(classified, core.parse_iso8601_seconds("2026-07-29T10:49:59+08:00"))
+    local first = core.schedule_decision(classified, core.parse_iso8601_seconds("2026-07-29T10:50:00+08:00"))
+    local second_window = core.schedule_decision(classified, core.parse_iso8601_seconds("2026-07-29T11:04:59+08:00"))
+    local second = core.schedule_decision(classified, core.parse_iso8601_seconds("2026-07-29T11:00:00+08:00"))
+    local request = core.x_publish_request(classified, nil, second)
+
+    t.eq(classified.recurrence, "every-minutes")
+    t.eq(classified.interval_minutes, 10)
+    t.eq(before.due, false)
+    t.eq(before.scheduled_at, "2026-07-29T10:50:00+08:00")
+    t.eq(first.due, true)
+    t.eq(first.occurrence_id, "2026-07-29T10:50:00+08:00")
+    t.eq(second_window.occurrence_id, "2026-07-29T11:00:00+08:00")
+    t.eq(second.occurrence_id, "2026-07-29T11:00:00+08:00")
+    t.eq(request.scheduled_at, "2026-07-29T11:00:00+08:00")
+    t.eq(request.metadata.schedule_type, "every-minutes")
+    t.eq(request.metadata.interval_minutes, 10)
+    t.eq(request.metadata.occurrence_id, "2026-07-29T11:00:00+08:00")
+  end,
+
   test_daily_schedule_requires_explicit_timezone = function()
     local classified, why = core.classify_issue(issue(), {
       issue_body = [[

@@ -11,6 +11,7 @@ local ALLOWED_CONTROL_FIELDS = {
   account = true,
   ["calendar-ref"] = true,
   channel = true,
+  ["interval-minutes"] = true,
   locale = true,
   mode = true,
   owner = true,
@@ -229,7 +230,19 @@ local function normalize_recurrence(value)
   if recurrence == "daily" then
     return "daily"
   end
+  if recurrence == "every-minutes" or recurrence == "every-minute" or recurrence == "minutely" then
+    return "every-minutes"
+  end
   return nil
+end
+
+local function parse_interval_minutes(value)
+  local text = strings.trim(value)
+  local minutes = tonumber(text)
+  if minutes == nil or minutes < 1 or minutes > 1440 or minutes ~= math.floor(minutes) then
+    return nil
+  end
+  return minutes
 end
 
 local function parse_timezone_offset(value)
@@ -315,7 +328,7 @@ local function parse_clock_time(value)
   return h, m, s
 end
 
-local function parse_iso8601_seconds(value)
+local function parse_iso8601(value)
   local text = strings.trim(value)
   local year, month, day, hour, minute, second, zone =
     text:match("^(%d%d%d%d)-(%d%d)-(%d%d)[Tt ](%d%d):(%d%d):(%d%d)(.*)$")
@@ -335,7 +348,36 @@ local function parse_iso8601_seconds(value)
   if epoch == nil then
     return nil, "invalid scheduled-at"
   end
-  return epoch - offset, nil
+  return {
+    epoch_seconds = epoch - offset,
+    offset_seconds = offset,
+    offset_text = _offset_text,
+  }, nil
+end
+
+local function parse_iso8601_seconds(value)
+  local parsed, why = parse_iso8601(value)
+  if parsed == nil then
+    return nil, why
+  end
+  return parsed.epoch_seconds, nil
+end
+
+local function format_epoch_with_offset(epoch_seconds, offset_seconds, offset_text)
+  local local_date = os.date("!*t", epoch_seconds + offset_seconds)
+  if type(local_date) ~= "table" then
+    return nil
+  end
+  return string.format(
+    "%04d-%02d-%02dT%02d:%02d:%02d%s",
+    local_date.year,
+    local_date.month,
+    local_date.day,
+    local_date.hour,
+    local_date.min,
+    local_date.sec,
+    offset_text
+  )
 end
 
 local function daily_occurrence(item, now_seconds)
@@ -363,6 +405,40 @@ local function daily_occurrence(item, now_seconds)
     reason = now_seconds >= due_epoch and "due" or "not due",
     occurrence_id = local_day .. "T" .. local_time .. offset_text,
     scheduled_at = local_day .. "T" .. local_time .. offset_text,
+    due_epoch_seconds = due_epoch,
+  }
+end
+
+local function every_minutes_occurrence(item, now_seconds)
+  local parsed, why = parse_iso8601(item.scheduled_at)
+  if parsed == nil then
+    return { due = false, reason = why or "invalid scheduled-at" }
+  end
+  local interval_minutes = parse_interval_minutes(item.interval_minutes)
+  if interval_minutes == nil then
+    return { due = false, reason = "invalid interval-minutes" }
+  end
+  if now_seconds < parsed.epoch_seconds then
+    return {
+      due = false,
+      reason = "not due",
+      occurrence_id = item.scheduled_at,
+      scheduled_at = item.scheduled_at,
+      due_epoch_seconds = parsed.epoch_seconds,
+    }
+  end
+  local interval_seconds = interval_minutes * 60
+  local occurrence_index = math.floor((now_seconds - parsed.epoch_seconds) / interval_seconds)
+  local due_epoch = parsed.epoch_seconds + occurrence_index * interval_seconds
+  local scheduled_at = format_epoch_with_offset(due_epoch, parsed.offset_seconds, parsed.offset_text)
+  if scheduled_at == nil then
+    return { due = false, reason = "invalid occurrence date" }
+  end
+  return {
+    due = true,
+    reason = "due",
+    occurrence_id = scheduled_at,
+    scheduled_at = scheduled_at,
     due_epoch_seconds = due_epoch,
   }
 end
@@ -412,6 +488,7 @@ function M.classify_issue(payload, opts)
     mode = normalize_mode(fields.mode or fields.channel),
     recurrence = recurrence,
     scheduled_at = fields["scheduled-at"],
+    interval_minutes = parse_interval_minutes(fields["interval-minutes"]),
     time = fields.time,
     timezone = fields.timezone,
     locale = fields.locale,
@@ -439,6 +516,16 @@ function M.classify_issue(payload, opts)
       end
       if parse_timezone_offset(out.timezone) == nil then
         return nil, "invalid recurring timezone"
+      end
+    elseif out.recurrence == "every-minutes" then
+      if out.scheduled_at == nil or fields["interval-minutes"] == nil then
+        return nil, "missing recurring schedule fields"
+      end
+      if out.interval_minutes == nil then
+        return nil, "invalid interval-minutes"
+      end
+      if parse_iso8601_seconds(out.scheduled_at) == nil then
+        return nil, "invalid scheduled-at"
       end
     elseif fields.recurrence ~= nil then
       return nil, "unsupported recurrence"
@@ -506,6 +593,9 @@ function M.schedule_decision(item, now_seconds)
   if item.recurrence == "daily" then
     return daily_occurrence(item, current)
   end
+  if item.recurrence == "every-minutes" then
+    return every_minutes_occurrence(item, current)
+  end
   local scheduled_seconds, why = parse_iso8601_seconds(item.scheduled_at)
   if scheduled_seconds == nil then
     return { due = false, reason = why or "invalid scheduled-at" }
@@ -554,6 +644,9 @@ function M.x_publish_request(item, opts, decision)
   }
   if item.recurrence ~= nil then
     metadata.schedule_type = item.recurrence
+  end
+  if item.interval_minutes ~= nil then
+    metadata.interval_minutes = item.interval_minutes
   end
   if decision ~= nil and decision.occurrence_id ~= nil then
     metadata.occurrence_id = decision.occurrence_id

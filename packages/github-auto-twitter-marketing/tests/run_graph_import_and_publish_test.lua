@@ -308,6 +308,34 @@ timezone: Asia/Shanghai
     t.is_true(tostring(request.payload.dedup_key or ""):find("/x-publish", 1, true) ~= nil)
   end,
 
+  test_observed_every_minutes_schedule_issue_dispatches_when_due = function()
+    mock_env()
+    mock_issue_read(47, [[
+type: schedule-publish
+project: chronoai
+week: 2026-W31
+calendar-ref: #42
+mode: shadow
+recurrence: every-minutes
+interval-minutes: 10
+scheduled-at: 2026-07-29T00:00:00+08:00
+]])
+
+    local trace = graph.require_quiescent(graph.run(observed_issue_event(47), { max_steps = 10 }))
+
+    graph.assert_covers(trace, {
+      "github-proxy.github_issue_observed -> github-auto-twitter-marketing.import_issue",
+      "x-publisher.x_publish_request -> x-publisher.publish_x",
+    })
+
+    local request = graph.require_raise(trace, "x-publisher.x_publish_request")
+    t.eq(request.payload.channel, "shadow")
+    t.eq(request.payload.metadata.schedule_type, "every-minutes")
+    t.eq(request.payload.metadata.interval_minutes, 10)
+    t.is_true(tostring(request.payload.scheduled_at or ""):find("+08:00", 1, true) ~= nil)
+    t.is_true(tostring(request.payload.dedup_key or ""):find("/x-publish", 1, true) ~= nil)
+  end,
+
   test_live_schedule_publish_issue_flows_to_x_publisher_live_request = function()
     mock_env({ live = true })
     mock_issue_read(44, [[

@@ -54,6 +54,7 @@ local SOURCE_REF_FIELDS = {
 local METADATA_FIELDS = {
   campaign_id = true,
   content_type = true,
+  interval_minutes = true,
   occurrence_id = true,
   locale = true,
   owner = true,

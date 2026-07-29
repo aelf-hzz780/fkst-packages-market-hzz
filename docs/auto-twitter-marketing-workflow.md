@@ -156,6 +156,30 @@ Expected outcome:
 - Deduplication prevents repeated posts for the same local occurrence.
 - Close the schedule issue to stop future daily runs.
 
+### Interval recurring publish
+
+Use this contract for short-window local acceptance where waiting a full day is
+not practical:
+
+```md
+type: schedule-publish
+project: chronoai
+week: 2026-W31
+calendar-ref: #25
+mode: live
+recurrence: every-minutes
+interval-minutes: 10
+scheduled-at: 2026-07-29T11:20:00+08:00
+```
+
+Expected outcome:
+
+- `scheduled-at` is the first occurrence anchor.
+- `interval-minutes` is a positive integer from 1 to 1440.
+- Each due occurrence has its own occurrence id and publish dedup key.
+- Keep the issue open until the required number of occurrences has been
+  observed, then close it to stop future interval runs.
+
 ### Radar config
 
 ```md
@@ -260,13 +284,17 @@ API at `http://127.0.0.1:18082`.
    verify one live X tweet from `hzz780`.
 4. Create a daily `schedule-publish` issue with a near-future local `time` and
    verify exactly one tweet for that occurrence; close the issue after the test.
-5. Create a `radar-config` issue and verify the radar config receipt.
-6. Create a `radar-signal` issue and verify the radar signal receipt.
-7. Create a `radar-run` issue without `calendar-ref` and verify that a new
+5. Create an `every-minutes` `schedule-publish` issue and verify at least two
+   live X tweets across two distinct occurrence ids.
+6. Create a daily recurring `schedule-publish` issue, keep it open overnight,
+   and verify live X tweets across two dates before closing it.
+7. Create a `radar-config` issue and verify the radar config receipt.
+8. Create a `radar-signal` issue and verify the radar signal receipt.
+9. Create a `radar-run` issue without `calendar-ref` and verify that a new
    `weekly-content` issue is created and imported.
-8. Create a `radar-run` issue with `calendar-ref` and verify that a new
+10. Create a `radar-run` issue with `calendar-ref` and verify that a new
    `schedule-publish` issue is created.
-9. Publish from the generated content and verify the X tweet id through NyxID.
+11. Publish from the generated content and verify the X tweet id through NyxID.
 
 ## Operational notes
 

@@ -18,6 +18,7 @@ return {
       scheduled_at = "2026-06-24T12:00:00Z",
       metadata = {
         campaign_id = "camp-1",
+        interval_minutes = 10,
         locale = "en-US",
         occurrence_id = "2026-07-28T11:10:00+08:00",
         schedule_type = "daily",
