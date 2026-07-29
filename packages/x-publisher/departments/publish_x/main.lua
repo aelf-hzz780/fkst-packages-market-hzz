@@ -121,6 +121,9 @@ local function preflight_username(payload, options)
     return nil, "nyxid account preflight failed"
   end
   local username = publish_caps.parse_nyxid_username(result.stdout)
+  if username == nil or username == "" then
+    return nil, "nyxid account preflight failed"
+  end
   if username ~= options.expected_username then
     return nil, "unexpected account"
   end

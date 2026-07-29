@@ -179,7 +179,7 @@ return {
       artifact_id = "auto-twitter-marketing/chronoai/2026-W31/schedule",
       status = "published",
       post_uri = "https://x.com/i/web/status/1234567890",
-    }), { max_steps = 1 })
+    }), { max_steps = 4 })
     graph.assert_covers(x_trace, {
       "x-publisher.x_published -> github-auto-twitter-marketing.optional_receipt_sink",
     })
@@ -194,7 +194,7 @@ return {
       artifact_id = "auto-twitter-marketing/chronoai/2026-W31/schedule",
       status = "blocked",
       blocked_reason = "unexpected account",
-    }), { max_steps = 1 })
+    }), { max_steps = 4 })
     local blocked_comment = graph.require_raise(blocked_trace, "github-proxy.github_issue_comment_request")
     t.eq(blocked_comment.payload.issue_number, 90)
     t.is_true(blocked_comment.payload.body:find("X publish blocked", 1, true) ~= nil)

@@ -306,6 +306,23 @@ return {
     t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 0)
   end,
 
+  test_live_publish_blocks_when_account_preflight_returns_problem_json = function()
+    mock_nyxid_cli_available()
+    t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
+      stdout = '{"detail":"Service Unavailable","status":503,"title":"Service Unavailable","type":"about:blank"}',
+      stderr = "Proxy request failed (HTTP 503 Service Unavailable)",
+      exit_code = 0,
+    })
+
+    local result = run_publish(live_payload("preflight-problem-json"), live_env())
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].payload.status, "blocked")
+    t.eq(result.raises[1].payload.blocked_reason, "nyxid account preflight failed")
+    t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 0)
+  end,
+
   test_live_publish_blocks_when_account_is_unexpected = function()
     mock_nyxid_cli_available()
     t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
