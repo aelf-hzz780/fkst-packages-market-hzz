@@ -7,6 +7,7 @@ full run never samples (a full run only walks the all-pass path). Without this, 
 edit that neutered `return "$fails"` or the rc-missing fail-closed fallback would keep CI
 green while silently deadening the parallel gate."""
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -96,6 +97,30 @@ class RunUnitsParallelTest(unittest.TestCase):
             "run_units_parallel 2 'true' 'exit 0' 'true'; echo \"rc=$?\""
         )
         self.assertIn("rc=1", result.stdout)
+
+
+class CoverageArtifactCollectionTest(unittest.TestCase):
+    def test_collects_normal_and_graph_artifacts_in_package_order(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "alpha").mkdir()
+            (root / "alpha.graph").mkdir()
+            (root / "beta").mkdir()
+            (root / "alpha" / "coverage.json").write_text("normal\n", encoding="utf-8")
+            (root / "alpha.graph" / "coverage.json").write_text("graph\n", encoding="utf-8")
+            (root / "beta" / "coverage.json").write_text("normal\n", encoding="utf-8")
+
+            result = _run(f'collect_package_coverage_artifacts "{root}" alpha beta')
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.splitlines(),
+                [
+                    str(root / "alpha" / "coverage.json"),
+                    str(root / "alpha.graph" / "coverage.json"),
+                    str(root / "beta" / "coverage.json"),
+                ],
+            )
 
 
 if __name__ == "__main__":

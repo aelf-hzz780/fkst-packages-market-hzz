@@ -226,4 +226,75 @@ Observed radar resync generated content.
     local create = graph.require_raise(trace, "github-proxy.github_issue_create_request")
     t.is_true(create.payload.body:find("type: weekly-content", 1, true) ~= nil)
   end,
+
+  test_observed_radar_config_skips_non_run_resync = function()
+    mock_common_env()
+    mock_issue_read(56, [[
+type: radar-config
+project: chronoai
+account: example_user
+]])
+
+    local trace = graph.require_quiescent(graph.run(observed_issue_event(56), { max_steps = 4 }))
+
+    graph.assert_covers(trace, {
+      "github-proxy.github_issue_observed -> marketing-radar.import_issue",
+    })
+    t.is_nil(graph.find_raise(trace, "marketing-radar.radar_config_imported"))
+    t.is_nil(graph.find_raise(trace, "github-proxy.github_issue_comment_request"))
+  end,
+
+  test_github_fetch_failure_skips_without_outputs = function()
+    mock_common_env()
+    t.mock_command("gh api repos/" .. repo .. "/issues/" .. tostring(57), {
+      stdout = "",
+      stderr = "read failed",
+      exit_code = 1,
+    })
+    local trace = graph.require_quiescent(graph.run(issue_event(57), { max_steps = 4 }))
+
+    t.is_nil(graph.find_raise(trace, "marketing-radar.radar_config_imported"))
+    t.is_nil(graph.find_raise(trace, "marketing-radar.radar_signal_imported"))
+    t.is_nil(graph.find_raise(trace, "marketing-radar.radar_brief_created"))
+    t.is_nil(graph.find_raise(trace, "github-proxy.github_issue_create_request"))
+    t.is_nil(graph.find_raise(trace, "github-proxy.github_issue_comment_request"))
+  end,
+
+  test_invalid_source_ref_skips_without_github_fetch_or_outputs = function()
+    mock_common_env()
+    local event = issue_event(58)
+    event.payload.body = nil
+    event.payload.controls = nil
+    event.payload.source_ref = {
+      kind = "external",
+      ref = repo .. "#discussion/58",
+      reference = repo .. "#discussion/58",
+    }
+
+    local trace = graph.require_quiescent(graph.run(event, { max_steps = 4 }))
+
+    t.is_nil(graph.find_raise(trace, "marketing-radar.radar_config_imported"))
+    t.is_nil(graph.find_raise(trace, "marketing-radar.radar_signal_imported"))
+    t.is_nil(graph.find_raise(trace, "marketing-radar.radar_brief_created"))
+    t.is_nil(graph.find_raise(trace, "github-proxy.github_issue_create_request"))
+  end,
+
+  test_invalid_source_ref_kind_skips_without_github_fetch_or_outputs = function()
+    mock_common_env()
+    local event = issue_event(59)
+    event.payload.body = nil
+    event.payload.controls = nil
+    event.payload.source_ref = {
+      kind = "draft",
+      ref = repo .. "#issue/59",
+      reference = repo .. "#issue/59",
+    }
+
+    local trace = graph.require_quiescent(graph.run(event, { max_steps = 4 }))
+
+    t.is_nil(graph.find_raise(trace, "marketing-radar.radar_config_imported"))
+    t.is_nil(graph.find_raise(trace, "marketing-radar.radar_signal_imported"))
+    t.is_nil(graph.find_raise(trace, "marketing-radar.radar_brief_created"))
+    t.is_nil(graph.find_raise(trace, "github-proxy.github_issue_create_request"))
+  end,
 }

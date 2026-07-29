@@ -134,6 +134,27 @@ local function count_calls(needle)
   return count
 end
 
+local function live_payload(suffix)
+  return {
+    artifact_id = "artifact-" .. tostring(suffix),
+    source_ref = { kind = "external", ref = repo .. "#issue/43" },
+    content_ref = "#42",
+    platform = "x",
+    channel = "live",
+    dedup_key = "dedup-live-" .. tostring(suffix),
+    trace_id = "trace-" .. tostring(suffix),
+  }
+end
+
+local function live_env()
+  return {
+    X_PUBLISH_WRITE = "1",
+    NYXID_X_SERVICE_SLUG = "api-twitter-2-media",
+    X_PUBLISH_EXPECTED_USERNAME = "example_user",
+    ["NYXID_ACCESS_TOKEN"] = "present",
+  }
+end
+
 return {
   test_publish_request_raises_preview_receipt = function()
     local result = run_publish({
@@ -253,6 +274,157 @@ return {
     t.eq(result.raises[1].payload.blocked_reason, "nyxid cli unavailable")
     t.eq(count_calls('printf %s "$NYXID_ACCESS_TOKEN"'), 0)
     t.eq(count_calls("nyxid proxy request"), 0)
+  end,
+
+  test_live_publish_fails_closed_without_dedup_key = function()
+    local payload = live_payload("missing-dedup")
+    payload.dedup_key = nil
+
+    local result = run_publish(payload, live_env())
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].payload.status, "blocked")
+    t.eq(result.raises[1].payload.blocked_reason, "missing dedup_key")
+    t.eq(count_calls("nyxid --version"), 0)
+  end,
+
+  test_live_publish_blocks_when_account_preflight_fails = function()
+    mock_nyxid_cli_available()
+    t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
+      stdout = "",
+      stderr = "preflight failed",
+      exit_code = 1,
+    })
+
+    local result = run_publish(live_payload("preflight-failed"), live_env())
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].payload.status, "blocked")
+    t.eq(result.raises[1].payload.blocked_reason, "nyxid account preflight failed")
+    t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 0)
+  end,
+
+  test_live_publish_blocks_when_account_is_unexpected = function()
+    mock_nyxid_cli_available()
+    t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
+      stdout = '{"data":{"id":"100000000000000002","name":"Other User","username":"other_user"}}',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_publish(live_payload("unexpected-account"), live_env())
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].payload.status, "blocked")
+    t.eq(result.raises[1].payload.blocked_reason, "unexpected account")
+    t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 0)
+  end,
+
+  test_live_publish_blocks_when_github_content_read_fails = function()
+    mock_author_env()
+    mock_nyxid_cli_available()
+    t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
+      stdout = '{"data":{"id":"100000000000000001","name":"Example User","username":"example_user"}}',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_publish(live_payload("github-read-failed"), live_env())
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].payload.status, "blocked")
+    t.eq(result.raises[1].payload.blocked_reason, "github content read failed")
+    t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 0)
+  end,
+
+  test_live_publish_blocks_when_content_ref_is_missing_after_preflight = function()
+    local payload = live_payload("missing-content-ref")
+    payload.content_ref = nil
+    mock_nyxid_cli_available()
+    t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
+      stdout = '{"data":{"id":"100000000000000001","name":"Example User","username":"example_user"}}',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_publish(payload, live_env())
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].payload.status, "blocked")
+    t.eq(result.raises[1].payload.blocked_reason, "missing content_ref")
+    t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 0)
+  end,
+
+  test_live_publish_blocks_when_tweet_publish_fails = function()
+    mock_author_env()
+    mock_content_issue(42, "tweet: publish failure branch")
+    mock_nyxid_cli_available()
+    t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
+      stdout = '{"data":{"id":"100000000000000001","name":"Example User","username":"example_user"}}',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("nyxid proxy request api-twitter-2-media /tweets -m POST", {
+      stdout = "",
+      stderr = "publish failed",
+      exit_code = 1,
+    })
+
+    local result = run_publish(live_payload("publish-failed"), live_env())
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].payload.status, "blocked")
+    t.eq(result.raises[1].payload.blocked_reason, "nyxid tweet publish failed")
+  end,
+
+  test_live_publish_blocks_when_tweet_response_has_no_id = function()
+    mock_author_env()
+    mock_content_issue(42, "tweet: invalid response branch")
+    mock_nyxid_cli_available()
+    t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
+      stdout = '{"data":{"id":"100000000000000001","name":"Example User","username":"example_user"}}',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("nyxid proxy request api-twitter-2-media /tweets -m POST", {
+      stdout = '{"data":{}}',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_publish(live_payload("invalid-response"), live_env())
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].payload.status, "blocked")
+    t.eq(result.raises[1].payload.blocked_reason, "invalid nyxid tweet response")
+  end,
+
+  test_live_publish_skips_account_preflight_without_expected_username = function()
+    local env_values = live_env()
+    env_values.X_PUBLISH_EXPECTED_USERNAME = ""
+    mock_author_env()
+    mock_content_issue(42, "tweet: no expected username branch")
+    mock_nyxid_cli_available()
+    t.mock_command("nyxid proxy request api-twitter-2-media /tweets -m POST", {
+      stdout = '{"data":{"id":"2234567890123456789","text":"no expected username branch"}}',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_publish(live_payload("no-expected-username"), env_values)
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].payload.status, "published")
+    t.is_nil(result.raises[1].payload.account_username)
+    t.eq(count_calls("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET"), 0)
   end,
 
   test_live_publish_accepts_non_reserved_environment_names = function()

@@ -593,10 +593,9 @@ cmd_test() {
   # Collect per-package coverage artifacts from their deterministic $name-keyed paths.
   # Only consumed when fail==0 (all packages passed), matching the serial version's
   # ratchet precondition; a run_one_package failure already bumped fail above.
-  for name in ${ran_names[@]+"${ran_names[@]}"}; do
-    coverage_file="$coverage_report_dir/$name/coverage.json"
-    [ -f "$coverage_file" ] && coverage_artifacts+=("$coverage_file")
-  done
+  while IFS= read -r coverage_file; do
+    coverage_artifacts+=("$coverage_file")
+  done < <(collect_package_coverage_artifacts "$coverage_report_dir" "${ran_names[@]}")
   if [ "$ran" -eq 0 ]; then
     if [ -n "$target" ]; then
       echo "no packages matched for '$target'" >&2

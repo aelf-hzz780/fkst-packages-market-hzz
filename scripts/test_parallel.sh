@@ -64,6 +64,17 @@ run_units_parallel() {
   return "$fails"
 }
 
+collect_package_coverage_artifacts() {
+  local coverage_report_dir="$1"; shift
+  local name coverage_file
+  for name in "$@"; do
+    for coverage_file in "$coverage_report_dir/$name/coverage.json" "$coverage_report_dir/$name.graph/coverage.json"; do
+      [ -f "$coverage_file" ] && printf '%s\n' "$coverage_file"
+    done
+  done
+  return 0
+}
+
 # Run one package's conformance + test(s) with its OWN ephemeral runtime/durable roots,
 # so packages running in parallel never share engine runtime/durable state (the tests'
 # real filesystem IO is FKST_RUNTIME_ROOT-relative). The collection dirs (report_dir,

@@ -297,6 +297,81 @@ timezone: Asia/Shanghai
     t.is_true(tostring(request.payload.dedup_key or ""):find("/x-publish", 1, true) ~= nil)
   end,
 
+  test_observed_strategy_issue_skips_non_schedule_resync = function()
+    mock_env()
+    mock_issue_read(48, [[
+type: strategy
+project: chronoai
+account: main
+]])
+
+    local trace = graph.require_quiescent(graph.run(observed_issue_event(48), { max_steps = 4 }))
+
+    graph.assert_covers(trace, {
+      "github-proxy.github_issue_observed -> github-auto-twitter-marketing.import_issue",
+    })
+    t.is_nil(graph.find_raise(trace, "github-auto-twitter-marketing.strategy_imported"))
+    t.is_nil(graph.find_raise(trace, "github-proxy.github_issue_comment_request"))
+  end,
+
+  test_github_fetch_failure_skips_without_outputs = function()
+    mock_env()
+    t.mock_command("gh api repos/" .. repo .. "/issues/49", {
+      stdout = "",
+      stderr = "read failed",
+      exit_code = 1,
+    })
+    local trace = graph.require_quiescent(graph.run(issue_event(49), { max_steps = 4 }))
+
+    t.is_nil(graph.find_raise(trace, "github-auto-twitter-marketing.strategy_imported"))
+    t.is_nil(graph.find_raise(trace, "github-auto-twitter-marketing.weekly_content_imported"))
+    t.is_nil(graph.find_raise(trace, "x-publisher.x_publish_request"))
+    t.is_nil(graph.find_raise(trace, "github-proxy.github_issue_comment_request"))
+  end,
+
+  test_inline_controls_skip_github_fetch_and_import_strategy = function()
+    mock_env()
+    local event = issue_event(51)
+    event.payload.controls = {
+      type = "strategy",
+      project = "chronoai",
+      account = "main",
+    }
+
+    local trace = graph.require_quiescent(graph.run(event, { max_steps = 6 }))
+
+    local imported = graph.require_raise(trace, "github-auto-twitter-marketing.strategy_imported")
+    t.eq(imported.payload.project, "chronoai")
+    t.eq(imported.payload.account, "main")
+  end,
+
+  test_due_schedule_publish_is_once_per_occurrence = function()
+    mock_env()
+    mock_issue_read(50, [[
+type: schedule-publish
+project: chronoai
+week: 2026-W31
+calendar-ref: #42
+mode: shadow
+scheduled-at: 2026-07-25T09:00:00Z
+]])
+    local first = graph.require_quiescent(graph.run(issue_event(50), { max_steps = 8 }))
+
+    mock_env()
+    mock_issue_read(50, [[
+type: schedule-publish
+project: chronoai
+week: 2026-W31
+calendar-ref: #42
+mode: shadow
+scheduled-at: 2026-07-25T09:00:00Z
+]])
+    local second = graph.require_quiescent(graph.run(issue_event(50), { max_steps = 8 }))
+
+    t.is_true(graph.find_raise(first, "x-publisher.x_publish_request") ~= nil)
+    t.is_nil(graph.find_raise(second, "x-publisher.x_publish_request"))
+  end,
+
   test_observed_every_minutes_schedule_issue_dispatches_when_due = function()
     mock_env()
     mock_issue_read(47, [[
