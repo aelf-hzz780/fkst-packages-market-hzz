@@ -1,84 +1,31 @@
 [workspace]
-# The current engine consumes `units`; `packages` and `libraries` keep the
-# workspace split explicit for the library-dependency contract.
-units = ["packages/*", "libraries/*"]
-packages = ["packages/*"]
-libraries = ["libraries/*"]
+units = [
+  "packages/x-publisher",
+  "packages/github-auto-twitter-marketing",
+  "packages/marketing-radar",
+  "libraries/contract",
+  "libraries/forge",
+  "libraries/workflow",
+  "libraries/testkit",
+]
+packages = [
+  "packages/x-publisher",
+  "packages/github-auto-twitter-marketing",
+  "packages/marketing-radar",
+]
+libraries = [
+  "libraries/contract",
+  "libraries/forge",
+  "libraries/workflow",
+  "libraries/testkit",
+]
 
 [registries]
 workspace = "workspace"
 
-[[package]]
-name = "github-devloop"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "github-devloop-pr"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "github-devloop-integration"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "github-devloop-intake"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "github-devloop-workflow"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "github-devloop-decompose"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "github-devloop-ops"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "github-proxy"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "consensus"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "github-external-pr-intake"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "github-ratchet-migration-slicer"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "fkst-substrate-ref-maintainer"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "integration-coverage-producer"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "idle-detector"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "git-branch-detector"
-source = "workspace"
-version = "workspace"
+[[external_sources]]
+id = "fkst-official"
+git = "https://github.com/ChronoAIProject/fkst-hosted.git"
+rev = "28563dd34e5eb4d4a481bd0e630d41378d49b3f6"
+packages = ["github-proxy"]
+libraries = []

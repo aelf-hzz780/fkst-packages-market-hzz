@@ -1,1 +1,0 @@
-../packages/integration-coverage-producer/tools/check_repo_integration_coverage.py

@@ -1,14 +1,14 @@
-# Local, machine-specific config. Tracked template lives in .fkst/env.example.
-/.fkst/packages
-/.fkst/local-packages
-/.fkst/run/
+# Local, machine-specific config. Tracked templates stay committed.
 /.fkst/env
+/.fkst/local-packages
+/.fkst/packages
+/.fkst/official
+/.fkst/cache
+/.fkst/run
 
-# Python bytecode
+# Local secrets.
+.env
+
+# Python bytecode.
 __pycache__/
 *.pyc
-
-# Local-only Claude Code harness state + secrets (machine-specific, never tracked)
-.env
-.claude/scheduled_tasks.lock
-.claude/worktrees/

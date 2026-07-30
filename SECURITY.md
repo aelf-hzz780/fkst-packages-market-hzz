@@ -1,40 +1,34 @@
 # Security Policy
 
-## Supported Scope
+## Supported scope
 
-Security reports for `fkst-packages` should cover this repository's Lua packages, repository scripts,
-test harnesses, documentation that affects operation, and package-level GitHub automation behavior.
+Security reports for this repository should cover:
 
-Engine runtime, SDK primitive, delivery-store, sandbox, or Rust implementation issues belong in the
-separate `fkst-substrate` repository unless the vulnerable behavior is caused by package code in this
-repository.
+- the three marketing FKST packages;
+- the minimal local FKST Lua support libraries kept for those packages;
+- repository scripts and CI configuration;
+- documentation that affects runtime operation.
 
-## Reporting a Vulnerability
+Generic FKST host/runtime behavior belongs in `fkst-hosted`. FKST engine, sandbox, durable delivery, SDK primitive, or Rust implementation issues belong in `fkst-substrate`.
 
-Use GitHub private vulnerability reporting for this repository when available:
+## Reporting a vulnerability
 
-```text
-https://github.com/ChronoAIProject/fkst-packages/security/advisories/new
-```
+Use GitHub private vulnerability reporting for this repository when available. If private vulnerability reporting is unavailable, open a minimal public issue asking the maintainers for a private reporting channel.
 
-If private vulnerability reporting is unavailable, open a minimal public issue asking the maintainers
-for a private reporting channel. Do not include exploit details, secrets, tokens, private logs, or
-proof-of-concept payloads in the public issue.
+Do not include exploit details, secrets, tokens, private logs, or proof-of-concept payloads in public issues.
 
 Include enough information for maintainers to reproduce and assess the issue privately:
 
-- affected package, script, or workflow;
+- affected package, script, workflow, or document;
 - the security impact;
 - reproduction steps or a minimal proof of concept;
-- whether GitHub write posture, credentials, branch protection, or external command execution is
-  involved;
+- whether GitHub write posture, X publishing, NyxID, credentials, or external command execution is involved;
 - any known mitigations.
 
-## Handling Expectations
+## Credential posture
 
-Maintainers should acknowledge valid private reports, keep sensitive details out of public issues
-until a fix is available, and land fixes through the normal issue to PR to review to merge workflow.
-Do not use security reports as permission to modify program state, GitHub labels, comments, branches,
-or PRs outside the repository's normal guarded paths.
+No raw credentials belong in this repository, manifests, tests, or GitHub issue payloads.
+
+User-owned service credentials must be supplied through FKST Environment Profiles / NyxID at runtime. Live X writes must fail closed unless the user-owned environment explicitly enables the write gate and account preflight succeeds.
 
 ⟦AI:FKST⟧

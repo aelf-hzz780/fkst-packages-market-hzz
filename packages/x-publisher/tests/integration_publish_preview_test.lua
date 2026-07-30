@@ -174,7 +174,7 @@ return {
     t.eq(#result.raises, 1)
 
     local raised = result.raises[1]
-    t.eq(raised.queue, "x_published")
+    t.eq(raised.queue, "x-publisher.x_published")
     t.eq(raised.payload.artifact_id, "artifact-1")
     t.eq(raised.payload.platform, "x")
     t.eq(raised.payload.status, "preview")
@@ -215,7 +215,7 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
-    t.eq(result.raises[1].queue, "x_published")
+    t.eq(result.raises[1].queue, "x-publisher.x_published")
     t.eq(result.raises[1].payload.status, "blocked")
     t.eq(result.raises[1].payload.blocked_reason, "live gate disabled")
     t.eq(count_calls("nyxid proxy request"), 0)
@@ -238,7 +238,7 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
-    t.eq(result.raises[1].queue, "x_published")
+    t.eq(result.raises[1].queue, "x-publisher.x_published")
     t.eq(result.raises[1].payload.status, "blocked")
     t.eq(result.raises[1].payload.blocked_reason, "nyxid access token missing")
     t.eq(count_calls("nyxid --version"), 0)
@@ -269,7 +269,7 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
-    t.eq(result.raises[1].queue, "x_published")
+    t.eq(result.raises[1].queue, "x-publisher.x_published")
     t.eq(result.raises[1].payload.status, "blocked")
     t.eq(result.raises[1].payload.blocked_reason, "nyxid cli unavailable")
     t.eq(count_calls('printf %s "$NYXID_ACCESS_TOKEN"'), 0)
