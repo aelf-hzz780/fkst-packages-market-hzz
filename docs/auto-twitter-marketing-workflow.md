@@ -4,8 +4,17 @@ This document defines the issue-driven contracts for the marketing package set. 
 
 ## Runtime package set
 
+Import the official GitHub adapter separately, then import this repository's
+business-only marketing manifest:
+
 ```text
 ChronoAIProject/fkst-hosted@packages:packages/github-proxy
+aelf-hzz780/fkst-packages-market-hzz@dev:manifests/auto-twitter-marketing.json
+```
+
+The market manifest expands only to:
+
+```text
 aelf-hzz780/fkst-packages-market-hzz@dev:packages/x-publisher
 aelf-hzz780/fkst-packages-market-hzz@dev:packages/github-auto-twitter-marketing
 aelf-hzz780/fkst-packages-market-hzz@dev:packages/marketing-radar

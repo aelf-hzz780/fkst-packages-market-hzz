@@ -3,7 +3,6 @@
   "name": "auto-twitter-marketing",
   "description": "Business-only GitHub issue driven Auto Twitter marketing workflow for FKST hosted multi-workspace package import. Shadow mode previews by default; live text-only X publishing is gated by the user's Environment Profile and brokered by NyxID.",
   "packages": [
-    "ChronoAIProject/fkst-hosted@packages:packages/github-proxy",
     "aelf-hzz780/fkst-packages-market-hzz@dev:packages/x-publisher",
     "aelf-hzz780/fkst-packages-market-hzz@dev:packages/github-auto-twitter-marketing",
     "aelf-hzz780/fkst-packages-market-hzz@dev:packages/marketing-radar"

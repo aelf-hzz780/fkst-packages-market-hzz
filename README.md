@@ -21,19 +21,21 @@ These libraries are retained only until the official SDK libraries are available
 
 ## Runtime composition
 
-The intended hosted shape is official + user packages:
+The intended hosted shape is official + user packages. Import the official
+GitHub adapter separately, then import this repository's business-only
+marketing manifest:
 
 ```text
 ChronoAIProject/fkst-hosted@packages:packages/github-proxy
+aelf-hzz780/fkst-packages-market-hzz@dev:manifests/auto-twitter-marketing.json
+```
+
+The market manifest expands only to the business packages:
+
+```text
 aelf-hzz780/fkst-packages-market-hzz@dev:packages/x-publisher
 aelf-hzz780/fkst-packages-market-hzz@dev:packages/github-auto-twitter-marketing
 aelf-hzz780/fkst-packages-market-hzz@dev:packages/marketing-radar
-```
-
-The ready-to-import manifest is:
-
-```text
-manifests/auto-twitter-marketing.json
 ```
 
 `fkst-hosted` owns GitHub App login, session management, package fetching, and runtime execution. This repository does not require host changes for marketing business logic.
