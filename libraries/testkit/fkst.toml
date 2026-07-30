@@ -5,10 +5,10 @@ name = "testkit"
 root = "."
 
 [lib_deps]
-libraries = ["contract", "workflow", "forge"]
+libraries = ["workflow"]
 
 [dependency_constraints]
-allowed_lib_deps = ["contract", "workflow", "forge"]
+allowed_lib_deps = ["workflow"]
 
 [library]
 name = "testkit"
