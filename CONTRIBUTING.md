@@ -1,10 +1,8 @@
-# Contributing to fkst-packages
+# Contributing to fkst-packages-market-zz
 
-`fkst-packages` is the behavior-layer package library for the separate `fkst-substrate` engine.
-Contributions should change Lua packages, tests, scripts, or documentation in this repository only.
-Engine Rust changes belong in `fkst-substrate`.
+This repository contains business-owned FKST packages for the Auto Twitter marketing workflow. It is not the official generic FKST package repository.
 
-## Development Setup
+## Development setup
 
 1. Build or obtain a local `fkst-framework` binary from `fkst-substrate`.
 2. Copy `.fkst/env.example` to `.fkst/env`.
@@ -16,105 +14,78 @@ Useful commands:
 ```sh
 scripts/run.sh check
 scripts/run.sh test
-scripts/run.sh test <package>
+scripts/run.sh test x-publisher
 scripts/run.sh test-composed
-scripts/run.sh doctor
-scripts/run.sh run <package> <department> '{"payload":{}}'
-scripts/run.sh supervise <package>
+scripts/run.sh run x-publisher publish_x '{"payload":{}}'
 ```
 
-`run` and `supervise` default to `.fkst/run/runtime` and `.fkst/run/durable` when the corresponding host
-facts are unset. `run` never sets `FKST_GITHUB_WRITE`. Real GitHub writes happen only when
-`FKST_GITHUB_WRITE=1`.
+`scripts/run.sh test-composed` loads the official `github-proxy` package from the pinned official source at runtime. The official package source is not committed into this repository.
 
-## Branch and PR Workflow
+## Branch and PR workflow
 
 - Use `dev` as the integration branch.
 - Do not commit directly to `dev`; open a PR into `dev`.
-- Use branch names of the form `<type>/<kebab-topic>`, where `<type>` is one of `feat`, `fix`,
-  `docs`, `chore`, `refactor`, or `test`.
+- Use branch names of the form `<type>/<kebab-topic>`, where `<type>` is one of `feat`, `fix`, `docs`, `chore`, `refactor`, or `test`.
 - Keep each commit to one coherent logical change.
-- Use English-only commit messages, PR titles, and PR bodies. Do not append auxiliary restatements in
-  another language.
+- Use English-only commit messages, PR titles, and PR bodies.
 - PR bodies should include motivation, changes, and test evidence with commands and results.
 - Merge with squash after CI is green.
 - AI-generated PR bodies or change notes should end with `⟦AI:FKST⟧`.
 
-## Package Structure
+## Package structure
 
-Packages live under `packages/<pkg>/` as committed development source. The engine loads runtime
-package roots only from `.fkst/`: `.fkst/local-packages` is regenerated as a relative symlink to
-`packages/` for this repository's own packages, and `.fkst/packages/` is reserved for external
-referenced packages. Both runtime load directories are gitignored.
+Only these business packages belong here:
 
 ```text
-packages/<pkg>/
-  core.lua
-  departments/<dept>/main.lua
-  raisers/<raiser>.lua
-  tests/*_test.lua
+packages/x-publisher
+packages/github-auto-twitter-marketing
+packages/marketing-radar
 ```
 
-Package-local shared code belongs at package root, usually `core.lua`, and is required as
-`require("core")`. Departments may split local responsibilities beside `main.lua` and require them
-as `require("departments.<dept>.<module>")`. Do not cross-require sibling packages. Cross-package
-composition must use event queues and, for composed packages, `[event_deps]`.
+Only the minimal FKST Lua support libraries required by those packages belong here:
 
-Flat packages must be self-contained, use their own bare queue names internally, avoid external
-package namespace references, and pass single-root conformance. Composed packages may reference
-sibling package queues such as `<pkg>.<queue>` and must declare the loaded siblings in
-`[event_deps]`.
+```text
+libraries/contract
+libraries/workflow
+libraries/forge
+libraries/testkit
+```
 
-## Source and Documentation Language
+Do not copy official generic packages such as `github-proxy` into this repository. Use runtime package composition instead.
 
-Source files such as `.lua`, `.sh`, `.py`, and `.rs` use English for comments, docstrings, log
-messages, error text, template strings, and identifiers. Localized outward text values may use
-UTF-8 target-language strings only when they are explicit localization resources and remain readable
-and grep-friendly.
+## Source and documentation language
 
-Outward artifacts such as documentation, issues, PRs, comments, commit messages, and change notes
-are English-only. Code identifiers, paths, crate names, command names, protocol names, test
-assertions, and quoted source text stay verbatim.
+Source files such as `.lua`, `.sh`, `.py`, and `.rs` use English for comments, docstrings, log messages, error text, template strings, and identifiers.
 
-## Design Rules
+Outward artifacts such as documentation, issues, PRs, comments, commit messages, and change notes are English-only in this public repository.
+
+## Design rules
 
 - Keep package behavior deterministic where possible and fail closed on unknown input.
-- Treat GitHub and other external systems as eventually consistent fact sources.
-- Use stable `source_ref`, `schema`, `dedup_key`, version, and short control fields in durable
-  delivery payloads.
-- Do not serialize large issue bodies, PR diffs, comments, code, or files into reliable delivery
-  payloads. Consumers should fetch full content from source when needed.
+- Treat GitHub and X/NyxID as external boundaries.
+- Keep external side effects dry-run or blocked by default.
+- Require explicit runtime authority before live X writes.
+- Do not serialize raw credentials, large issue bodies, PR diffs, comments, code, or files into reliable delivery payloads.
 - Do not store business state in the source tree or runtime scratch paths to survive crashes.
-  Re-derive state from git, external sources, or explicit host facts.
-- Keep external side effects dry-run by default. `FKST_GITHUB_WRITE=1` is the only GitHub write
-  posture switch.
-- Do not add deprecated shims, compatibility layers, `.old` files, `_legacy` paths, or dual-mode
-  behavior for old contracts. Change the current contract completely and remove obsolete code.
+- Do not add deprecated shims, compatibility layers, `.old` files, `_legacy` paths, or dual-mode behavior for old contracts.
 
-## File Size and Test Discipline
+## File size and test discipline
 
-Source files under `packages/` and `scripts/` have a hard 1000-line limit for `.lua`, `.sh`,
-`.py`, and `.rs` files. Split by stable responsibility before a file reaches the limit. Do not use
-empty forwarding files or compatibility shells to satisfy the limit.
+Source files under `packages/`, `libraries/`, and `scripts/` should stay below 1000 lines for `.lua`, `.sh`, `.py`, and `.rs` files.
 
-Tests belong in `packages/<pkg>/tests/` and should be named `*_test.lua`; shared test helpers should
-be named `*_helpers.lua`. External commands such as `gh` and `codex exec` must be mocked through
-`fkst.test.mock_command` and inspected through `fkst.test.command_calls`. Do not create fake CLI
-binaries in tests.
+Tests belong in `packages/<pkg>/tests/` and should be named `*_test.lua`; shared test helpers should be named `*_helpers.lua`. External commands such as `gh` and `nyxid` must be mocked through FKST test facilities.
 
-For behavior changes, add or update focused tests and run the narrow package test first when useful,
-then run the full suite:
+Run:
 
 ```sh
 scripts/run.sh test
+scripts/run.sh test-composed
 ```
 
-## Security and Side Effects
+## Security and side effects
 
-Do not put secrets in tests, fixtures, docs, examples, or issue templates. Do not modify GitHub
-state, labels, comments, branches, PRs, or repository settings as part of local development unless a
-task explicitly requires it and the required write posture is configured.
+Do not put secrets in tests, fixtures, docs, examples, or issue templates. Do not modify GitHub or X state as part of local development unless a task explicitly requires it and the required write posture is configured by the operator.
 
-See [`SECURITY.md`](SECURITY.md) for vulnerability reporting.
+See `SECURITY.md` for vulnerability reporting.
 
 ⟦AI:FKST⟧

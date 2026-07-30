@@ -1,69 +1,11 @@
-[[library]]
-name = "std"
-source = "workspace"
-version = "workspace"
+[[external_source]]
+id = "fkst-official"
+git = "https://github.com/ChronoAIProject/fkst-hosted.git"
+libraries = []
 
-[[package]]
-name = "archaudit"
-source = "workspace"
-version = "workspace"
+[external_source.intent]
+rev = "28563dd34e5eb4d4a481bd0e630d41378d49b3f6"
 
-[[package]]
-name = "autochrono"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "consensus"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "github-autochrono"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "github-devloop"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "github-devloop-decompose"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "github-devloop-intake"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "github-devloop-integration"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "github-devloop-pr"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "github-external-pr-intake"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "github-proxy"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "github-ratchet-migration-slicer"
-source = "workspace"
-version = "workspace"
-
-[[package]]
-name = "idle-detector"
-source = "workspace"
-version = "workspace"
+[external_source.resolved]
+rev = "28563dd34e5eb4d4a481bd0e630d41378d49b3f6"
+tree_sha256 = "sha256-172f81eee0ad991c07ab779c448bb11311bc35aa44275b61cb586ff0a00a1aa9"

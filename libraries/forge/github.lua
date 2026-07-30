@@ -10,14 +10,7 @@ function M.new(exec, opts)
   assert(type(exec) == "function", "forge.github.new requires an exec function")
   local options = opts or {}
   local handle = {}
-  local trusted_author_policy = options.trusted_author_policy
-  if type(trusted_author_policy) == "function" then
-    handle._trusted_author_policy = function()
-      return trusted_author_policy(handle)
-    end
-  else
-    handle._trusted_author_policy = trusted_author_policy
-  end
+  handle._trusted_author_policy = options.trusted_author_policy
   function handle.is_authorized_author(login)
     return content_filter.is_authorized(login, content_filter.policy_whitelist(handle._trusted_author_policy))
   end
