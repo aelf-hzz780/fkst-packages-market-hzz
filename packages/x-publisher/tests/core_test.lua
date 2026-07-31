@@ -384,6 +384,7 @@ FKST interval recurring verification for example_user. occurrence={{occurrence_i
       id = "1234567890123456789",
       username = "example_user",
       nyxid_x_service = "api-twitter-2-media",
+      tweet_text = "FKST live receipt text.",
     })
 
     t.eq(receipt.status, "published")
@@ -391,6 +392,7 @@ FKST interval recurring verification for example_user. occurrence={{occurrence_i
     t.eq(receipt.post_uri, "https://x.com/i/web/status/1234567890123456789")
     t.eq(receipt.account_username, "example_user")
     t.eq(receipt.nyxid_x_service, "api-twitter-2-media")
+    t.eq(receipt.tweet_text, "FKST live receipt text.")
     t.is_nil(receipt.provider_response)
   end,
 }

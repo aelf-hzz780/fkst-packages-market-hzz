@@ -175,6 +175,7 @@ local function publish_tweet(payload, options, username, tweet_text)
     id = tweet_id,
     username = username,
     nyxid_x_service = options.nyxid_x_service,
+    tweet_text = tweet_text,
   }), nil
 end
 

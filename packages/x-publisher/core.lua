@@ -491,6 +491,9 @@ function M.live_receipt(payload, opts)
   receipt.post_uri = post_id ~= "" and ("https://x.com/i/web/status/" .. post_id) or nil
   receipt.account_username = options.username
   receipt.nyxid_x_service = safe_service_slug(options.nyxid_x_service)
+  if type(options.tweet_text) == "string" and strings.trim(options.tweet_text) ~= "" then
+    receipt.tweet_text = options.tweet_text
+  end
   return receipt
 end
 

@@ -36,6 +36,29 @@ local function safe_line(value, limit)
   return text
 end
 
+local function safe_block(value, limit)
+  if value == nil then
+    return ""
+  end
+  local text = tostring(value):gsub("\r\n", "\n"):gsub("\r", "\n"):gsub("%z", "")
+  text = text:gsub("^%s+", ""):gsub("%s+$", "")
+  if limit ~= nil and #text > limit then
+    return text:sub(1, limit)
+  end
+  return text
+end
+
+local function fenced_text(text)
+  local longest = 0
+  for run in text:gmatch("`+") do
+    if #run > longest then
+      longest = #run
+    end
+  end
+  local fence = string.rep("`", math.max(3, longest + 1))
+  return fence .. "text\n" .. text .. "\n" .. fence .. "\n"
+end
+
 local function comment_title(status)
   if status == "published" then
     return "X published"
@@ -71,6 +94,21 @@ local function receipt_comment(payload)
   local post_uri = safe_line(payload.post_uri, 256)
   if post_uri ~= "" then
     body = body .. "post_uri: " .. post_uri .. "\n"
+  end
+
+  local content_ref = safe_line(payload.content_ref, 256)
+  if content_ref ~= "" then
+    body = body .. "content_ref: " .. content_ref .. "\n"
+  end
+
+  local scheduled_at = safe_line(payload.scheduled_at, 128)
+  if scheduled_at ~= "" then
+    body = body .. "scheduled_at: " .. scheduled_at .. "\n"
+  end
+
+  local tweet_text = safe_block(payload.tweet_text, 512)
+  if tweet_text ~= "" then
+    body = body .. "tweet_text:\n" .. fenced_text(tweet_text)
   end
 
   local blocked_reason = safe_line(payload.blocked_reason, 256)

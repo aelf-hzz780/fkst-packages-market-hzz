@@ -535,6 +535,7 @@ FKST live publish verification for example_user via NyxID. Test post.
     t.eq(receipt.platform_post_id, "1234567890123456789")
     t.eq(receipt.post_uri, "https://x.com/i/web/status/1234567890123456789")
     t.eq(receipt.account_username, "example_user")
+    t.eq(receipt.tweet_text, "FKST live publish verification for example_user via NyxID. Test post.")
     t.eq(count_calls("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET"), 1)
     t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 1)
   end,

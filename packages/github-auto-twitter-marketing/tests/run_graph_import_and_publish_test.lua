@@ -179,6 +179,9 @@ return {
       artifact_id = "auto-twitter-marketing/chronoai/2026-W31/schedule",
       status = "published",
       post_uri = "https://x.com/i/web/status/1234567890",
+      content_ref = "#89",
+      scheduled_at = "2026-07-31T09:55:00Z",
+      tweet_text = "FKST graph receipt test: published text is visible on the schedule issue.",
     }), { max_steps = 4 })
     graph.assert_covers(x_trace, {
       "x-publisher.x_published -> github-auto-twitter-marketing.optional_receipt_sink",
@@ -188,6 +191,9 @@ return {
     t.eq(published_comment.payload.issue_number, 90)
     t.is_true(published_comment.payload.body:find("X published", 1, true) ~= nil)
     t.is_true(published_comment.payload.body:find("https://x.com/i/web/status/1234567890", 1, true) ~= nil)
+    t.is_true(published_comment.payload.body:find("content_ref: #89", 1, true) ~= nil)
+    t.is_true(published_comment.payload.body:find("tweet_text:", 1, true) ~= nil)
+    t.is_true(published_comment.payload.body:find("FKST graph receipt test", 1, true) ~= nil)
 
     local blocked_trace = graph.run(receipt_event("x-publisher.x_published", {
       schema = "x-publisher.x-published.v1",
