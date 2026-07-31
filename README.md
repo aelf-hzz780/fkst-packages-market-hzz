@@ -34,15 +34,15 @@ For reproducible production sessions, pin the SemVer tag:
 
 ```text
 ChronoAIProject/fkst-hosted@packages:packages/github-proxy
-aelf-hzz780/fkst-packages-market-hzz@v0.1.0:manifests/auto-twitter-marketing.json
+aelf-hzz780/fkst-packages-market-hzz@v0.1.1:manifests/auto-twitter-marketing.json
 ```
 
 The market manifest expands only to the business packages:
 
 ```text
-aelf-hzz780/fkst-packages-market-hzz@v0.1.0:packages/x-publisher
-aelf-hzz780/fkst-packages-market-hzz@v0.1.0:packages/github-auto-twitter-marketing
-aelf-hzz780/fkst-packages-market-hzz@v0.1.0:packages/marketing-radar
+aelf-hzz780/fkst-packages-market-hzz@v0.1.1:packages/x-publisher
+aelf-hzz780/fkst-packages-market-hzz@v0.1.1:packages/github-auto-twitter-marketing
+aelf-hzz780/fkst-packages-market-hzz@v0.1.1:packages/marketing-radar
 ```
 
 `fkst-hosted` owns GitHub App login, session management, package fetching, and runtime execution. This repository does not require host changes for marketing business logic.
