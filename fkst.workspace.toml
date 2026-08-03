@@ -3,6 +3,7 @@ units = [
   "packages/x-publisher",
   "packages/github-auto-twitter-marketing",
   "packages/marketing-radar",
+  "packages/telegram-governance",
   "libraries/contract",
   "libraries/forge",
   "libraries/workflow",
@@ -12,6 +13,7 @@ packages = [
   "packages/x-publisher",
   "packages/github-auto-twitter-marketing",
   "packages/marketing-radar",
+  "packages/telegram-governance",
 ]
 libraries = [
   "libraries/contract",

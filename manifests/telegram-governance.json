@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "name": "telegram-governance",
+  "description": "GitHub issue driven Telegram governance workflow. Preview is the default; live commands require force-fresh GitHub authority, NyxID Machine API preflight, explicit write switches, and independent two-person approval for R2 actions.",
+  "packages": [
+    "aelf-hzz780/fkst-packages-market-hzz@v0.2.0-rc.1:packages/telegram-governance"
+  ],
+  "github": {
+    "workLabels": [
+      "telegram-governance"
+    ],
+    "changedQueue": "github-proxy.github_issue_changed",
+    "observedReplayQueue": "github-proxy.github_issue_observed"
+  },
+  "nyxid": {
+    "runtimeDependency": "nyxid-cli-on-path",
+    "accessTokenEnv": "NYXID_ACCESS_TOKEN",
+    "ordinaryServiceEnv": "TELEGRAM_GOVERNANCE_ORDINARY_SERVICE",
+    "destructiveServiceEnv": "TELEGRAM_GOVERNANCE_DESTRUCTIVE_SERVICE",
+    "ordinaryWriteSwitchEnv": "TELEGRAM_GOVERNANCE_WRITE",
+    "destructiveWriteSwitchEnv": "TELEGRAM_GOVERNANCE_DESTRUCTIVE_WRITE",
+    "trustedAuthorLoginsEnv": "TELEGRAM_GOVERNANCE_TRUSTED_AUTHOR_LOGINS",
+    "approverLoginsEnv": "TELEGRAM_GOVERNANCE_APPROVER_LOGINS",
+    "serviceBasePath": "/api/machine/v1",
+    "rawTelegramCredentialPolicy": "forbidden-outside-nyxid"
+  },
+  "workflow": {
+    "defaultMode": "preview",
+    "publishedSeam": "telegram-governance.telegram_command_request",
+    "receiptQueue": "telegram-governance.telegram_command_receipt",
+    "receiptDeduplication": "command-id-and-status",
+    "liveIssueRead": "force-fresh",
+    "commandStatusReplay": "observed-event-reposts-same-idempotency-key",
+    "destructiveApproval": "trusted-author-plus-distinct-allowlisted-approver-exact-canonical-json"
+  }
+}

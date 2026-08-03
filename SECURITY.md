@@ -4,7 +4,7 @@
 
 Security reports for this repository should cover:
 
-- the three marketing FKST packages;
+- the business-owned FKST Market packages;
 - the minimal local FKST Lua support libraries kept for those packages;
 - repository scripts and CI configuration;
 - documentation that affects runtime operation.
@@ -22,13 +22,13 @@ Include enough information for maintainers to reproduce and assess the issue pri
 - affected package, script, workflow, or document;
 - the security impact;
 - reproduction steps or a minimal proof of concept;
-- whether GitHub write posture, X publishing, NyxID, credentials, or external command execution is involved;
+- whether GitHub write posture, X publishing, Telegram governance, NyxID, credentials, or external command execution is involved;
 - any known mitigations.
 
 ## Credential posture
 
 No raw credentials belong in this repository, manifests, tests, or GitHub issue payloads.
 
-User-owned service credentials must be supplied through FKST Environment Profiles / NyxID at runtime. Live X writes must fail closed unless the user-owned environment explicitly enables the write gate and account preflight succeeds.
+User-owned service credentials must be supplied through FKST Environment Profiles / NyxID at runtime. Live X and Telegram writes must fail closed unless the user-owned environment explicitly enables the relevant write gates and preflight succeeds. Telegram API keys must remain in NyxID; R2 commands must use an independent destructive credential and two-person GitHub approval.
 
 ⟦AI:FKST⟧

@@ -1,6 +1,6 @@
 # Contributing to fkst-packages-market-zz
 
-This repository contains business-owned FKST packages for the Auto Twitter marketing workflow. It is not the official generic FKST package repository.
+This repository contains business-owned FKST Market packages. It is not the official generic FKST package repository.
 
 ## Development setup
 
@@ -34,12 +34,13 @@ scripts/run.sh run x-publisher publish_x '{"payload":{}}'
 
 ## Package structure
 
-Only these business packages belong here:
+Only business-owned Market packages belong here:
 
 ```text
 packages/x-publisher
 packages/github-auto-twitter-marketing
 packages/marketing-radar
+packages/telegram-governance
 ```
 
 Only the minimal FKST Lua support libraries required by those packages belong here:
@@ -62,9 +63,9 @@ Outward artifacts such as documentation, issues, PRs, comments, commit messages,
 ## Design rules
 
 - Keep package behavior deterministic where possible and fail closed on unknown input.
-- Treat GitHub and X/NyxID as external boundaries.
+- Treat GitHub, Telegram, and NyxID as external boundaries.
 - Keep external side effects dry-run or blocked by default.
-- Require explicit runtime authority before live X writes.
+- Require explicit runtime authority before live X or Telegram writes.
 - Do not serialize raw credentials, large issue bodies, PR diffs, comments, code, or files into reliable delivery payloads.
 - Do not store business state in the source tree or runtime scratch paths to survive crashes.
 - Do not add deprecated shims, compatibility layers, `.old` files, `_legacy` paths, or dual-mode behavior for old contracts.

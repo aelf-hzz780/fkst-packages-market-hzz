@@ -20,10 +20,11 @@ OFFICIAL_CACHE="$ROOT/.fkst/cache/fkst-hosted-src"
 OFFICIAL_ROOT="$ROOT/.fkst/official/fkst-hosted"
 OFFICIAL_PROXY_ROOT="$OFFICIAL_ROOT/packages/github-proxy"
 
-MARKETING_ROOTS=(
+MARKET_ROOTS=(
   "$ROOT/packages/x-publisher"
   "$ROOT/packages/github-auto-twitter-marketing"
   "$ROOT/packages/marketing-radar"
+  "$ROOT/packages/telegram-governance"
 )
 
 usage() {
@@ -127,7 +128,7 @@ PACKAGE_ROOT_ARGS=()
 
 set_all_roots() {
   PACKAGE_ROOT_ARGS=(--package-root "$OFFICIAL_PROXY_ROOT")
-  for root in "${MARKETING_ROOTS[@]}"; do
+  for root in "${MARKET_ROOTS[@]}"; do
     PACKAGE_ROOT_ARGS+=(--package-root "$root")
   done
 }
@@ -145,6 +146,10 @@ set_package_roots() {
       PACKAGE_ROOT_ARGS+=(--package-root "$root")
       ;;
     marketing-radar)
+      PACKAGE_ROOT_ARGS+=(--package-root "$OFFICIAL_PROXY_ROOT")
+      PACKAGE_ROOT_ARGS+=(--package-root "$root")
+      ;;
+    telegram-governance)
       PACKAGE_ROOT_ARGS+=(--package-root "$OFFICIAL_PROXY_ROOT")
       PACKAGE_ROOT_ARGS+=(--package-root "$root")
       ;;
@@ -199,6 +204,7 @@ cmd_test() {
   run_package_test x-publisher
   run_package_test github-auto-twitter-marketing
   run_package_test marketing-radar
+  run_package_test telegram-governance
 }
 
 cmd_test_composed() {
@@ -210,6 +216,7 @@ cmd_test_composed() {
   run_package_test x-publisher
   run_package_test github-auto-twitter-marketing
   run_package_test marketing-radar
+  run_package_test telegram-governance
 }
 
 cmd_run() {

@@ -1,15 +1,16 @@
 # Repository instructions
 
-This repository is a business FKST package workspace for Auto Twitter marketing. It is not the official generic FKST package repository.
+This repository is a workspace for business-owned FKST Market packages. It is not the official generic FKST package repository.
 
 ## Scope
 
 - Keep host/runtime behavior in `fkst-hosted`.
 - Keep reusable official packages in the official package source.
-- Keep only marketing business packages here:
+- Keep only business-owned Market packages here:
   - `packages/x-publisher`
   - `packages/github-auto-twitter-marketing`
   - `packages/marketing-radar`
+  - `packages/telegram-governance`
 - Do not copy official generic packages such as `github-proxy` into this repository.
 - Do not modify FKST engine Rust code here. Engine changes belong in `fkst-substrate`.
 
@@ -22,7 +23,8 @@ This repository is a business FKST package workspace for Auto Twitter marketing.
 
 - Never commit raw credentials, tokens, private keys, local machine paths, or personal account-specific examples.
 - User-owned service credentials must be supplied through FKST Environment Profiles / NyxID.
-- X writes must stay gated by explicit runtime configuration and account preflight.
+- X and Telegram writes must stay gated by explicit runtime configuration and service preflight.
+- Telegram destructive writes require a separate NyxID service, two independent GitHub actors, and both write switches.
 - Local `.fkst/env` and runtime state are ignored and must not be committed.
 
 ## Architecture rules
