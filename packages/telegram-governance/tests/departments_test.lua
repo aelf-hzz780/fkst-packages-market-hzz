@@ -1,3 +1,4 @@
+local automation_contract = require("automation_contract")
 local github_fake = require("forge.github_fake")
 local strings = require("contract.strings")
 local t = fkst.test
@@ -89,9 +90,10 @@ local function command_response(status, command_id)
       stdout = "{"
         .. '"command_id":' .. strings.json_string(command_id)
         .. ',"client_command_id":' .. strings.json_string(request.client_command_id)
-        .. ',"action":' .. strings.json_string(request.action)
+        .. ',"operation":' .. strings.json_string(request.operation)
         .. ',"status":' .. strings.json_string(status)
-        .. ',"risk_tier":' .. strings.json_string(request.action == "message.delete" and "R2" or "R0")
+        .. ',"execution_outcome":"not_attempted"'
+        .. ',"idempotent_replay":false'
         .. ',"trace_id":' .. strings.json_string(request.trace_id)
         .. "}",
       stderr = "",
@@ -100,22 +102,24 @@ local function command_response(status, command_id)
 end
 
 local function capabilities_stdout()
-  return '{"version":"v1","actions":['
-    .. '{"action":"group.sync","risk_tier":"R0","required_scope":"machine:operate","forced_dry_run":false},'
-    .. '{"action":"group.profile_scan","risk_tier":"R0","required_scope":"machine:operate","forced_dry_run":true},'
-    .. '{"action":"monitor.add","risk_tier":"R1","required_scope":"machine:operate","forced_dry_run":false},'
-    .. '{"action":"monitor.pause","risk_tier":"R1","required_scope":"machine:operate","forced_dry_run":false},'
-    .. '{"action":"monitor.resume","risk_tier":"R1","required_scope":"machine:operate","forced_dry_run":false},'
-    .. '{"action":"history.backfill","risk_tier":"R1","required_scope":"machine:operate","forced_dry_run":false},'
-    .. '{"action":"group.config.update","risk_tier":"R1","required_scope":"machine:configure","forced_dry_run":false},'
-    .. '{"action":"knowledge.bindings.replace","risk_tier":"R1","required_scope":"machine:configure","forced_dry_run":false},'
-    .. '{"action":"actor_policy.upsert","risk_tier":"R1","required_scope":"machine:configure","forced_dry_run":false},'
-    .. '{"action":"message.delete","risk_tier":"R2","required_scope":"machine:destructive","forced_dry_run":false},'
-    .. '{"action":"user.restrict","risk_tier":"R2","required_scope":"machine:destructive","forced_dry_run":false},'
-    .. '{"action":"user.ban","risk_tier":"R2","required_scope":"machine:destructive","forced_dry_run":false},'
-    .. '{"action":"user.restore","risk_tier":"R2","required_scope":"machine:destructive","forced_dry_run":false},'
-    .. '{"action":"reply.approve_send","risk_tier":"R2","required_scope":"machine:destructive","forced_dry_run":false}'
-    .. '],"exclusions":["group_creation","arbitrary_proactive_messages","raw_telethon_rpc"]}'
+  local operations = {}
+  local metadata = {}
+  for _, item in ipairs(automation_contract.catalog()) do
+    table.insert(operations, strings.json_string(item.operation))
+    table.insert(metadata, "{"
+      .. '"operation":' .. strings.json_string(item.operation)
+      .. ',"required_scope":' .. strings.json_string(item.required_scope)
+      .. ',"risk_tier":' .. strings.json_string(item.risk_tier)
+      .. ',"side_effect_class":' .. strings.json_string(item.side_effect_class)
+      .. ',"supported_modes":["shadow","live"]'
+      .. ',"forced_shadow":false}')
+  end
+  return '{"contract_version":"automation.v1","account_ref":"telegram-primary","operations":['
+    .. table.concat(operations, ",")
+    .. '],"operation_capabilities":[' .. table.concat(metadata, ",")
+    .. '],"modes":["shadow","live"],"scopes":["automation:read","groups:write","analysis:run","knowledge:write","policy:write"]'
+    .. ',"exclusions":["arbitrary_proactive_messages","caller_selected_moderation","group_creation","raw_telegram_rpc"]'
+    .. ',"limits":{"queue_max":100,"command_timeout_seconds":60,"result_max_bytes":65536,"read_limit":100}}'
 end
 
 local function options(overrides)
@@ -155,7 +159,7 @@ return {
 
   test_observed_intake_rechecks_work_label_before_replay = function()
     local allowed = load_department("departments.github_command_intake.main", {
-      github = github_for('{"command":{"action":"group.sync","target":{"group_id":-1001},"parameters":{}}}'),
+      github = github_for('{"command":{"account_ref":"telegram-primary","operation":"group.sync","payload":{"group_id":-1001}}}'),
     })
     local raises = {}
     local old_raise = raise
@@ -171,7 +175,7 @@ return {
 
   test_preview_reads_issue_without_calling_nyxid = function()
     local client = fake_nyxid({})
-    local github = github_for('{"mode":"preview","command":{"action":"group.sync","target":{"group_id":-1001},"parameters":{}}}')
+    local github = github_for('{"mode":"preview","command":{"account_ref":"telegram-primary","operation":"group.sync","payload":{"group_id":-1001}}}')
     local department = load_department("departments.execute_command.main", {
       github = github,
       nyxid = client,
@@ -202,7 +206,7 @@ return {
 
   test_live_force_fresh_preflights_then_posts_with_stable_idempotency = function()
     local read_options = nil
-    local fixture = issue_fixture('{"mode":"live","command":{"action":"group.sync","target":{"group_id":-1001},"parameters":{}}}')
+    local fixture = issue_fixture('{"mode":"live","command":{"account_ref":"telegram-primary","operation":"group.sync","payload":{"group_id":-1001}}}')
     local github = {
       read_issue = function(_source_ref, received)
         read_options = received
@@ -218,7 +222,7 @@ return {
     }
     local client = fake_nyxid({
       { exit_code = 0, stdout = capabilities_stdout(), stderr = "" },
-      command_response("queued", "11111111-1111-4111-8111-111111111111"),
+      command_response("accepted", "11111111-1111-4111-8111-111111111111"),
     })
     local department = load_department("departments.execute_command.main", {
       github = github,
@@ -248,12 +252,12 @@ return {
     t.eq(client.calls[1].path, "/capabilities")
     t.eq(client.calls[2].path, "/commands")
     t.eq(client.calls[2].headers["Idempotency-Key"]:find("telegram-governance/", 1, true), 1)
-    t.eq(raises[1].payload.status, "queued")
+    t.eq(raises[1].payload.status, "accepted")
     t.eq(raises[1].payload.command_id, "11111111-1111-4111-8111-111111111111")
   end,
 
   test_nyxid_or_preflight_failure_emits_blocked_receipt_without_post = function()
-    local document = '{"mode":"live","command":{"action":"group.sync","target":{"group_id":-1001},"parameters":{}}}'
+    local document = '{"mode":"live","command":{"account_ref":"telegram-primary","operation":"group.sync","payload":{"group_id":-1001}}}'
     local cases = {
       {
         client = setmetatable({ calls = {} }, {
@@ -266,7 +270,7 @@ return {
       },
       {
         client = fake_nyxid({ { exit_code = 1, stdout = "", stderr = "service unavailable" } }),
-        why = "Machine API capabilities request failed",
+        why = "Automation API capabilities request failed",
       },
     }
     for _, case in ipairs(cases) do
@@ -298,8 +302,8 @@ return {
   end,
 
   test_r2_force_fresh_approval_posts_only_through_destructive_service = function()
-    local canonical = '{"action":"message.delete","parameters":{"reason":"spam"},"target":{"group_id":-1001,"message_id":9}}'
-    local body = '{"mode":"live","command":{"action":"message.delete","target":{"group_id":-1001,"message_id":9},"parameters":{"reason":"spam"}}}'
+    local canonical = '{"account_ref":"telegram-primary","mode":"live","operation":"moderation.user.restore","payload":{"group_id":-1001,"restriction_audit_id":73,"user_id":42}}'
+    local body = '{"mode":"live","command":{"account_ref":"telegram-primary","operation":"moderation.user.restore","payload":{"group_id":-1001,"user_id":42,"restriction_audit_id":73}}}'
     local comments = {
       {
         id = 99,
@@ -310,7 +314,7 @@ return {
     }
     local client = fake_nyxid({
       { exit_code = 0, stdout = capabilities_stdout(), stderr = "" },
-      command_response("queued", "22222222-2222-4222-8222-222222222222"),
+      command_response("accepted", "22222222-2222-4222-8222-222222222222"),
     })
     local department = load_department("departments.execute_command.main", {
       github = github_for(body, comments),
@@ -339,13 +343,13 @@ return {
     t.eq(client.calls[2].service, "telegram-machine-destructive-online")
     t.eq(client.calls[2].path, "/commands")
     t.is_true(client.calls[2].body:find('"approved_by":"bob"', 1, true) ~= nil)
-    t.is_true(client.calls[2].body:find('"canonical_json":"{\\"action\\":\\"message.delete\\"', 1, true) ~= nil)
-    t.eq(raises[1].payload.status, "queued")
+    t.is_true(client.calls[2].body:find('"canonical_json":"{\\"account_ref\\":\\"telegram-primary\\"', 1, true) ~= nil)
+    t.eq(raises[1].payload.status, "accepted")
     t.eq(raises[1].payload.risk_tier, "R2")
   end,
 
   test_observed_replay_posts_identical_payload_and_idempotency_for_latest_status = function()
-    local body = '{"mode":"live","command":{"action":"group.sync","target":{"group_id":-1001},"parameters":{}}}'
+    local body = '{"mode":"live","command":{"account_ref":"telegram-primary","operation":"group.sync","payload":{"group_id":-1001}}}'
     local client = fake_nyxid({
       { exit_code = 0, stdout = capabilities_stdout(), stderr = "" },
       command_response("running", "33333333-3333-4333-8333-333333333333"),

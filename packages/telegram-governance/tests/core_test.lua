@@ -1,27 +1,10 @@
 local core = require("core")
 local t = fkst.test
 
-local ACTIONS = {
-  "actor_policy.upsert",
-  "group.config.update",
-  "group.profile_scan",
-  "group.sync",
-  "history.backfill",
-  "knowledge.bindings.replace",
-  "message.delete",
-  "monitor.add",
-  "monitor.pause",
-  "monitor.resume",
-  "reply.approve_send",
-  "user.ban",
-  "user.restrict",
-  "user.restore",
-}
-
 local function issue(overrides)
   local value = {
     number = 42,
-    body = '{"command":{"target":{"group_id":-1001},"parameters":{},"action":"group.sync"},"mode":"preview"}',
+    body = '{"command":{"account_ref":"telegram-primary","operation":"group.sync","payload":{"group_id":-1001}},"mode":"preview"}',
     labels = { "telegram-governance" },
     author_login = "alice",
     comments = {},
@@ -39,11 +22,11 @@ end
 
 local function destructive_issue(overrides)
   local value = issue({
-    body = '{"mode":"live","command":{"parameters":{"reason":"spam"},"target":{"group_id":-1001,"message_id":9},"action":"message.delete"}}',
+    body = '{"mode":"live","command":{"account_ref":"telegram-primary","operation":"moderation.user.restore","payload":{"group_id":-1001,"user_id":42,"restriction_audit_id":73}}}',
     comments = {
       {
         id = 99,
-        body = '{"action":"message.delete","parameters":{"reason":"spam"},"target":{"group_id":-1001,"message_id":9}}',
+        body = '{"account_ref":"telegram-primary","mode":"live","operation":"moderation.user.restore","payload":{"group_id":-1001,"restriction_audit_id":73,"user_id":42}}',
         author_login = "bob",
         created_at = "2026-08-03T02:00:00Z",
       },
@@ -72,36 +55,27 @@ local function live_options(overrides)
 end
 
 local function capabilities()
-  local metadata = {
-    ["group.sync"] = { "R0", "machine:operate", false },
-    ["group.profile_scan"] = { "R0", "machine:operate", true },
-    ["monitor.add"] = { "R1", "machine:operate", false },
-    ["monitor.pause"] = { "R1", "machine:operate", false },
-    ["monitor.resume"] = { "R1", "machine:operate", false },
-    ["history.backfill"] = { "R1", "machine:operate", false },
-    ["group.config.update"] = { "R1", "machine:configure", false },
-    ["knowledge.bindings.replace"] = { "R1", "machine:configure", false },
-    ["actor_policy.upsert"] = { "R1", "machine:configure", false },
-    ["message.delete"] = { "R2", "machine:destructive", false },
-    ["user.restrict"] = { "R2", "machine:destructive", false },
-    ["user.ban"] = { "R2", "machine:destructive", false },
-    ["user.restore"] = { "R2", "machine:destructive", false },
-    ["reply.approve_send"] = { "R2", "machine:destructive", false },
-  }
+  local metadata = core.operation_catalog()
+  local operations = {}
   local values = {}
-  for _, action in ipairs(ACTIONS) do
-    local row = metadata[action]
-    table.insert(values, {
-      action = action,
-      risk_tier = row[1],
-      required_scope = row[2],
-      forced_dry_run = row[3],
-    })
+  for _, row in ipairs(metadata) do
+    table.insert(operations, row.operation)
+    table.insert(values, row)
   end
   return {
-    version = "v1",
-    actions = values,
-    exclusions = { "group_creation", "arbitrary_proactive_messages", "raw_telethon_rpc" },
+    contract_version = "automation.v1",
+    account_ref = "telegram-primary",
+    operations = operations,
+    operation_capabilities = values,
+    modes = { "shadow", "live" },
+    scopes = { "automation:read", "groups:write", "analysis:run", "knowledge:write", "policy:write" },
+    exclusions = {
+      "group_creation",
+      "arbitrary_proactive_messages",
+      "caller_selected_moderation",
+      "raw_telegram_rpc",
+    },
+    limits = { queue_max = 100, command_timeout_seconds = 60, result_max_bytes = 65536, read_limit = 100 },
   }
 end
 
@@ -111,16 +85,17 @@ return {
 
     t.is_nil(why)
     t.eq(document.mode, "preview")
-    t.eq(document.action, "group.sync")
+    t.eq(document.machine_mode, "shadow")
+    t.eq(document.operation, "group.sync")
     t.eq(document.risk_tier, "R0")
-    t.eq(document.canonical_json, '{"action":"group.sync","parameters":{},"target":{"group_id":-1001}}')
-    t.eq(#core.action_catalog(), 14)
+    t.eq(document.canonical_json, '{"account_ref":"telegram-primary","mode":"shadow","operation":"group.sync","payload":{"group_id":-1001}}')
+    t.eq(#core.operation_catalog(), 24)
   end,
 
   test_issue_contract_rejects_invalid_json_unknown_fields_and_invalid_mode = function()
     local invalid_json, invalid_why = core.parse_issue_document("not-json")
-    local unknown, unknown_why = core.parse_issue_document('{"mode":"preview","command":{"action":"group.sync","target":{},"parameters":{}},"extra":1}')
-    local invalid_mode, mode_why = core.parse_issue_document('{"mode":"later","command":{"action":"group.sync","target":{},"parameters":{}}}')
+    local unknown, unknown_why = core.parse_issue_document('{"mode":"preview","command":{"account_ref":"telegram-primary","operation":"group.sync","payload":{}},"extra":1}')
+    local invalid_mode, mode_why = core.parse_issue_document('{"mode":"later","command":{"account_ref":"telegram-primary","operation":"group.sync","payload":{}}}')
 
     t.is_nil(invalid_json)
     t.eq(invalid_why, "invalid issue JSON")
@@ -130,24 +105,24 @@ return {
     t.eq(mode_why, "mode must be preview or live")
   end,
 
-  test_issue_contract_rejects_unknown_action_sensitive_fields_and_oversized_values = function()
-    local unknown, unknown_why = core.parse_issue_document('{"command":{"action":"raw.telethon","target":{},"parameters":{}}}')
-    local sensitive, sensitive_why = core.parse_issue_document('{"command":{"action":"group.sync","target":{"api_token":"nope"},"parameters":{}}}')
-    local oversized, oversized_why = core.parse_issue_document('{"command":{"action":"group.sync","target":{"note":"' .. string.rep("x", 4097) .. '"},"parameters":{}}}')
+  test_issue_contract_rejects_unknown_operation_sensitive_fields_and_oversized_values = function()
+    local unknown, unknown_why = core.parse_issue_document('{"command":{"account_ref":"telegram-primary","operation":"raw.telethon","payload":{}}}')
+    local sensitive, sensitive_why = core.parse_issue_document('{"command":{"account_ref":"telegram-primary","operation":"group.sync","payload":{"api_token":"nope"}}}')
+    local oversized, oversized_why = core.parse_issue_document('{"command":{"account_ref":"telegram-primary","operation":"group.sync","payload":{"note":"' .. string.rep("x", 4097) .. '"}}}')
 
     t.is_nil(unknown)
-    t.eq(unknown_why, "unsupported action")
+    t.eq(unknown_why, "unsupported operation")
     t.is_nil(sensitive)
     t.is_true(tostring(sensitive_why):find("sensitive field", 1, true) ~= nil)
     t.is_nil(oversized)
     t.is_true(tostring(oversized_why):find("value too large", 1, true) ~= nil)
   end,
 
-  test_profile_scan_cannot_request_live_execution = function()
-    local document, why = core.parse_issue_document('{"mode":"live","command":{"action":"group.profile_scan","target":{"group_id":-1001},"parameters":{"dry_run":false}}}')
+  test_caller_selected_destructive_action_is_not_supported = function()
+    local document, why = core.parse_issue_document('{"mode":"live","command":{"account_ref":"telegram-primary","operation":"message.delete","payload":{"message_id":9}}}')
 
     t.is_nil(document)
-    t.eq(why, "group.profile_scan is always dry-run")
+    t.eq(why, "unsupported operation")
   end,
 
   test_intake_event_is_pointer_only = function()
@@ -177,7 +152,7 @@ return {
   end,
 
   test_live_gate_selects_ordinary_service_for_r0_and_r1 = function()
-    local document = assert(core.parse_issue_document('{"mode":"live","command":{"action":"group.config.update","target":{"group_id":-1001},"parameters":{"enabled":true}}}'))
+    local document = assert(core.parse_issue_document('{"mode":"live","command":{"account_ref":"telegram-primary","operation":"group.policy.update","payload":{"group_id":-1001,"expected_policy_version":1,"patch":{"auto_reply_enabled":true}}}}'))
     local authorization, why = core.authorize_live(document, issue(), live_options())
 
     t.is_nil(why)
@@ -186,7 +161,7 @@ return {
   end,
 
   test_live_gate_fails_closed_without_token_write_switch_or_service = function()
-    local document = assert(core.parse_issue_document('{"mode":"live","command":{"action":"group.sync","target":{"group_id":-1001},"parameters":{}}}'))
+    local document = assert(core.parse_issue_document('{"mode":"live","command":{"account_ref":"telegram-primary","operation":"group.sync","payload":{"group_id":-1001}}}'))
     local cases = {
       { options = live_options({ nyxid_access_token_present = false }), why = "nyxid access token missing" },
       { options = live_options({ write_enabled = false }), why = "ordinary write switch disabled" },
@@ -276,27 +251,27 @@ return {
   end,
 
   test_capabilities_preflight_requires_exact_catalog_scope_matrix_and_exclusions = function()
-    local ok, why = core.validate_capabilities(capabilities())
+    local ok, why = core.validate_capabilities(capabilities(), "telegram-primary")
     t.eq(ok, true)
     t.is_nil(why)
 
     local missing = capabilities()
-    table.remove(missing.actions)
-    local missing_ok, missing_why = core.validate_capabilities(missing)
+    table.remove(missing.operations)
+    local missing_ok, missing_why = core.validate_capabilities(missing, "telegram-primary")
     t.eq(missing_ok, false)
-    t.eq(missing_why, "Machine API action catalog mismatch")
+    t.eq(missing_why, "Automation API operation catalog mismatch")
 
     local wrong_scope = capabilities()
-    wrong_scope.actions[1].required_scope = "machine:destructive"
-    local scope_ok, scope_why = core.validate_capabilities(wrong_scope)
+    wrong_scope.operation_capabilities[1].required_scope = "moderation:execute"
+    local scope_ok, scope_why = core.validate_capabilities(wrong_scope, "telegram-primary")
     t.eq(scope_ok, false)
-    t.eq(scope_why, "Machine API action metadata mismatch")
+    t.eq(scope_why, "Automation API operation metadata mismatch")
 
     local exclusions = capabilities()
-    exclusions.exclusions = { "group_creation", "raw_telethon_rpc" }
-    local exclusions_ok, exclusions_why = core.validate_capabilities(exclusions)
+    exclusions.exclusions = { "group_creation", "raw_telegram_rpc" }
+    local exclusions_ok, exclusions_why = core.validate_capabilities(exclusions, "telegram-primary")
     t.eq(exclusions_ok, false)
-    t.eq(exclusions_why, "Machine API exclusions mismatch")
+    t.eq(exclusions_why, "Automation API exclusions mismatch")
   end,
 
   test_command_request_contains_github_evidence_trace_and_stable_idempotency = function()
@@ -306,7 +281,9 @@ return {
     local first = assert(core.machine_command(document, current_issue, authorization.approval))
     local second = assert(core.machine_command(document, current_issue, authorization.approval))
 
-    t.eq(first.body.action, "message.delete")
+    t.eq(first.body.account_ref, "telegram-primary")
+    t.eq(first.body.operation, "moderation.user.restore")
+    t.eq(first.body.mode, "live")
     t.eq(first.body.source.provider, "github")
     t.eq(first.body.source.repository, "owner/repo")
     t.eq(first.body.source.issue_number, 42)
@@ -323,9 +300,10 @@ return {
     local response, why = core.normalize_machine_response({
       command_id = "11111111-1111-4111-8111-111111111111",
       client_command_id = "fkst-client",
-      action = "group.sync",
+      operation = "group.sync",
       status = "running",
-      risk_tier = "R0",
+      execution_outcome = "not_attempted",
+      idempotent_replay = false,
       trace_id = "trace-1",
       result = nil,
       error = nil,
@@ -336,17 +314,17 @@ return {
 
     local invalid, invalid_why = core.normalize_machine_response({ status = "maybe", command_id = "id" })
     t.is_nil(invalid)
-    t.eq(invalid_why, "invalid Machine API status")
+    t.eq(invalid_why, "invalid Automation API status")
   end,
 
-  test_machine_response_must_bind_to_submitted_action_client_and_trace = function()
+  test_machine_response_must_bind_to_submitted_operation_client_and_trace = function()
     local current_issue = issue({
-      body = '{"mode":"live","command":{"action":"group.sync","target":{"group_id":-1001},"parameters":{}}}',
+      body = '{"mode":"live","command":{"account_ref":"telegram-primary","operation":"group.sync","payload":{"group_id":-1001}}}',
     })
     local document = assert(core.parse_issue_document(current_issue.body))
     local command = assert(core.machine_command(document, current_issue))
     local response = {
-      action = command.body.action,
+      operation = command.body.operation,
       client_command_id = command.body.client_command_id,
       trace_id = command.body.trace_id,
     }
@@ -358,6 +336,6 @@ return {
     response.trace_id = "different-trace"
     local mismatch, mismatch_why = core.validate_response_binding(response, command)
     t.eq(mismatch, false)
-    t.eq(mismatch_why, "Machine API response trace_id mismatch")
+    t.eq(mismatch_why, "Automation API response trace_id mismatch")
   end,
 }

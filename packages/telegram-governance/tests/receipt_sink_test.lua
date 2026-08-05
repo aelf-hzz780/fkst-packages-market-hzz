@@ -7,8 +7,9 @@ return {
       payload = {
         schema = "telegram-governance.command-receipt.v1",
         command_id = "11111111-1111-4111-8111-111111111111",
-        action = "group.sync",
+        operation = "group.sync",
         status = "succeeded",
+        execution_outcome = "confirmed_effect",
         risk_tier = "R0",
         idempotency_key = "telegram-governance/key-1",
         trace_id = "trace-1",

@@ -18,9 +18,9 @@ local VALUE_ENV = {
   FKST_GITHUB_BOT_LOGIN = true,
   FKST_DEVLOOP_MANAGED_BOT_LOGINS = true,
   TELEGRAM_GOVERNANCE_APPROVER_LOGINS = true,
-  TELEGRAM_GOVERNANCE_DESTRUCTIVE_SERVICE = true,
+  TELEGRAM_GOVERNANCE_DESTRUCTIVE_SERVICE_SLUG = true,
   TELEGRAM_GOVERNANCE_DESTRUCTIVE_WRITE = true,
-  TELEGRAM_GOVERNANCE_ORDINARY_SERVICE = true,
+  TELEGRAM_GOVERNANCE_SERVICE_SLUG = true,
   TELEGRAM_GOVERNANCE_TRUSTED_AUTHOR_LOGINS = true,
   TELEGRAM_GOVERNANCE_WRITE = true,
 }
@@ -59,8 +59,8 @@ local function runtime_options()
   return {
     write_enabled = strings.trim(read_env("TELEGRAM_GOVERNANCE_WRITE") or "") == "1",
     destructive_write_enabled = strings.trim(read_env("TELEGRAM_GOVERNANCE_DESTRUCTIVE_WRITE") or "") == "1",
-    ordinary_service = strings.trim(read_env("TELEGRAM_GOVERNANCE_ORDINARY_SERVICE") or ""),
-    destructive_service = strings.trim(read_env("TELEGRAM_GOVERNANCE_DESTRUCTIVE_SERVICE") or ""),
+    ordinary_service = strings.trim(read_env("TELEGRAM_GOVERNANCE_SERVICE_SLUG") or ""),
+    destructive_service = strings.trim(read_env("TELEGRAM_GOVERNANCE_DESTRUCTIVE_SERVICE_SLUG") or ""),
     trusted_author_logins = login_list(read_env("TELEGRAM_GOVERNANCE_TRUSTED_AUTHOR_LOGINS")),
     approver_logins = login_list(read_env("TELEGRAM_GOVERNANCE_APPROVER_LOGINS")),
     nyxid_access_token_present = strings.trim(read_token_presence("NYXID_ACCESS_TOKEN") or "") == "1",
@@ -125,7 +125,7 @@ end
 local function raise_blocked(document, current_issue, reason)
   local receipt = core.blocked_receipt(document, current_issue, reason)
   log.warn("telegram-governance dept=execute_command tag=BLOCKED reason=" .. tostring(reason)
-    .. " action=" .. tostring(document and document.action or "unknown")
+    .. " operation=" .. tostring(document and document.operation or "unknown")
     .. " trace_id=" .. tostring(receipt.trace_id))
   raise("telegram_command_receipt", receipt)
 end
@@ -159,7 +159,7 @@ local function make_department(ports)
         raise_blocked(document, current_issue, receipt_why)
         return
       end
-      log.info("telegram-governance dept=execute_command tag=PREVIEW action=" .. document.action)
+      log.info("telegram-governance dept=execute_command tag=PREVIEW operation=" .. document.operation)
       raise("telegram_command_receipt", receipt)
       return
     end
@@ -177,7 +177,7 @@ local function make_department(ports)
 
     local capabilities_result = nyxid.request(live_options.ordinary_service, "/capabilities", "GET")
     if type(capabilities_result) ~= "table" or capabilities_result.exit_code ~= 0 then
-      raise_blocked(document, current_issue, "Machine API capabilities request failed")
+      raise_blocked(document, current_issue, "Automation API capabilities request failed")
       return
     end
     local capabilities, capabilities_why = core.decode_proxy_response(capabilities_result.stdout, "Machine capabilities")
@@ -185,7 +185,7 @@ local function make_department(ports)
       raise_blocked(document, current_issue, capabilities_why)
       return
     end
-    local capabilities_ok, preflight_why = core.validate_capabilities(capabilities)
+    local capabilities_ok, preflight_why = core.validate_capabilities(capabilities, document.account_ref)
     if not capabilities_ok then
       raise_blocked(document, current_issue, preflight_why)
       return
@@ -198,9 +198,10 @@ local function make_department(ports)
     end
     local command_result = nyxid.request(live.service, "/commands", "POST", command.body_json, {
       ["Idempotency-Key"] = command.idempotency_key,
+      ["X-Trace-ID"] = command.body.trace_id,
     })
     if type(command_result) ~= "table" or command_result.exit_code ~= 0 then
-      raise_blocked(document, current_issue, "Machine API command request failed")
+      raise_blocked(document, current_issue, "Automation API command request failed")
       return
     end
     local response, response_why = core.normalize_machine_response(command_result.stdout)
@@ -213,7 +214,7 @@ local function make_department(ports)
       raise_blocked(document, current_issue, binding_why)
       return
     end
-    log.info("telegram-governance dept=execute_command tag=RECEIPT action=" .. document.action
+    log.info("telegram-governance dept=execute_command tag=RECEIPT operation=" .. document.operation
       .. " command_id=" .. tostring(response.command_id)
       .. " status=" .. tostring(response.status)
       .. " trace_id=" .. tostring(response.trace_id))

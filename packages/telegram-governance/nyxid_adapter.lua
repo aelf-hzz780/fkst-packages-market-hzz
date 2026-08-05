@@ -1,4 +1,4 @@
--- Narrow NyxID CLI adapter for the Telegram Machine API service.
+-- Narrow NyxID CLI adapter for the Telegram Automation API service.
 local M = {}
 
 local ALLOWED_PATHS = {
@@ -31,8 +31,14 @@ local function valid_idempotency_key(value)
   return type(value) == "string"
     and #value >= 8
     and #value <= 200
-    and value == value:match("^%s*(.-)%s*$")
-    and value:find("[\r\n]") == nil
+    and value:match("^[A-Za-z0-9._:/-]+$") ~= nil
+end
+
+local function valid_trace_id(value)
+  return type(value) == "string"
+    and #value >= 1
+    and #value <= 128
+    and value:match("^[A-Za-z0-9._:/-]+$") ~= nil
 end
 
 function M.new(run)
@@ -55,7 +61,9 @@ function M.new(run)
     end
     local request_headers = headers or {}
     for name, value in pairs(request_headers) do
-      if name ~= "Idempotency-Key" or not valid_idempotency_key(value) then
+      local valid = (name == "Idempotency-Key" and valid_idempotency_key(value))
+        or (name == "X-Trace-ID" and valid_trace_id(value))
+      if not valid then
         return result(2)
       end
     end
@@ -64,6 +72,10 @@ function M.new(run)
     if request_headers["Idempotency-Key"] ~= nil then
       table.insert(argv, "-H")
       table.insert(argv, "Idempotency-Key:" .. request_headers["Idempotency-Key"])
+    end
+    if request_headers["X-Trace-ID"] ~= nil then
+      table.insert(argv, "-H")
+      table.insert(argv, "X-Trace-ID:" .. request_headers["X-Trace-ID"])
     end
     if body ~= nil then
       table.insert(argv, "-d")

@@ -22,6 +22,7 @@ return {
     local capabilities = client.request("telegram-machine", "/capabilities", "GET")
     local command = client.request("telegram-machine", "/commands", "POST", "{}", {
       ["Idempotency-Key"] = "telegram-governance/key-1",
+      ["X-Trace-ID"] = "tg:issue-42:sync",
     })
 
     t.eq(ready, true)
@@ -30,7 +31,7 @@ return {
     t.eq(calls[1].argv[1], "nyxid")
     t.eq(calls[1].argv[2], "--version")
     t.eq(table.concat(calls[2].argv, " "), "nyxid proxy request telegram-machine /capabilities -m GET --output json")
-    t.eq(table.concat(calls[3].argv, " "), "nyxid proxy request telegram-machine /commands -m POST -H Idempotency-Key:telegram-governance/key-1 -d {} --output json")
+    t.eq(table.concat(calls[3].argv, " "), "nyxid proxy request telegram-machine /commands -m POST -H Idempotency-Key:telegram-governance/key-1 -H X-Trace-ID:tg:issue-42:sync -d {} --output json")
   end,
 
   test_adapter_rejects_invalid_service_path_method_and_header = function()
@@ -41,11 +42,13 @@ return {
     local path = client.request("telegram-machine", "/api/machine/v1/commands", "GET")
     local method = client.request("telegram-machine", "/commands", "DELETE")
     local header = client.request("telegram-machine", "/commands", "POST", "{}", { Authorization = "nope" })
+    local trace = client.request("telegram-machine", "/commands", "POST", "{}", { ["X-Trace-ID"] = "bad trace" })
 
     t.eq(service.exit_code, 2)
     t.eq(path.exit_code, 2)
     t.eq(method.exit_code, 2)
     t.eq(header.exit_code, 2)
+    t.eq(trace.exit_code, 2)
     t.eq(#calls, 0)
   end,
 }

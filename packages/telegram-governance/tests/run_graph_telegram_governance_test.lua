@@ -48,7 +48,7 @@ end
 return {
   test_preview_issue_flows_through_pointer_seam_to_receipt_comment_without_nyxid = function()
     mock_env()
-    mock_issue('{"mode":"preview","command":{"action":"group.sync","target":{"group_id":-1001},"parameters":{}}}')
+    mock_issue('{"mode":"preview","command":{"account_ref":"telegram-primary","operation":"group.sync","payload":{"group_id":-1001}}}')
     local event_ref = ref()
     local trace = graph.require_quiescent(graph.run({
       queue = "github-proxy.github_issue_changed",

@@ -11,7 +11,7 @@ local github = {
   read_issue = function()
     return {
       number = 42,
-      body = '{"mode":"preview","command":{"action":"group.sync","target":{"group_id":-1001},"parameters":{}}}',
+      body = '{"mode":"preview","command":{"account_ref":"telegram-primary","operation":"group.sync","payload":{"group_id":-1001}}}',
       labels = { "telegram-governance" },
       author_login = "alice",
       comments = {},
@@ -85,8 +85,9 @@ local function payload_for_queue(_path, queue)
     return {
       schema = "telegram-governance.command-receipt.v1",
       command_id = "11111111-1111-4111-8111-111111111111",
-      action = "group.sync",
+      operation = "group.sync",
       status = "succeeded",
+      execution_outcome = "confirmed_effect",
       risk_tier = "R0",
       idempotency_key = "telegram-governance/key-1",
       trace_id = "trace-42",

@@ -1,5 +1,6 @@
--- Pure contracts and policy for GitHub-driven Telegram Machine API commands.
+-- Pure contracts and policy for GitHub-driven Telegram Automation API commands.
 local M = {}
+local automation_contract = require("automation_contract")
 local strings = require("contract.strings")
 
 local WORK_LABEL = "telegram-governance"
@@ -9,46 +10,13 @@ local MAX_KEY_BYTES = 128
 local MAX_DEPTH = 8
 local MAX_NODES = 1000
 
-local ACTIONS = {
-  { action = "actor_policy.upsert", risk_tier = "R1", required_scope = "machine:configure", forced_dry_run = false },
-  { action = "group.config.update", risk_tier = "R1", required_scope = "machine:configure", forced_dry_run = false },
-  { action = "group.profile_scan", risk_tier = "R0", required_scope = "machine:operate", forced_dry_run = true },
-  { action = "group.sync", risk_tier = "R0", required_scope = "machine:operate", forced_dry_run = false },
-  { action = "history.backfill", risk_tier = "R1", required_scope = "machine:operate", forced_dry_run = false },
-  { action = "knowledge.bindings.replace", risk_tier = "R1", required_scope = "machine:configure", forced_dry_run = false },
-  { action = "message.delete", risk_tier = "R2", required_scope = "machine:destructive", forced_dry_run = false },
-  { action = "monitor.add", risk_tier = "R1", required_scope = "machine:operate", forced_dry_run = false },
-  { action = "monitor.pause", risk_tier = "R1", required_scope = "machine:operate", forced_dry_run = false },
-  { action = "monitor.resume", risk_tier = "R1", required_scope = "machine:operate", forced_dry_run = false },
-  { action = "reply.approve_send", risk_tier = "R2", required_scope = "machine:destructive", forced_dry_run = false },
-  { action = "user.ban", risk_tier = "R2", required_scope = "machine:destructive", forced_dry_run = false },
-  { action = "user.restrict", risk_tier = "R2", required_scope = "machine:destructive", forced_dry_run = false },
-  { action = "user.restore", risk_tier = "R2", required_scope = "machine:destructive", forced_dry_run = false },
-}
-
-local ACTION_BY_NAME = {}
-for _, metadata in ipairs(ACTIONS) do
-  ACTION_BY_NAME[metadata.action] = metadata
-end
-
-local COMMAND_STATUSES = {
-  queued = true,
-  running = true,
-  succeeded = true,
-  failed = true,
-  indeterminate = true,
-  cancelled = true,
-}
-
 local RECEIPT_STATUSES = {
   preview = true,
   blocked = true,
-  queued = true,
+  accepted = true,
   running = true,
   succeeded = true,
   failed = true,
-  indeterminate = true,
-  cancelled = true,
 }
 
 local SENSITIVE_KEY_PARTS = {
@@ -64,12 +32,6 @@ local SENSITIVE_KEY_PARTS = {
   "secret",
   "session",
   "token",
-}
-
-local REQUIRED_EXCLUSIONS = {
-  arbitrary_proactive_messages = true,
-  group_creation = true,
-  raw_telethon_rpc = true,
 }
 
 local function copy(value)
@@ -340,22 +302,24 @@ local function command_identity(document, issue_ref)
 end
 
 local function command_body_json(body, approval)
-  local action = assert(canonical_json(body.action))
+  local account_ref = assert(canonical_json(body.account_ref))
   local actor = assert(canonical_json(body.actor))
   local approval_json = approval == nil and "null" or assert(canonical_json(approval))
   local client_command_id = assert(canonical_json(body.client_command_id))
-  local parameters = assert(canonical_json(body.parameters))
+  local mode = assert(canonical_json(body.mode))
+  local operation = assert(canonical_json(body.operation))
+  local payload = assert(canonical_json(body.payload))
   local source = assert(canonical_json(body.source))
-  local target = assert(canonical_json(body.target))
   local trace_id = assert(canonical_json(body.trace_id))
   return "{"
-    .. '"action":' .. action
+    .. '"account_ref":' .. account_ref
     .. ',"actor":' .. actor
     .. ',"approval":' .. approval_json
     .. ',"client_command_id":' .. client_command_id
-    .. ',"parameters":' .. parameters
+    .. ',"mode":' .. mode
+    .. ',"operation":' .. operation
+    .. ',"payload":' .. payload
     .. ',"source":' .. source
-    .. ',"target":' .. target
     .. ',"trace_id":' .. trace_id
     .. "}"
 end
@@ -366,7 +330,7 @@ local function safe_line(value, limit)
   local normalized = first:lower()
   for _, part in ipairs(SENSITIVE_KEY_PARTS) do
     if normalized:find(part, 1, true) ~= nil then
-      return "Machine API request failed"
+      return "Automation API request failed"
     end
   end
   local max_len = limit or 256
@@ -393,8 +357,8 @@ function M.has_work_label(labels)
   return false
 end
 
-function M.action_catalog()
-  return copy(ACTIONS)
+function M.operation_catalog()
+  return automation_contract.catalog()
 end
 
 function M.is_valid_service_slug(value)
@@ -419,42 +383,47 @@ function M.parse_issue_document(body)
   end
   local command = envelope.command
   local command_exact, command_why = exact_fields(command, {
-    action = true,
-    target = true,
-    parameters = true,
+    account_ref = true,
+    operation = true,
+    payload = true,
   }, "command")
   if not command_exact then
     return nil, command_why
   end
-  if type(command.action) ~= "string" or ACTION_BY_NAME[command.action] == nil then
-    return nil, "unsupported action"
+  local metadata = type(command.operation) == "string" and automation_contract.metadata(command.operation) or nil
+  if metadata == nil then
+    return nil, "unsupported operation"
   end
-  if type(command.target) ~= "table" or table_shape(command.target) ~= "object" then
-    return nil, "target must be an object"
+  if type(command.account_ref) ~= "string" or command.account_ref == "" or #command.account_ref > 120 then
+    return nil, "account_ref must be a non-empty string of at most 120 bytes"
   end
-  if type(command.parameters) ~= "table" or table_shape(command.parameters) ~= "object" then
-    return nil, "parameters must be an object"
+  if type(command.payload) ~= "table" or table_shape(command.payload) ~= "object" then
+    return nil, "payload must be an object"
   end
   local valid, valid_why = validate_json_value(command, { nodes = 0 }, 0, "$.command")
   if not valid then
     return nil, valid_why
   end
-  if command.action == "group.profile_scan" and command.parameters.dry_run == false then
-    return nil, "group.profile_scan is always dry-run"
-  end
-  local canonical, canonical_why = canonical_json(command)
+  local machine_mode = mode == "preview" and "shadow" or "live"
+  local canonical, canonical_why = canonical_json({
+    account_ref = command.account_ref,
+    mode = machine_mode,
+    operation = command.operation,
+    payload = command.payload,
+  })
   if canonical == nil then
     return nil, canonical_why
   end
   return {
     mode = mode,
-    action = command.action,
-    target = copy(command.target),
-    parameters = copy(command.parameters),
+    machine_mode = machine_mode,
+    account_ref = command.account_ref,
+    operation = command.operation,
+    payload = copy(command.payload),
     canonical_json = canonical,
-    risk_tier = ACTION_BY_NAME[command.action].risk_tier,
-    required_scope = ACTION_BY_NAME[command.action].required_scope,
-    forced_dry_run = ACTION_BY_NAME[command.action].forced_dry_run,
+    risk_tier = metadata.risk_tier,
+    required_scope = metadata.required_scope,
+    side_effect_class = metadata.side_effect_class,
   }, nil
 end
 
@@ -506,7 +475,7 @@ local function approval_evidence(document, current_issue, opts)
       and has_login(options.approver_logins, approver)
       and tostring(comment.body or "") == document.canonical_json
       and approved_at:match("^%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%d[%d%.]*Z$") ~= nil
-      and comment_id:match("^[A-Za-z0-9_-]+$") ~= nil then
+      and comment_id:match("^[1-9]%d*$") ~= nil then
       selected = {
         approved_by = approver,
         approved_at = approved_at,
@@ -562,7 +531,7 @@ function M.authorize_live(document, current_issue, opts)
 end
 
 function M.machine_command(document, current_issue, approval)
-  if type(document) ~= "table" or ACTION_BY_NAME[document.action] == nil then
+  if type(document) ~= "table" or automation_contract.metadata(document.operation) == nil then
     return nil, "invalid command document"
   end
   local pointer, why = source_ref(current_issue and current_issue.source_ref)
@@ -579,9 +548,10 @@ function M.machine_command(document, current_issue, approval)
   local identity = command_identity(document, pointer)
   local body = {
     client_command_id = identity.client_command_id,
-    action = document.action,
-    target = copy(document.target),
-    parameters = copy(document.parameters),
+    account_ref = document.account_ref,
+    operation = document.operation,
+    mode = document.machine_mode,
+    payload = copy(document.payload),
     source = {
       provider = "github",
       repository = pointer.repo,
@@ -603,47 +573,12 @@ function M.decode_proxy_response(stdout, label)
   return decode_proxy_stdout(stdout, label or "NyxID proxy response")
 end
 
-function M.validate_capabilities(value)
+function M.validate_capabilities(value, expected_account_ref)
   local capabilities = value
   if type(value) == "string" then
     capabilities = decode_proxy_stdout(value, "Machine capabilities")
   end
-  if type(capabilities) ~= "table" or capabilities.version ~= "v1" or type(capabilities.actions) ~= "table" then
-    return false, "invalid Machine API capabilities"
-  end
-  local actual = {}
-  local count = 0
-  for _, item in ipairs(capabilities.actions) do
-    if type(item) ~= "table" or type(item.action) ~= "string" or actual[item.action] ~= nil then
-      return false, "Machine API action catalog mismatch"
-    end
-    actual[item.action] = item
-    count = count + 1
-  end
-  if count ~= #ACTIONS then
-    return false, "Machine API action catalog mismatch"
-  end
-  for _, expected in ipairs(ACTIONS) do
-    local item = actual[expected.action]
-    if item == nil then
-      return false, "Machine API action catalog mismatch"
-    end
-    if item.risk_tier ~= expected.risk_tier
-      or item.required_scope ~= expected.required_scope
-      or item.forced_dry_run ~= expected.forced_dry_run then
-      return false, "Machine API action metadata mismatch"
-    end
-  end
-  local exclusions = {}
-  for _, item in ipairs(type(capabilities.exclusions) == "table" and capabilities.exclusions or {}) do
-    exclusions[tostring(item)] = true
-  end
-  for required, _ in pairs(REQUIRED_EXCLUSIONS) do
-    if not exclusions[required] then
-      return false, "Machine API exclusions mismatch"
-    end
-  end
-  return true, nil
+  return automation_contract.validate_capabilities(capabilities, expected_account_ref)
 end
 
 function M.normalize_machine_response(value)
@@ -652,45 +587,55 @@ function M.normalize_machine_response(value)
     response = decode_proxy_stdout(value, "Machine command")
   end
   if type(response) ~= "table" then
-    return nil, "invalid Machine API response"
+    return nil, "invalid Automation API response"
   end
   local status = tostring(response.status or "")
-  if not COMMAND_STATUSES[status] then
-    return nil, "invalid Machine API status"
+  if not automation_contract.is_command_status(status) then
+    return nil, "invalid Automation API status"
   end
   local command_id = tostring(response.command_id or "")
   if command_id == "" or #command_id > 128 or command_id:find("%s") ~= nil then
-    return nil, "invalid Machine API command_id"
+    return nil, "invalid Automation API command_id"
   end
-  local action = tostring(response.action or "")
-  if ACTION_BY_NAME[action] == nil then
-    return nil, "invalid Machine API action"
+  local operation = tostring(response.operation or "")
+  local metadata = automation_contract.metadata(operation)
+  if metadata == nil then
+    return nil, "invalid Automation API operation"
+  end
+  local execution_outcome = tostring(response.execution_outcome or "")
+  if not automation_contract.is_execution_outcome(execution_outcome) then
+    return nil, "invalid Automation API execution_outcome"
+  end
+  if type(response.idempotent_replay) ~= "boolean" then
+    return nil, "invalid Automation API idempotent_replay"
   end
   local error_value = type(response.error) == "table" and response.error or {}
   return {
     command_id = command_id,
     client_command_id = safe_line(response.client_command_id, 128),
-    action = action,
+    operation = operation,
     status = status,
-    risk_tier = ACTION_BY_NAME[action].risk_tier,
+    risk_tier = metadata.risk_tier,
+    execution_outcome = execution_outcome,
+    idempotent_replay = response.idempotent_replay,
     trace_id = safe_line(response.trace_id, 128),
-    error_code = safe_line(error_value.code, 128),
+    error_code = safe_line(error_value.error_code, 128),
     error_message = safe_line(error_value.message, 256),
   }, nil
 end
 
 function M.validate_response_binding(response, command)
   if type(response) ~= "table" or type(command) ~= "table" or type(command.body) ~= "table" then
-    return false, "invalid Machine API response binding"
+    return false, "invalid Automation API response binding"
   end
-  if response.action ~= command.body.action then
-    return false, "Machine API response action mismatch"
+  if response.operation ~= command.body.operation then
+    return false, "Automation API response operation mismatch"
   end
   if response.client_command_id == "" or response.client_command_id ~= command.body.client_command_id then
-    return false, "Machine API response client_command_id mismatch"
+    return false, "Automation API response client_command_id mismatch"
   end
   if response.trace_id == "" or response.trace_id ~= command.body.trace_id then
-    return false, "Machine API response trace_id mismatch"
+    return false, "Automation API response trace_id mismatch"
   end
   return true, nil
 end
@@ -702,8 +647,9 @@ function M.preview_receipt(document, current_issue)
   end
   return {
     schema = "telegram-governance.command-receipt.v1",
-    action = document.action,
+    operation = document.operation,
     status = "preview",
+    execution_outcome = "not_attempted",
     risk_tier = document.risk_tier,
     idempotency_key = command.idempotency_key,
     trace_id = command.body.trace_id,
@@ -727,8 +673,9 @@ function M.blocked_receipt(document, current_issue, reason)
   end
   return {
     schema = "telegram-governance.command-receipt.v1",
-    action = type(document) == "table" and document.action or "unknown",
+    operation = type(document) == "table" and document.operation or "unknown",
     status = "blocked",
+    execution_outcome = "not_attempted",
     risk_tier = type(document) == "table" and document.risk_tier or "unknown",
     idempotency_key = identity and identity.idempotency_key or "telegram-governance/blocked/unknown",
     trace_id = identity and identity.trace_id or "tg:blocked",
@@ -742,8 +689,9 @@ function M.response_receipt(document, current_issue, command, response)
     schema = "telegram-governance.command-receipt.v1",
     command_id = response.command_id,
     client_command_id = response.client_command_id,
-    action = response.action,
+    operation = response.operation,
     status = response.status,
+    execution_outcome = response.execution_outcome,
     risk_tier = response.risk_tier or document.risk_tier,
     idempotency_key = command.idempotency_key,
     trace_id = response.trace_id ~= "" and response.trace_id or command.body.trace_id,
@@ -764,17 +712,27 @@ function M.receipt_comment(payload)
     return nil, why
   end
   local status = tostring(payload.status)
+  local execution_outcome = tostring(payload.execution_outcome or "")
+  if not automation_contract.is_execution_outcome(execution_outcome) then
+    return nil, "invalid Telegram governance execution outcome"
+  end
+  local operation = tostring(payload.operation or "")
+  if automation_contract.metadata(operation) == nil and not (status == "blocked" and operation == "unknown") then
+    return nil, "invalid Telegram governance operation"
+  end
   local identity = tostring(payload.command_id or "")
   if identity == "" then
     identity = safe_segment(payload.idempotency_key or "unknown", 128)
   else
     identity = safe_segment(identity, 128)
   end
-  local dedup_key = "telegram-governance/receipt/" .. identity .. "/" .. safe_segment(status, 32)
+  local dedup_key = "telegram-governance/receipt/" .. identity .. "/"
+    .. safe_segment(status, 32) .. "/" .. safe_segment(execution_outcome, 32)
   local body = "Telegram governance receipt\n\n"
     .. "status: " .. safe_line(status, 32) .. "\n"
-    .. "action: " .. safe_line(payload.action, 128) .. "\n"
+    .. "operation: " .. safe_line(operation, 128) .. "\n"
     .. "risk_tier: " .. safe_line(payload.risk_tier, 16) .. "\n"
+    .. "execution_outcome: " .. safe_line(execution_outcome, 32) .. "\n"
   if tostring(payload.command_id or "") ~= "" then
     body = body .. "command_id: " .. safe_line(payload.command_id, 128) .. "\n"
   end
