@@ -22,9 +22,9 @@ github-proxy.github_issue_observed --/       -> telegram_command_request (pointe
 
 ## Issue Contract / Issue Contract
 
-Issue 必须带 `telegram-governance` label，body 必须是一个不超过 32 KiB 的 JSON envelope。Package mode 只允许 `preview` 或 `live`，默认是 `preview`。`command` 只允许 `account_ref`、`operation` 和 `payload`。
+Issue 必须带 `telegram-governance` label，body 必须是一个不超过 32 KiB 的 JSON envelope。Package mode 允许 `preview`、`dry-run` 或 `live`，默认是 `preview`。`command` 只允许 `account_ref`、`operation` 和 `payload`。
 
-The Issue must carry the `telegram-governance` label and its body must be a JSON envelope no larger than 32 KiB. Package mode is either `preview` or `live` and defaults to `preview`. `command` contains exactly `account_ref`, `operation`, and `payload`.
+The Issue must carry the `telegram-governance` label and its body must be a JSON envelope no larger than 32 KiB. Package mode is `preview`, `dry-run`, or `live` and defaults to `preview`. `command` contains exactly `account_ref`, `operation`, and `payload`.
 
 ```json
 {
@@ -37,9 +37,9 @@ The Issue must carry the `telegram-governance` label and its body must be a JSON
 }
 ```
 
-Preview 在本地生成 shadow receipt，不调用 NyxID。Live 会向 TG 提交 `mode=live`。Payload 的最终 strict schema 由 TG OpenAPI/Pydantic contract 验证；package 同时限制 JSON 深度、大小、节点数和 credential-shaped fields。
+Preview 在本地生成 shadow receipt，不调用 NyxID。Dry-run 会 force-fresh 重读 Issue，通过 ordinary NyxID service 向 TG 提交 `mode=shadow`，并拒绝 R2 operation。Live 会向 TG 提交 `mode=live`。Payload 的最终 strict schema 由 TG OpenAPI/Pydantic contract 验证；package 同时限制 JSON 深度、大小、节点数和 credential-shaped fields。
 
-Preview emits a local shadow receipt without calling NyxID. Live submits `mode=live` to TG. The TG OpenAPI/Pydantic contract remains authoritative for each strict payload schema; the package also bounds JSON depth, size, node count, and credential-shaped fields.
+Preview emits a local shadow receipt without calling NyxID. Dry-run force-fresh re-reads the Issue, submits `mode=shadow` through the ordinary NyxID service, and rejects R2 operations. Live submits `mode=live` to TG. The TG OpenAPI/Pydantic contract remains authoritative for each strict payload schema; the package also bounds JSON depth, size, node count, and credential-shaped fields.
 
 ## Operation Contract / Operation Contract
 
@@ -89,6 +89,7 @@ R2 commands are submitted through the destructive NyxID service while capabiliti
 ```sh
 TELEGRAM_GOVERNANCE_WRITE=1
 TELEGRAM_GOVERNANCE_DESTRUCTIVE_WRITE=1
+TELEGRAM_GOVERNANCE_DRY_RUN=1
 TELEGRAM_GOVERNANCE_SERVICE_SLUG=telegram-automation-online
 TELEGRAM_GOVERNANCE_DESTRUCTIVE_SERVICE_SLUG=telegram-automation-destructive-online
 TELEGRAM_GOVERNANCE_TRUSTED_AUTHOR_LOGINS=alice

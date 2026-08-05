@@ -20,6 +20,7 @@ local VALUE_ENV = {
   TELEGRAM_GOVERNANCE_APPROVER_LOGINS = true,
   TELEGRAM_GOVERNANCE_DESTRUCTIVE_SERVICE_SLUG = true,
   TELEGRAM_GOVERNANCE_DESTRUCTIVE_WRITE = true,
+  TELEGRAM_GOVERNANCE_DRY_RUN = true,
   TELEGRAM_GOVERNANCE_SERVICE_SLUG = true,
   TELEGRAM_GOVERNANCE_TRUSTED_AUTHOR_LOGINS = true,
   TELEGRAM_GOVERNANCE_WRITE = true,
@@ -57,6 +58,7 @@ end
 
 local function runtime_options()
   return {
+    dry_run_enabled = strings.trim(read_env("TELEGRAM_GOVERNANCE_DRY_RUN") or "") == "1",
     write_enabled = strings.trim(read_env("TELEGRAM_GOVERNANCE_WRITE") or "") == "1",
     destructive_write_enabled = strings.trim(read_env("TELEGRAM_GOVERNANCE_DESTRUCTIVE_WRITE") or "") == "1",
     ordinary_service = strings.trim(read_env("TELEGRAM_GOVERNANCE_SERVICE_SLUG") or ""),
@@ -102,7 +104,7 @@ local function read_current_issue(github, payload)
   if document == nil then
     return current_issue, nil, why
   end
-  if document.mode ~= "live" then
+  if document.mode == "preview" then
     return current_issue, document, nil
   end
 
@@ -164,10 +166,15 @@ local function make_department(ports)
       return
     end
 
-    local live_options = options()
-    local live, live_why = core.authorize_live(document, current_issue, live_options)
-    if live == nil then
-      raise_blocked(document, current_issue, live_why)
+    local dispatch_options = options()
+    local authorization, authorization_why
+    if document.mode == "dry-run" then
+      authorization, authorization_why = core.authorize_dry_run(document, dispatch_options)
+    else
+      authorization, authorization_why = core.authorize_live(document, current_issue, dispatch_options)
+    end
+    if authorization == nil then
+      raise_blocked(document, current_issue, authorization_why)
       return
     end
     if type(nyxid.available) ~= "function" or not nyxid.available() then
@@ -175,7 +182,7 @@ local function make_department(ports)
       return
     end
 
-    local capabilities_result = nyxid.request(live_options.ordinary_service, "/capabilities", "GET")
+    local capabilities_result = nyxid.request(dispatch_options.ordinary_service, "/capabilities", "GET")
     if type(capabilities_result) ~= "table" or capabilities_result.exit_code ~= 0 then
       raise_blocked(document, current_issue, "Automation API capabilities request failed")
       return
@@ -191,12 +198,12 @@ local function make_department(ports)
       return
     end
 
-    local command, command_why = core.machine_command(document, current_issue, live.approval)
+    local command, command_why = core.machine_command(document, current_issue, authorization.approval)
     if command == nil then
       raise_blocked(document, current_issue, command_why)
       return
     end
-    local command_result = nyxid.request(live.service, "/commands", "POST", command.body_json, {
+    local command_result = nyxid.request(authorization.service, "/commands", "POST", command.body_json, {
       ["Idempotency-Key"] = command.idempotency_key,
       ["X-Trace-ID"] = command.body.trace_id,
     })

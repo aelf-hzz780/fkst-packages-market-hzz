@@ -40,6 +40,7 @@ end
 
 local function live_options(overrides)
   local value = {
+    dry_run_enabled = true,
     write_enabled = true,
     destructive_write_enabled = true,
     nyxid_access_token_present = true,
@@ -92,6 +93,43 @@ return {
     t.eq(#core.operation_catalog(), 24)
   end,
 
+  test_dry_run_maps_to_shadow_and_uses_an_independent_gate = function()
+    local document = assert(core.parse_issue_document(
+      '{"mode":"dry-run","command":{"account_ref":"telegram-primary","operation":"group.sync","payload":{"group_id":-1001}}}'
+    ))
+    local authorization, why = core.authorize_dry_run(document, live_options({ write_enabled = false }))
+    local command = assert(core.machine_command(document, issue(), authorization and authorization.approval))
+
+    t.is_nil(why)
+    t.eq(document.mode, "dry-run")
+    t.eq(document.machine_mode, "shadow")
+    t.eq(authorization.service, "telegram-machine-online")
+    t.eq(authorization.approval, nil)
+    t.eq(command.body.mode, "shadow")
+  end,
+
+  test_dry_run_fails_closed_without_gate_token_service_or_for_r2 = function()
+    local document = assert(core.parse_issue_document(
+      '{"mode":"dry-run","command":{"account_ref":"telegram-primary","operation":"group.sync","payload":{"group_id":-1001}}}'
+    ))
+    local destructive = assert(core.parse_issue_document(
+      '{"mode":"dry-run","command":{"account_ref":"telegram-primary","operation":"moderation.user.restore","payload":{"group_id":-1001,"restriction_audit_id":73,"user_id":42}}}'
+    ))
+    local cases = {
+      { document = document, options = live_options({ dry_run_enabled = false }), why = "dry-run switch disabled" },
+      { document = document, options = live_options({ nyxid_access_token_present = false }), why = "nyxid access token missing" },
+      { document = document, options = live_options({ ordinary_service = "" }), why = "ordinary NyxID service missing" },
+      { document = document, options = live_options({ ordinary_service = "secret://bad" }), why = "invalid ordinary NyxID service slug" },
+      { document = destructive, options = live_options(), why = "dry-run does not allow R2 operations" },
+    }
+
+    for _, case in ipairs(cases) do
+      local authorization, why = core.authorize_dry_run(case.document, case.options)
+      t.is_nil(authorization)
+      t.eq(why, case.why)
+    end
+  end,
+
   test_issue_contract_rejects_invalid_json_unknown_fields_and_invalid_mode = function()
     local invalid_json, invalid_why = core.parse_issue_document("not-json")
     local unknown, unknown_why = core.parse_issue_document('{"mode":"preview","command":{"account_ref":"telegram-primary","operation":"group.sync","payload":{}},"extra":1}')
@@ -102,7 +140,7 @@ return {
     t.is_nil(unknown)
     t.eq(unknown_why, "unknown envelope field: extra")
     t.is_nil(invalid_mode)
-    t.eq(mode_why, "mode must be preview or live")
+    t.eq(mode_why, "mode must be preview, dry-run, or live")
   end,
 
   test_issue_contract_rejects_unknown_operation_sensitive_fields_and_oversized_values = function()

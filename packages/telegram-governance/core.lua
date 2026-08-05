@@ -378,8 +378,8 @@ function M.parse_issue_document(body)
     return nil, exact_why
   end
   local mode = envelope.mode or "preview"
-  if mode ~= "preview" and mode ~= "live" then
-    return nil, "mode must be preview or live"
+  if mode ~= "preview" and mode ~= "dry-run" and mode ~= "live" then
+    return nil, "mode must be preview, dry-run, or live"
   end
   local command = envelope.command
   local command_exact, command_why = exact_fields(command, {
@@ -404,7 +404,7 @@ function M.parse_issue_document(body)
   if not valid then
     return nil, valid_why
   end
-  local machine_mode = mode == "preview" and "shadow" or "live"
+  local machine_mode = mode == "live" and "live" or "shadow"
   local canonical, canonical_why = canonical_json({
     account_ref = command.account_ref,
     mode = machine_mode,
@@ -489,6 +489,29 @@ local function approval_evidence(document, current_issue, opts)
     return nil, "destructive approval missing"
   end
   return selected, nil
+end
+
+function M.authorize_dry_run(document, opts)
+  local options = opts or {}
+  if type(document) ~= "table" or document.mode ~= "dry-run" then
+    return nil, "not a dry-run command"
+  end
+  if document.risk_tier == "R2" then
+    return nil, "dry-run does not allow R2 operations"
+  end
+  if options.dry_run_enabled ~= true then
+    return nil, "dry-run switch disabled"
+  end
+  if options.nyxid_access_token_present ~= true then
+    return nil, "nyxid access token missing"
+  end
+  if tostring(options.ordinary_service or "") == "" then
+    return nil, "ordinary NyxID service missing"
+  end
+  if not valid_slug(options.ordinary_service) then
+    return nil, "invalid ordinary NyxID service slug"
+  end
+  return { service = options.ordinary_service, approval = nil }, nil
 end
 
 function M.authorize_live(document, current_issue, opts)

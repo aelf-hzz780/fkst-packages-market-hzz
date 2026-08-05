@@ -124,6 +124,7 @@ end
 
 local function options(overrides)
   local value = {
+    dry_run_enabled = true,
     write_enabled = true,
     destructive_write_enabled = true,
     nyxid_access_token_present = true,
@@ -202,6 +203,59 @@ return {
     t.eq(#raises, 1)
     t.eq(raises[1].queue, "telegram_command_receipt")
     t.eq(raises[1].payload.status, "preview")
+  end,
+
+  test_dry_run_force_fresh_preflights_and_posts_shadow_through_ordinary_service = function()
+    local read_options = nil
+    local fixture = issue_fixture('{"mode":"dry-run","command":{"account_ref":"telegram-primary","operation":"group.sync","payload":{"group_id":-1001}}}')
+    local github = {
+      read_issue = function(_source_ref, received)
+        read_options = received
+        return {
+          number = fixture.number,
+          body = fixture.body,
+          labels = fixture.labels,
+          comments = fixture.comments,
+          author_login = fixture.author.login,
+          source_ref = source_ref(),
+        }
+      end,
+    }
+    local client = fake_nyxid({
+      { exit_code = 0, stdout = capabilities_stdout(), stderr = "" },
+      command_response("succeeded", "44444444-4444-4444-8444-444444444444"),
+    })
+    local department = load_department("departments.execute_command.main", {
+      github = github,
+      nyxid = client,
+      options = options({ write_enabled = false }),
+    })
+    local raises = {}
+    local old_raise = raise
+    raise = function(queue, payload)
+      table.insert(raises, { queue = queue, payload = payload })
+    end
+    department.pipeline({
+      queue = "telegram_command_request",
+      payload = {
+        schema = "telegram-governance.command-request.v1",
+        trigger = "changed",
+        source_ref = source_ref(),
+        dedup_key = "telegram-governance/intake/42",
+        trace_id = "trace-42",
+      },
+    })
+    raise = old_raise
+
+    t.eq(read_options.force_fresh, true)
+    t.eq(#client.calls, 2)
+    t.eq(client.calls[1].service, "telegram-machine-online")
+    t.eq(client.calls[1].path, "/capabilities")
+    t.eq(client.calls[2].service, "telegram-machine-online")
+    t.eq(client.calls[2].path, "/commands")
+    t.eq(json.decode(client.calls[2].body).mode, "shadow")
+    t.eq(raises[1].payload.status, "succeeded")
+    t.eq(raises[1].payload.execution_outcome, "not_attempted")
   end,
 
   test_live_force_fresh_preflights_then_posts_with_stable_idempotency = function()

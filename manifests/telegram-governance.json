@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "telegram-governance",
-  "description": "GitHub issue driven Telegram governance workflow for Telethon Auto's canonical automation.v1 contract. Preview is the default; live commands require force-fresh GitHub authority, NyxID preflight, explicit write switches, and independent two-person approval for R2 operations.",
+  "description": "GitHub issue driven Telegram governance workflow for Telethon Auto's canonical automation.v1 contract. Preview is local-only, dry-run dispatches shadow commands through NyxID, and live commands require explicit write switches plus independent two-person approval for R2 operations.",
   "packages": [
     "aelf-hzz780/fkst-packages-market-hzz@v0.2.0-rc.1:packages/telegram-governance"
   ],
@@ -17,6 +17,7 @@
     "accessTokenEnv": "NYXID_ACCESS_TOKEN",
     "ordinaryServiceEnv": "TELEGRAM_GOVERNANCE_SERVICE_SLUG",
     "destructiveServiceEnv": "TELEGRAM_GOVERNANCE_DESTRUCTIVE_SERVICE_SLUG",
+    "dryRunSwitchEnv": "TELEGRAM_GOVERNANCE_DRY_RUN",
     "ordinaryWriteSwitchEnv": "TELEGRAM_GOVERNANCE_WRITE",
     "destructiveWriteSwitchEnv": "TELEGRAM_GOVERNANCE_DESTRUCTIVE_WRITE",
     "trustedAuthorLoginsEnv": "TELEGRAM_GOVERNANCE_TRUSTED_AUTHOR_LOGINS",
@@ -26,6 +27,7 @@
   },
   "workflow": {
     "defaultMode": "preview",
+    "dryRunMode": "force-fresh-github-authority-plus-nyxid-shadow-command",
     "publishedSeam": "telegram-governance.telegram_command_request",
     "receiptQueue": "telegram-governance.telegram_command_receipt",
     "receiptDeduplication": "command-id-status-and-execution-outcome",
