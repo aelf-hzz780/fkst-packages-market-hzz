@@ -48,6 +48,21 @@ local function run_publish(payload, env)
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command('printf %s "$X_PUBLISH_NATIVE_QUOTE"', {
+    stdout = env_values.X_PUBLISH_NATIVE_QUOTE or "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_X_PUBLISH_NATIVE_QUOTE"', {
+    stdout = env_values.FKST_X_PUBLISH_NATIVE_QUOTE or "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_SESSION_PACKAGE_ENV_JSON"', {
+    stdout = env_values.FKST_SESSION_PACKAGE_ENV_JSON or "",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command('if [ -n "$NYXID_ACCESS_TOKEN" ]; then printf 1; else printf 0; fi', {
     stdout = env_values.NYXID_ACCESS_TOKEN and "1" or "0",
     stderr = "",
@@ -290,6 +305,8 @@ return {
   end,
 
   test_live_publish_blocks_when_account_preflight_fails = function()
+    mock_author_env()
+    mock_content_issue(42, "tweet: account preflight failure")
     mock_nyxid_cli_available()
     t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
       stdout = "",
@@ -307,6 +324,8 @@ return {
   end,
 
   test_live_publish_blocks_when_account_preflight_returns_problem_json = function()
+    mock_author_env()
+    mock_content_issue(42, "tweet: account preflight problem response")
     mock_nyxid_cli_available()
     t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
       stdout = '{"detail":"Service Unavailable","status":503,"title":"Service Unavailable","type":"about:blank"}',
@@ -324,6 +343,8 @@ return {
   end,
 
   test_live_publish_blocks_when_account_is_unexpected = function()
+    mock_author_env()
+    mock_content_issue(42, "tweet: unexpected account")
     mock_nyxid_cli_available()
     t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
       stdout = '{"data":{"id":"100000000000000002","name":"Other User","username":"other_user"}}',
@@ -537,6 +558,132 @@ FKST live publish verification for example_user via NyxID. Test post.
     t.eq(receipt.account_username, "example_user")
     t.eq(count_calls("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET"), 1)
     t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 1)
+  end,
+
+  test_live_native_quote_requires_explicit_capability_gate = function()
+    mock_author_env()
+    mock_content_issue(42, [[
+type: weekly-content
+week: 2026-W32
+operation: quote
+quote-mode: native
+quote-url: https://x.com/example/status/1234567890123456789
+tweet: Native Quote capability check
+]])
+    mock_nyxid_cli_available()
+    t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
+      stdout = '{"data":{"id":"100000000000000001","name":"Example User","username":"example_user"}}',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_publish(live_payload("native-quote-gate"), live_env())
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].payload.status, "blocked")
+    t.eq(result.raises[1].payload.blocked_reason, "native quote capability disabled")
+    t.eq(result.raises[1].payload.quote_target_post_id, "1234567890123456789")
+    t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 0)
+  end,
+
+  test_live_native_quote_publishes_exact_body_once = function()
+    local env_values = live_env()
+    env_values.FKST_SESSION_PACKAGE_ENV_JSON =
+      '{"x-publisher":{"FKST_X_PUBLISH_NATIVE_QUOTE":"1"}}'
+    mock_author_env()
+    mock_content_issue(42, [[
+type: weekly-content
+week: 2026-W32
+operation: quote
+quote-mode: native
+quote-url: https://twitter.com/Example/status/1234567890123456789?source=fkst
+tweet: Native Quote commentary
+]])
+    mock_nyxid_cli_available()
+    t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
+      stdout = '{"data":{"id":"100000000000000001","name":"Example User","username":"example_user"}}',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("nyxid proxy request api-twitter-2-media /tweets -m POST", {
+      stdout = '{"data":{"id":"2234567890123456789"}}',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_publish(live_payload("native-quote"), env_values)
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local receipt = result.raises[1].payload
+    t.eq(receipt.status, "published")
+    t.eq(receipt.operation, "quote")
+    t.eq(receipt.quote_mode, "native")
+    t.eq(receipt.quote_target_uri, "https://x.com/example/status/1234567890123456789")
+    t.eq(count_calls('"quote_tweet_id":"1234567890123456789"'), 1)
+    t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 1)
+  end,
+
+  test_native_quote_provider_failure_does_not_fallback = function()
+    local env_values = live_env()
+    env_values.X_PUBLISH_NATIVE_QUOTE = "1"
+    mock_author_env()
+    mock_content_issue(42, [[
+operation: quote
+quote-mode: native
+quote-url: https://x.com/example/status/1234567890123456789
+tweet: No fallback commentary
+]])
+    mock_nyxid_cli_available()
+    t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
+      stdout = '{"data":{"id":"100000000000000001","name":"Example User","username":"example_user"}}',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("nyxid proxy request api-twitter-2-media /tweets -m POST", {
+      stdout = '{"status":403,"title":"Forbidden"}',
+      stderr = "Proxy request failed",
+      exit_code = 1,
+    })
+
+    local result = run_publish(live_payload("native-quote-failure"), env_values)
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].payload.status, "blocked")
+    t.eq(result.raises[1].payload.blocked_reason, "nyxid quote publish failed")
+    t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 1)
+    t.eq(count_calls("https://x.com/example/status/1234567890123456789"), 0)
+  end,
+
+  test_live_link_quote_appends_canonical_url_without_native_field = function()
+    mock_author_env()
+    mock_content_issue(42, [[
+operation: quote
+quote-mode: link
+quote-url: https://twitter.com/Example/status/1234567890123456789?source=fkst
+tweet: Link Quote commentary
+]])
+    mock_nyxid_cli_available()
+    t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
+      stdout = '{"data":{"id":"100000000000000001","name":"Example User","username":"example_user"}}',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("nyxid proxy request api-twitter-2-media /tweets -m POST", {
+      stdout = '{"data":{"id":"3234567890123456789"}}',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_publish(live_payload("link-quote"), live_env())
+
+    t.eq(result.exit_code, 0)
+    t.eq(result.raises[1].payload.status, "published")
+    t.eq(result.raises[1].payload.quote_mode, "link")
+    t.eq(count_calls('Link Quote commentary\\n\\nhttps://x.com/example/status/1234567890123456789'), 1)
+    t.eq(count_calls("quote_tweet_id"), 0)
   end,
 
   test_live_publish_duplicate_dedup_key_skips_second_post = function()

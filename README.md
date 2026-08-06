@@ -6,7 +6,7 @@ This repository intentionally contains only the marketing capability layer. Gene
 
 ## Packages
 
-- `packages/x-publisher`: text-only X publishing seam. Live writes are gated by user-owned Environment Profile / NyxID configuration.
+- `packages/x-publisher`: text-only X Post and Quote publishing seam. Live writes are gated by user-owned Environment Profile / NyxID configuration.
 - `packages/github-auto-twitter-marketing`: imports strategy issues, weekly content issues, and schedule-publish issues from GitHub events.
 - `packages/marketing-radar`: imports radar configuration/signals and creates weekly-content or schedule-publish issue requests.
 
@@ -66,10 +66,27 @@ X_PUBLISH_WRITE=1
 NYXID_URL=<nyxid-api-url>
 NYXID_X_SERVICE_SLUG=<user-owned-x-service-slug>
 X_PUBLISH_EXPECTED_USERNAME=<expected-x-username>
+# Required only for native Quote publishing.
+X_PUBLISH_NATIVE_QUOTE=1
 NYXID_ACCESS_TOKEN=<user-owned-nyxid-agent-key>
 ```
 
-`x-publisher` checks that the NyxID CLI is available, verifies the configured X account through `/users/me`, and only then sends the text-only tweet request through NyxID.
+`x-publisher` validates source-backed Post/Quote content, checks that the NyxID CLI is available,
+verifies the configured X account through `/users/me`, and only then sends the text-only request
+through NyxID. Native Quote additionally requires `X_PUBLISH_NATIVE_QUOTE=1`; Link Quote uses the
+ordinary Post authority.
+
+For a Hosted trigger, Native Quote can instead be enabled without editing the Environment Profile:
+
+```md
+### Package Env
+
+#### x-publisher
+FKST_X_PUBLISH_NATIVE_QUOTE=1
+```
+
+Hosted trigger 也可通过上述 `### Package Env` 显式开启 Native Quote，无需修改 Environment
+Profile；该能力仍默认关闭，且不会绕过 live-write、account 或 NyxID 检查。
 
 ## Local development
 

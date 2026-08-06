@@ -5,6 +5,7 @@ local ports_lib = require("forge.ports")
 local saga = require("workflow.saga")
 local env = require("workflow.env")
 local strings = require("contract.strings")
+local package_env = require("x_publisher_package_env")
 
 local spec = {
   consumes = { "x_publish_request" },
@@ -20,9 +21,11 @@ local VALUE_ENV = {
   FKST_GITHUB_AUTHORIZED_LOGINS = true,
   FKST_GITHUB_BOT_LOGIN = true,
   FKST_NYXID_X_SERVICE_SLUG = true,
+  FKST_X_PUBLISH_NATIVE_QUOTE = true,
   FKST_X_PUBLISH_EXPECTED_USERNAME = true,
   FKST_X_PUBLISH_WRITE = true,
   NYXID_X_SERVICE_SLUG = true,
+  X_PUBLISH_NATIVE_QUOTE = true,
   X_PUBLISH_EXPECTED_USERNAME = true,
   X_PUBLISH_WRITE = true,
 }
@@ -63,6 +66,17 @@ local function first_non_empty_env(names)
   return ""
 end
 
+local function native_quote_enabled()
+  local process_value = first_non_empty_env({
+    "X_PUBLISH_NATIVE_QUOTE",
+    "FKST_X_PUBLISH_NATIVE_QUOTE",
+  })
+  if process_value == "1" then
+    return true
+  end
+  return strings.trim(package_env.get("FKST_X_PUBLISH_NATIVE_QUOTE") or "") == "1"
+end
+
 local function live_options()
   local write_gate = first_non_empty_env({ "X_PUBLISH_WRITE", "FKST_X_PUBLISH_WRITE" })
   return {
@@ -91,10 +105,10 @@ local function live_environment_ready(options)
   return true, nil
 end
 
-local function block(payload, reason)
+local function block(payload, reason, intent)
   log.warn("x-publisher dept=publish_x tag=BLOCKED reason=" .. tostring(reason)
     .. " artifact_id=" .. tostring(payload.artifact_id))
-  raise("x_published", publish_caps.blocked_receipt(payload, reason))
+  raise("x_published", publish_caps.blocked_receipt(payload, reason, intent))
 end
 
 local function skip_duplicate(payload)
@@ -132,7 +146,7 @@ local function preflight_username(payload, options)
   return username, nil
 end
 
-local function resolve_tweet_text(github, payload)
+local function resolve_publish_intent(github, payload)
   local content_ref, ref_why = publish_caps.content_source_ref(payload)
   if content_ref == nil then
     return nil, ref_why
@@ -149,10 +163,10 @@ local function resolve_tweet_text(github, payload)
   if not ok or type(issue) ~= "table" then
     return nil, "github content read failed"
   end
-  return publish_caps.extract_tweet_text(issue.body, payload)
+  return publish_caps.extract_publish_intent(issue.body, payload)
 end
 
-local function publish_tweet(payload, options, username, tweet_text)
+local function publish_tweet(payload, options, username, intent)
   local result = nyxid_request({
     "nyxid",
     "proxy",
@@ -162,10 +176,11 @@ local function publish_tweet(payload, options, username, tweet_text)
     "-m",
     "POST",
     "-d",
-    publish_caps.tweet_body_json(tweet_text),
+    publish_caps.publish_body_json(intent),
   }, 60)
   if type(result) ~= "table" or result.exit_code ~= 0 then
-    return nil, "nyxid tweet publish failed"
+    local operation = type(intent) == "table" and intent.operation or "post"
+    return nil, operation == "quote" and "nyxid quote publish failed" or "nyxid tweet publish failed"
   end
   local tweet_id = publish_caps.parse_nyxid_tweet_id(result.stdout)
   if tweet_id == nil then
@@ -175,6 +190,7 @@ local function publish_tweet(payload, options, username, tweet_text)
     id = tweet_id,
     username = username,
     nyxid_x_service = options.nyxid_x_service,
+    intent = intent,
   }), nil
 end
 
@@ -216,22 +232,27 @@ local function make_department(ports)
       return
     end
 
-    local username, username_why = preflight_username(payload, options)
-    if username_why ~= nil then
-      block(payload, username_why)
+    local intent, intent_why = resolve_publish_intent(github, payload)
+    if intent == nil then
+      block(payload, intent_why)
       return
     end
 
-    local tweet_text, text_why = resolve_tweet_text(github, payload)
-    if tweet_text == nil then
-      block(payload, text_why)
+    local username, username_why = preflight_username(payload, options)
+    if username_why ~= nil then
+      block(payload, username_why, intent)
+      return
+    end
+    if intent.operation == "quote" and intent.quote_post.mode == "native"
+        and not native_quote_enabled() then
+      block(payload, "native quote capability disabled", intent)
       return
     end
 
     local ran = once(publish_once_key, function()
-      local receipt, publish_why = publish_tweet(payload, options, username, tweet_text)
+      local receipt, publish_why = publish_tweet(payload, options, username, intent)
       if receipt == nil then
-        block(payload, publish_why)
+        block(payload, publish_why, intent)
         return
       end
       log.info("x-publisher dept=publish_x tag=PUBLISHED artifact_id=" .. tostring(payload.artifact_id)
