@@ -97,11 +97,14 @@ tweet: Quote commentary text
 ```
 
 `native` sends the original commentary plus `quote_tweet_id` and requires
-`X_PUBLISH_NATIVE_QUOTE=1`. `link` appends `\n\n<canonical-url>` and uses ordinary Post authority.
-Native failure never falls back to Link.
+`X_PUBLISH_NATIVE_QUOTE=1` in the Environment Profile or `FKST_X_PUBLISH_NATIVE_QUOTE=1` under the
+Hosted trigger's `### Package Env` / `#### x-publisher`. `link` appends
+`\n\n<canonical-url>` and uses ordinary Post authority. Native failure never falls back to Link.
 
-`native` 发送原始评论正文和 `quote_tweet_id`，并要求 `X_PUBLISH_NATIVE_QUOTE=1`；`link`
-追加 `\n\n<canonical-url>`，沿用普通 Post 权限。Native 失败不会自动降级为 Link。
+`native` 发送原始评论正文和 `quote_tweet_id`，并要求 Environment Profile 中的
+`X_PUBLISH_NATIVE_QUOTE=1`，或 Hosted trigger 的 `### Package Env` / `#### x-publisher` 下的
+`FKST_X_PUBLISH_NATIVE_QUOTE=1`；`link` 追加 `\n\n<canonical-url>`，沿用普通 Post 权限。
+Native 失败不会自动降级为 Link。
 
 ## Schedule publish issue
 

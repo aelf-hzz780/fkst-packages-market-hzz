@@ -64,12 +64,14 @@ Quote commentary text.
 ````
 
 `quote-mode` may be `native` or `link`. Quote fields belong only to the weekly-content Issue; the
-schedule Issue cannot override them. `native` also requires `X_PUBLISH_NATIVE_QUOTE=1` in the user
-Environment Profile. `link` uses the ordinary Post authority.
+schedule Issue cannot override them. `native` also requires either `X_PUBLISH_NATIVE_QUOTE=1` in
+the user Environment Profile or `FKST_X_PUBLISH_NATIVE_QUOTE=1` in the trigger's `### Package Env`
+for `#### x-publisher`. `link` uses the ordinary Post authority.
 
 `quote-mode` 可选 `native` 或 `link`。Quote 字段只属于 weekly-content Issue，schedule Issue
-不能覆盖。`native` 还要求用户 Environment Profile 配置 `X_PUBLISH_NATIVE_QUOTE=1`；`link`
-沿用普通 Post 权限。
+不能覆盖。`native` 还要求用户 Environment Profile 配置 `X_PUBLISH_NATIVE_QUOTE=1`，或在
+trigger 的 `### Package Env` / `#### x-publisher` 下配置
+`FKST_X_PUBLISH_NATIVE_QUOTE=1`；`link` 沿用普通 Post 权限。
 
 Schedule publish:
 

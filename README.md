@@ -76,6 +76,18 @@ verifies the configured X account through `/users/me`, and only then sends the t
 through NyxID. Native Quote additionally requires `X_PUBLISH_NATIVE_QUOTE=1`; Link Quote uses the
 ordinary Post authority.
 
+For a Hosted trigger, Native Quote can instead be enabled without editing the Environment Profile:
+
+```md
+### Package Env
+
+#### x-publisher
+FKST_X_PUBLISH_NATIVE_QUOTE=1
+```
+
+Hosted trigger 也可通过上述 `### Package Env` 显式开启 Native Quote，无需修改 Environment
+Profile；该能力仍默认关闭，且不会绕过 live-write、account 或 NyxID 检查。
+
 ## Local development
 
 Build or obtain `fkst-framework` from `fkst-substrate`, then configure the local ignored environment file:

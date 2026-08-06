@@ -53,6 +53,11 @@ local function run_publish(payload, env)
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command('printf %s "$FKST_X_PUBLISH_NATIVE_QUOTE"', {
+    stdout = env_values.FKST_X_PUBLISH_NATIVE_QUOTE or "",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command('if [ -n "$NYXID_ACCESS_TOKEN" ]; then printf 1; else printf 0; fi', {
     stdout = env_values.NYXID_ACCESS_TOKEN and "1" or "0",
     stderr = "",
@@ -579,7 +584,7 @@ tweet: Native Quote capability check
 
   test_live_native_quote_publishes_exact_body_once = function()
     local env_values = live_env()
-    env_values.X_PUBLISH_NATIVE_QUOTE = "1"
+    env_values.FKST_X_PUBLISH_NATIVE_QUOTE = "1"
     mock_author_env()
     mock_content_issue(42, [[
 type: weekly-content
