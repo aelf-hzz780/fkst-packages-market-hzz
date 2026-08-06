@@ -3,6 +3,7 @@ local core = require("core")
 return {
   blocked_receipt = core.blocked_receipt,
   content_source_ref = core.content_source_ref,
+  extract_publish_intent = core.extract_publish_intent,
   extract_tweet_text = core.extract_tweet_text,
   live_gate = core.live_gate,
   live_receipt = core.live_receipt,
@@ -10,6 +11,7 @@ return {
   parse_nyxid_username = core.parse_nyxid_username,
   preview_receipt = core.preview_receipt,
   publish_once_key = core.publish_once_key,
+  publish_body_json = core.publish_body_json,
   tweet_body_json = core.tweet_body_json,
   validate_publish_request = core.validate_publish_request,
 }

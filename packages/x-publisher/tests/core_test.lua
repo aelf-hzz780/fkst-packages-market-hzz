@@ -360,10 +360,132 @@ FKST interval recurring verification for example_user. occurrence={{occurrence_i
     t.is_nil(unsupported)
     t.eq(unsupported_why, "unsupported tweet placeholder")
   end,
+  test_extract_publish_intent_keeps_legacy_post_compatible = function()
+    local intent, why = core.extract_publish_intent("tweet: Existing post contract")
+
+    t.eq(why, nil)
+    t.eq(intent.operation, "post")
+    t.eq(intent.text, "Existing post contract")
+    t.eq(intent.publish_text, "Existing post contract")
+    t.is_nil(intent.quote_post)
+  end,
+  test_extract_publish_intent_normalizes_native_quote_target = function()
+    local intent, why = core.extract_publish_intent([[
+operation: quote
+quote-mode: native
+quote-url: https://twitter.com/Example_User/status/2084047583316758780?ref_src=twsrc%5Etfw
+
+tweet-text:
+```
+Commentary text
+```
+]])
+
+    t.eq(why, nil)
+    t.eq(intent.operation, "quote")
+    t.eq(intent.text, "Commentary text")
+    t.eq(intent.publish_text, "Commentary text")
+    t.eq(intent.quote_post.mode, "native")
+    t.eq(intent.quote_post.provider_post_id, "2084047583316758780")
+    t.eq(intent.quote_post.author_handle, "example_user")
+    t.eq(intent.quote_post.url, "https://x.com/example_user/status/2084047583316758780")
+  end,
+  test_extract_publish_intent_builds_link_quote_text_once = function()
+    local intent, why = core.extract_publish_intent([[
+operation: quote
+quote-mode: link
+quote-url: https://x.com/i/web/status/2084047583316758780
+tweet: Commentary text
+]])
+
+    t.eq(why, nil)
+    t.eq(intent.operation, "quote")
+    t.eq(intent.publish_text,
+      "Commentary text\n\nhttps://x.com/i/web/status/2084047583316758780")
+    t.eq(intent.quote_post.mode, "link")
+    t.is_nil(intent.quote_post.author_handle)
+  end,
+  test_extract_publish_intent_rejects_invalid_or_incomplete_quote_contracts = function()
+    local cases = {
+      { "operation: quote\nquote-mode: native\ntweet: text", "missing quote url" },
+      { "operation: quote\nquote-url: https://x.com/a/status/1\ntweet: text", "missing quote mode" },
+      { "operation: quote\nquote-mode: fallback\nquote-url: https://x.com/a/status/1\ntweet: text", "unsupported quote mode" },
+      { "operation: quote\nquote-mode: native\nquote-url: http://x.com/a/status/1\ntweet: text", "invalid quote url" },
+      { "operation: quote\nquote-mode: native\nquote-url: https://user@x.com/a/status/1\ntweet: text", "invalid quote url" },
+      { "operation: quote\nquote-mode: native\nquote-url: https://x.com:443/a/status/1\ntweet: text", "invalid quote url" },
+      { "operation: quote\nquote-mode: native\nquote-url: https://x.com/a/status/1#fragment\ntweet: text", "invalid quote url" },
+      { "operation: quote\nquote-mode: native\nquote-url: https://example.com/a/status/1\ntweet: text", "invalid quote url" },
+      { "operation: quote\nquote-mode: native\nquote-url: https://x.com/a/home/1\ntweet: text", "invalid quote url" },
+      { "operation: post\nquote-mode: native\nquote-url: https://x.com/a/status/1\ntweet: text", "quote fields require quote operation" },
+      { "operation: thread\ntweet: text", "unsupported operation" },
+    }
+
+    for _, case in ipairs(cases) do
+      local intent, why = core.extract_publish_intent(case[1])
+      t.is_nil(intent)
+      t.eq(why, case[2])
+    end
+  end,
+  test_extract_publish_intent_rejects_duplicate_quote_control_fields = function()
+    local cases = {
+      "operation: quote\noperation: post\nquote-mode: native\nquote-url: https://x.com/a/status/1\ntweet: text",
+      "operation: quote\nquote-mode: native\nquote_mode: link\nquote-url: https://x.com/a/status/1\ntweet: text",
+      "operation: quote\nquote-mode: native\nquote-url: https://x.com/a/status/1\nquote-url: https://x.com/b/status/2\ntweet: text",
+    }
+
+    for _, body in ipairs(cases) do
+      local intent, why = core.extract_publish_intent(body)
+      t.is_nil(intent)
+      t.eq(why, "duplicate quote control field")
+    end
+  end,
+  test_weighted_length_matches_quote_boundary_vectors = function()
+    local native = core.extract_publish_intent("operation: quote\nquote-mode: native\nquote-url: https://x.com/a/status/1\ntweet: "
+      .. string.rep("中", 140))
+    local native_too_long, native_why = core.extract_publish_intent(
+      "operation: quote\nquote-mode: native\nquote-url: https://x.com/a/status/1\ntweet: "
+        .. string.rep("中", 141))
+    local link = core.extract_publish_intent("operation: quote\nquote-mode: link\nquote-url: https://x.com/a/status/1\ntweet: "
+      .. string.rep("x", 255))
+    local link_too_long, link_why = core.extract_publish_intent(
+      "operation: quote\nquote-mode: link\nquote-url: https://x.com/a/status/1\ntweet: "
+        .. string.rep("x", 256))
+
+    t.eq(native.weighted_length, 280)
+    t.eq(link.weighted_length, 280)
+    t.is_nil(native_too_long)
+    t.eq(native_why, "tweet text too long")
+    t.is_nil(link_too_long)
+    t.eq(link_why, "tweet text too long")
+  end,
+  test_weighted_length_counts_emoji_cluster_as_two = function()
+    local intent = assert(core.extract_publish_intent(
+      "operation: quote\nquote-mode: native\nquote-url: https://x.com/a/status/1\ntweet: "
+        .. string.rep("👨‍👩‍👧‍👦", 140)))
+    local too_long, why = core.extract_publish_intent(
+      "operation: quote\nquote-mode: native\nquote-url: https://x.com/a/status/1\ntweet: "
+        .. string.rep("👨‍👩‍👧‍👦", 141))
+
+    t.eq(intent.weighted_length, 280)
+    t.is_nil(too_long)
+    t.eq(why, "tweet text too long")
+  end,
   test_tweet_body_json_escapes_control_characters = function()
     local body = core.tweet_body_json("quote \" slash \\ newline\n tab\t carriage\r")
 
     t.eq(body, '{"text":"quote \\" slash \\\\ newline\\n tab\\t carriage\\r"}')
+  end,
+  test_tweet_body_json_maps_native_and_link_quote_intents = function()
+    local native = assert(core.extract_publish_intent(
+      "operation: quote\nquote-mode: native\nquote-url: https://x.com/a/status/123\ntweet: Native commentary"))
+    local link = assert(core.extract_publish_intent(
+      "operation: quote\nquote-mode: link\nquote-url: https://x.com/a/status/123\ntweet: Link commentary"))
+
+    t.eq(core.publish_body_json(native),
+      '{"text":"Native commentary","quote_tweet_id":"123"}')
+    t.eq(core.publish_body_json(link),
+      '{"text":"Link commentary\\n\\nhttps://x.com/a/status/123"}')
+    t.is_true(core.publish_body_json(link):find("quote_tweet_id", 1, true) == nil)
   end,
   test_nyxid_response_parsers_fail_closed = function()
     t.eq(core.parse_nyxid_username('{"data":{"username":"example_user"}}'), "example_user")
@@ -392,5 +514,22 @@ FKST interval recurring verification for example_user. occurrence={{occurrence_i
     t.eq(receipt.account_username, "example_user")
     t.eq(receipt.nyxid_x_service, "api-twitter-2-media")
     t.is_nil(receipt.provider_response)
+  end,
+  test_receipt_carries_safe_quote_evidence = function()
+    local intent = assert(core.extract_publish_intent(
+      "operation: quote\nquote-mode: native\nquote-url: https://x.com/a/status/123\ntweet: Commentary"))
+    local receipt = core.live_receipt({
+      artifact_id = "artifact-1",
+      source_ref = { kind = "external", ref = "owner/repo#issue/43" },
+    }, {
+      id = "456",
+      intent = intent,
+    })
+
+    t.eq(receipt.operation, "quote")
+    t.eq(receipt.quote_mode, "native")
+    t.eq(receipt.quote_target_uri, "https://x.com/a/status/123")
+    t.eq(receipt.quote_target_post_id, "123")
+    t.is_nil(receipt.text)
   end,
 }

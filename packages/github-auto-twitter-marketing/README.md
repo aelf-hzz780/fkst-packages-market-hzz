@@ -47,6 +47,30 @@ FKST live publish verification for example_user via NyxID. Test post.
 ```
 ````
 
+Native Quote weekly content / Native Quote 周内容：
+
+````md
+type: weekly-content
+project: example-project
+week: 2026-W32
+operation: quote
+quote-mode: native
+quote-url: https://x.com/example/status/1234567890123456789
+
+tweet-text:
+```
+Quote commentary text.
+```
+````
+
+`quote-mode` may be `native` or `link`. Quote fields belong only to the weekly-content Issue; the
+schedule Issue cannot override them. `native` also requires `X_PUBLISH_NATIVE_QUOTE=1` in the user
+Environment Profile. `link` uses the ordinary Post authority.
+
+`quote-mode` 可选 `native` 或 `link`。Quote 字段只属于 weekly-content Issue，schedule Issue
+不能覆盖。`native` 还要求用户 Environment Profile 配置 `X_PUBLISH_NATIVE_QUOTE=1`；`link`
+沿用普通 Post 权限。
+
 Schedule publish:
 
 ```md
@@ -71,6 +95,7 @@ X_PUBLISH_WRITE=1
 NYXID_URL=<nyxid-api-url>
 NYXID_X_SERVICE_SLUG=<user-owned-x-service-slug>
 X_PUBLISH_EXPECTED_USERNAME=<x-username>
+X_PUBLISH_NATIVE_QUOTE=1 # native Quote only
 NYXID_ACCESS_TOKEN=<secret-user-owned-nyxid-agent-key>
 ```
 

@@ -88,6 +88,11 @@ local function mock_env(opts)
       stderr = "",
       exit_code = 0,
     })
+    t.mock_command('printf %s "$X_PUBLISH_NATIVE_QUOTE"', {
+      stdout = options.native_quote == true and "1" or "",
+      stderr = "",
+      exit_code = 0,
+    })
     t.mock_command('if [ -n "$NYXID_ACCESS_TOKEN" ]; then printf 1; else printf 0; fi', {
       stdout = options.live == true and "1" or "0",
       stderr = "",
@@ -469,6 +474,60 @@ FKST live publish verification for example_user via NyxID. Test post.
     t.eq(receipt.payload.status, "published")
     t.eq(receipt.payload.platform_post_id, "1234567890123456789")
     t.eq(receipt.payload.account_username, "example_user")
+  end,
+
+  test_live_schedule_resolves_native_quote_from_weekly_content = function()
+    mock_env({ live = true, native_quote = true })
+    mock_issue_read(54, [[
+type: schedule-publish
+project: chronoai
+week: 2026-W32
+calendar-ref: #53
+mode: live
+scheduled-at: 2026-07-25T09:00:00Z
+]])
+    mock_issue_read(53, [[
+type: weekly-content
+project: chronoai
+week: 2026-W32
+operation: quote
+quote-mode: native
+quote-url: https://twitter.com/Example/status/1234567890123456789?source=fkst
+tweet: Native Quote composed graph verification
+]])
+    t.mock_command("nyxid --version", {
+      stdout = "nyxid 0.8.0\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
+      stdout = '{"data":{"id":"100000000000000001","name":"Example User","username":"example_user"}}',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("nyxid proxy request api-twitter-2-media /tweets -m POST", {
+      stdout = '{"data":{"id":"2234567890123456789"}}',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local trace = graph.require_quiescent(graph.run(issue_event(54), { max_steps = 12 }))
+
+    graph.assert_covers(trace, {
+      "github-proxy.github_issue_changed -> github-auto-twitter-marketing.import_issue",
+      "x-publisher.x_publish_request -> x-publisher.publish_x",
+      "x-publisher.x_published -> github-auto-twitter-marketing.optional_receipt_sink",
+    })
+    local receipt = graph.require_raise(trace, "x-publisher.x_published")
+    t.eq(receipt.payload.status, "published")
+    t.eq(receipt.payload.operation, "quote")
+    t.eq(receipt.payload.quote_mode, "native")
+    t.eq(receipt.payload.quote_target_uri,
+      "https://x.com/example/status/1234567890123456789")
+    local comment = graph.require_raise(trace, "github-proxy.github_issue_comment_request", function(raised)
+      return tostring((raised.payload or {}).body or ""):find("quote_mode: native", 1, true) ~= nil
+    end)
+    t.is_true(comment.payload.body:find("quote_mode: native", 1, true) ~= nil)
   end,
 
   test_non_issue_source_ref_skips_without_github_read = function()
