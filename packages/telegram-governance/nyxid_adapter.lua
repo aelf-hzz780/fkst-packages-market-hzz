@@ -69,6 +69,10 @@ function M.new(run)
     end
 
     local argv = { "nyxid", "proxy", "request", service, path, "-m", verb }
+    if body ~= nil then
+      table.insert(argv, "-H")
+      table.insert(argv, "Content-Type:application/json")
+    end
     if request_headers["Idempotency-Key"] ~= nil then
       table.insert(argv, "-H")
       table.insert(argv, "Idempotency-Key:" .. request_headers["Idempotency-Key"])

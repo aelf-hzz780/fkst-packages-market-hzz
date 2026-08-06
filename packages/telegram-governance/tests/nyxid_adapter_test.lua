@@ -31,7 +31,7 @@ return {
     t.eq(calls[1].argv[1], "nyxid")
     t.eq(calls[1].argv[2], "--version")
     t.eq(table.concat(calls[2].argv, " "), "nyxid proxy request telegram-machine /capabilities -m GET --output json")
-    t.eq(table.concat(calls[3].argv, " "), "nyxid proxy request telegram-machine /commands -m POST -H Idempotency-Key:telegram-governance/key-1 -H X-Trace-ID:tg:issue-42:sync -d {} --output json")
+    t.eq(table.concat(calls[3].argv, " "), "nyxid proxy request telegram-machine /commands -m POST -H Content-Type:application/json -H Idempotency-Key:telegram-governance/key-1 -H X-Trace-ID:tg:issue-42:sync -d {} --output json")
   end,
 
   test_adapter_rejects_invalid_service_path_method_and_header = function()
