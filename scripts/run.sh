@@ -168,6 +168,7 @@ check_file_sizes() {
 }
 
 cmd_check() {
+  python3 "$ROOT/scripts/check_x_publishing_contract_test.py"
   "$FRAMEWORK_BIN" deps --project-root "$ROOT" >/dev/null
   check_file_sizes
 }
