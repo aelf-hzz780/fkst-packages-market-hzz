@@ -3,6 +3,39 @@
 local M = {}
 local strings = require("contract.strings")
 local x_text = require("contract.x_text")
+local x_publishing_contract = require("contract.x_publishing_contract")
+
+local function values_by_name(values)
+  local names = {}
+  for _, value in ipairs(values or {}) do
+    names[value] = value
+  end
+  return names
+end
+
+local function contains(values, expected)
+  for _, value in ipairs(values or {}) do
+    if value == expected then
+      return true
+    end
+  end
+  return false
+end
+
+local OPERATIONS = values_by_name((function()
+  local names = {}
+  for _, definition in ipairs(x_publishing_contract.operations or {}) do
+    table.insert(names, definition.name)
+  end
+  return names
+end)())
+local QUOTE_MODES = values_by_name(
+  x_publishing_contract.operations_by_name.quote.modes
+)
+local RECEIPT_STATUSES = values_by_name(x_publishing_contract.receipt_statuses)
+local ERROR_CODES = values_by_name(x_publishing_contract.error_codes)
+local CONSUMER_CAPABILITIES = x_publishing_contract.consumer_capabilities["fkst-x-publisher"]
+local NATIVE_PROVIDER_POST_ID_FIELD = "quote_tweet_id"
 
 local TOP_LEVEL_FIELDS = {
   artifact_id = true,
@@ -93,17 +126,19 @@ local function is_small_scalar(value)
   return true
 end
 
-local function has_denylisted_name(key)
+local function has_sensitive_name(key)
   local normalized = tostring(key or ""):lower()
-  if CONTENT_FIELDS[normalized] then
-    return true
-  end
   for _, pattern in ipairs(SENSITIVE_PATTERNS) do
     if normalized:find(pattern, 1, true) then
       return true
     end
   end
   return false
+end
+
+local function has_denylisted_name(key)
+  local normalized = tostring(key or ""):lower()
+  return CONTENT_FIELDS[normalized] == true or has_sensitive_name(key)
 end
 
 local function validate_small_table(value, allowed_fields, label)
@@ -224,6 +259,16 @@ function M.is_usable_request(payload)
   return M.validate_publish_request(payload)
 end
 
+local function receipt_trace_id(payload)
+  for _, field in ipairs({ "trace_id", "dedup_key", "artifact_id" }) do
+    local value = type(payload) == "table" and payload[field] or nil
+    if type(value) == "string" and strings.trim(value) ~= "" then
+      return value
+    end
+  end
+  return "fkst-x-publisher"
+end
+
 function M.preview_receipt(payload, status)
   if type(payload) ~= "table" then
     payload = {}
@@ -238,13 +283,14 @@ function M.preview_receipt(payload, status)
   return {
     artifact_id = payload.artifact_id,
     platform = "x",
-    status = status or "preview",
+    status = status or RECEIPT_STATUSES.preview,
     post_uri = nil,
     source_ref = source_ref,
     content_ref = payload.content_ref,
     channel = payload.channel,
     dedup_key = payload.dedup_key,
-    trace_id = payload.trace_id,
+    trace_id = receipt_trace_id(payload),
+    traceId = receipt_trace_id(payload),
     approval_id = payload.approval_id,
     scheduled_at = payload.scheduled_at,
     metadata = copy_allowed_scalars(payload.metadata, METADATA_FIELDS),
@@ -478,8 +524,8 @@ local function content_control_fields(body)
   return fields, nil
 end
 
-local function normalize_quote_target(mode, raw_url)
-  if mode ~= "native" and mode ~= "link" then
+local function normalize_quote_target(mode, raw_url, canonical_semantics)
+  if not QUOTE_MODES[mode] then
     return nil, mode == "" and "missing quote mode" or "unsupported quote mode"
   end
   local url = strings.trim(raw_url)
@@ -498,28 +544,196 @@ local function normalize_quote_target(mode, raw_url)
   if authority == nil or authority:find("@", 1, true) or authority:find(":", 1, true) then
     return nil, "invalid quote url"
   end
-  local hostname = authority:lower():gsub("^www%.", "")
-  if hostname ~= "x.com" and hostname ~= "twitter.com" then
+  local hostname = authority:lower()
+  if not canonical_semantics then
+    hostname = hostname:gsub("^www%.", "")
+  end
+  local allowed_host = false
+  for _, candidate in ipairs(x_publishing_contract.normalization.quoteTarget.allowedHosts) do
+    if hostname == candidate then
+      allowed_host = true
+      break
+    end
+  end
+  if not allowed_host then
     return nil, "invalid quote url"
   end
 
   local path = raw_path:match("^([^?]+)")
-  local handle, post_id = path:match("^/([A-Za-z0-9_]+)/status/(%d+)/?$")
-  if post_id == nil then
-    post_id = path:match("^/i/web/status/(%d+)/?$")
-    handle = nil
+  local handle, post_id
+  if canonical_semantics then
+    handle, post_id = path:match("^/([A-Za-z0-9_]+)/status/(%d+)$")
+  else
+    handle, post_id = path:match("^/([A-Za-z0-9_]+)/status/(%d+)/?$")
+    if post_id == nil then
+      post_id = path:match("^/i/web/status/(%d+)/?$")
+      handle = nil
+    end
   end
   if post_id == nil or (handle ~= nil and (#handle < 1 or #handle > 15)) then
     return nil, "invalid quote url"
   end
-  local author_handle = handle and handle:lower() or nil
-  local canonical_owner = author_handle or "i/web"
+  local canonical_owner
+  if handle == nil then
+    canonical_owner = "i/web"
+  elseif canonical_semantics then
+    canonical_owner = handle
+  else
+    canonical_owner = handle:lower()
+  end
   return {
     mode = mode,
     provider_post_id = post_id,
-    url = "https://x.com/" .. canonical_owner .. "/status/" .. post_id,
-    author_handle = author_handle,
+    url = "https://" .. x_publishing_contract.normalization.quoteTarget.canonicalHost
+      .. "/" .. canonical_owner .. "/status/" .. post_id,
+    author_handle = handle and handle:lower() or nil,
   }, nil
+end
+
+local function contract_trace_id(request)
+  local value = type(request) == "table" and request.traceId or nil
+  if type(value) == "string" and strings.trim(value) ~= "" then
+    return value
+  end
+  local idempotency_key = type(request) == "table" and request.idempotencyKey or nil
+  if type(idempotency_key) == "string" and strings.trim(idempotency_key) ~= "" then
+    return "fkst:" .. idempotency_key
+  end
+  return "fkst-contract-validation"
+end
+
+local function blocked_contract_result(request, operation, error_code, extra)
+  local result = {
+    status = RECEIPT_STATUSES.blocked,
+    operation = operation,
+    errorCode = error_code,
+    traceId = contract_trace_id(request),
+  }
+  for key, value in pairs(extra or {}) do
+    result[key] = value
+  end
+  return result
+end
+
+local function missing_required_field(request, definition)
+  for _, field in ipairs(definition.requiredFields or {}) do
+    local value = request[field]
+    if type(value) ~= "string" or strings.trim(value) == "" then
+      return field
+    end
+  end
+  return nil
+end
+
+local function request_fields_are_safe(request, definition)
+  local allowed = { operation = true }
+  for _, field in ipairs(definition.requiredFields or {}) do
+    allowed[field] = true
+  end
+  for _, field in ipairs(definition.optionalFields or {}) do
+    allowed[field] = true
+  end
+  for key, _ in pairs(request) do
+    if type(key) ~= "string" or not allowed[key] or has_sensitive_name(key) then
+      return false
+    end
+  end
+  return true
+end
+
+local function capability_allows(capabilities, operation, quote_mode)
+  if type(capabilities) ~= "table" then
+    return false
+  end
+  if not contains(capabilities.operations, operation) then
+    return false
+  end
+  return operation ~= OPERATIONS.quote or contains(capabilities.quoteModes, quote_mode)
+end
+
+function M.evaluate_contract_request(request, opts)
+  local options = type(opts) == "table" and opts or {}
+  if type(request) ~= "table" then
+    return blocked_contract_result({}, nil, ERROR_CODES.invalid_request)
+  end
+
+  local operation = request.operation
+  local definition = type(operation) == "string"
+    and x_publishing_contract.operations_by_name[operation] or nil
+  if definition == nil then
+    local missing_operation = operation == nil or operation == ""
+    local code = missing_operation
+      and ERROR_CODES.missing_required_field or ERROR_CODES.unsupported_operation
+    return blocked_contract_result(request, operation, code)
+  end
+  if not request_fields_are_safe(request, definition) then
+    return blocked_contract_result(request, operation, ERROR_CODES.invalid_request)
+  end
+  if not contains(CONSUMER_CAPABILITIES.operations, operation) then
+    return blocked_contract_result(request, operation, ERROR_CODES.unsupported_capability)
+  end
+
+  local missing = missing_required_field(request, definition)
+  if missing ~= nil then
+    return blocked_contract_result(request, operation, ERROR_CODES.missing_required_field)
+  end
+
+  local adapter_capabilities = options.adapter_capabilities or CONSUMER_CAPABILITIES
+  if operation ~= OPERATIONS.quote then
+    if not capability_allows(adapter_capabilities, operation) then
+      return blocked_contract_result(request, operation, ERROR_CODES.unsupported_capability)
+    end
+    return {
+      status = RECEIPT_STATUSES.preview,
+      operation = operation,
+      text = request.text,
+      traceId = contract_trace_id(request),
+    }
+  end
+
+  if not QUOTE_MODES[request.quoteMode] then
+    return blocked_contract_result(request, operation, ERROR_CODES.unsupported_quote_mode)
+  end
+  if not capability_allows(adapter_capabilities, operation, request.quoteMode) then
+    return blocked_contract_result(request, operation, ERROR_CODES.unsupported_capability)
+  end
+
+  local quote_post = normalize_quote_target(request.quoteMode, request.quoteTargetUrl, true)
+  if quote_post == nil then
+    return blocked_contract_result(request, operation, ERROR_CODES.invalid_quote_target)
+  end
+  if request.quoteTargetPostId ~= nil and request.quoteTargetPostId ~= quote_post.provider_post_id then
+    return blocked_contract_result(request, operation, ERROR_CODES.invalid_quote_target)
+  end
+
+  local publish_text = request.text
+  if request.quoteMode == QUOTE_MODES.link and not publish_text:find(quote_post.url, 1, true) then
+    publish_text = publish_text .. "\n\n" .. quote_post.url
+  end
+  local provider_fields = {}
+  if request.quoteMode == QUOTE_MODES.native then
+    provider_fields[NATIVE_PROVIDER_POST_ID_FIELD] = quote_post.provider_post_id
+  end
+
+  local result = {
+    status = RECEIPT_STATUSES.preview,
+    operation = operation,
+    text = request.text,
+    publishText = publish_text,
+    quoteMode = request.quoteMode,
+    quoteTargetUrl = quote_post.url,
+    quoteTargetPostId = quote_post.provider_post_id,
+    providerFields = provider_fields,
+    traceId = contract_trace_id(request),
+  }
+  if type(options.provider_result) == "table" and options.provider_result.status == "failed" then
+    result.status = RECEIPT_STATUSES.blocked
+    result.errorCode = ERROR_CODES[options.provider_result.errorCode]
+      or ERROR_CODES.provider_failure
+    result.publishText = nil
+    result.providerFields = nil
+  end
+  return result
 end
 
 function M.extract_publish_intent(body, payload)
@@ -527,12 +741,15 @@ function M.extract_publish_intent(body, payload)
   if fields == nil then
     return nil, fields_why
   end
-  local operation = strings.trim(fields.operation or "post"):lower()
+  local operation = strings.trim(fields.operation or OPERATIONS.post):lower()
   local has_quote_fields = fields["quote-mode"] ~= nil or fields["quote-url"] ~= nil
-  if operation ~= "post" and operation ~= "quote" then
+  if x_publishing_contract.operations_by_name[operation] == nil then
     return nil, "unsupported operation"
   end
-  if operation ~= "quote" and has_quote_fields then
+  if not contains(CONSUMER_CAPABILITIES.operations, operation) then
+    return nil, "unsupported operation"
+  end
+  if operation ~= OPERATIONS.quote and has_quote_fields then
     return nil, "quote fields require quote operation"
   end
 
@@ -540,12 +757,12 @@ function M.extract_publish_intent(body, payload)
   if value == nil then
     return nil, value_why
   end
-  if operation == "post" then
+  if operation == OPERATIONS.post then
     local text, why, weighted = normalize_tweet_text(value, payload)
     if text == nil then
       return nil, why
     end
-    return { operation = "post", text = text, publish_text = text, weighted_length = weighted }, nil
+    return { operation = OPERATIONS.post, text = text, publish_text = text, weighted_length = weighted }, nil
   end
 
   local quote_post, quote_why = normalize_quote_target(
@@ -559,8 +776,11 @@ function M.extract_publish_intent(body, payload)
   if text == nil then
     return nil, text_why
   end
-  local publish_text = quote_post.mode == "link" and (text .. "\n\n" .. quote_post.url) or text
-  local transformed_urls = quote_post.mode == "link" and { quote_post.url } or nil
+  local publish_text = text
+  if quote_post.mode == QUOTE_MODES.link and not text:find(quote_post.url, 1, true) then
+    publish_text = text .. "\n\n" .. quote_post.url
+  end
+  local transformed_urls = quote_post.mode == QUOTE_MODES.link and { quote_post.url } or nil
   local normalized_publish_text, publish_why, weighted = normalize_tweet_text(
     publish_text,
     nil,
@@ -570,7 +790,7 @@ function M.extract_publish_intent(body, payload)
     return nil, publish_why
   end
   return {
-    operation = "quote",
+    operation = OPERATIONS.quote,
     text = text,
     publish_text = normalized_publish_text,
     weighted_length = weighted,
@@ -597,8 +817,8 @@ function M.publish_body_json(intent)
     return nil
   end
   local body = '{"text":"' .. json_escape(intent.publish_text) .. '"'
-  if intent.operation == "quote" and type(intent.quote_post) == "table"
-      and intent.quote_post.mode == "native" then
+  if intent.operation == OPERATIONS.quote and type(intent.quote_post) == "table"
+      and intent.quote_post.mode == QUOTE_MODES.native then
     body = body .. ',"quote_tweet_id":"' .. json_escape(intent.quote_post.provider_post_id) .. '"'
   end
   return body .. "}"
@@ -609,10 +829,13 @@ local function enrich_receipt_with_intent(receipt, intent)
     return receipt
   end
   receipt.operation = intent.operation
-  if intent.operation == "quote" and type(intent.quote_post) == "table" then
+  if intent.operation == OPERATIONS.quote and type(intent.quote_post) == "table" then
     receipt.quote_mode = intent.quote_post.mode
-    receipt.quote_target_uri = intent.quote_post.url
+    receipt.quote_target_uri = intent.quote_post.url:lower()
     receipt.quote_target_post_id = intent.quote_post.provider_post_id
+    receipt.quoteMode = intent.quote_post.mode
+    receipt.quoteTargetUrl = intent.quote_post.url
+    receipt.quoteTargetPostId = intent.quote_post.provider_post_id
   end
   return receipt
 end
@@ -645,14 +868,32 @@ function M.parse_nyxid_tweet_id(stdout)
 end
 
 function M.blocked_receipt(payload, reason, intent)
-  local receipt = M.preview_receipt(payload, "blocked")
+  local receipt = M.preview_receipt(payload, RECEIPT_STATUSES.blocked)
   receipt.blocked_reason = reason
+  local error_code = ERROR_CODES.provider_failure
+  if reason == "native quote capability disabled" or reason == "live gate disabled"
+      or reason == "nyxid access token missing" or reason == "missing nyxid x service"
+      or reason == "nyxid cli unavailable" then
+    error_code = ERROR_CODES.unsupported_capability
+  elseif reason == "unsupported operation" then
+    error_code = ERROR_CODES.unsupported_operation
+  elseif reason == "unsupported quote mode" then
+    error_code = ERROR_CODES.unsupported_quote_mode
+  elseif reason == "unsupported capability" then
+    error_code = ERROR_CODES.unsupported_capability
+  elseif reason == "invalid quote url" then
+    error_code = ERROR_CODES.invalid_quote_target
+  elseif tostring(reason or ""):find("missing", 1, true) then
+    error_code = ERROR_CODES.missing_required_field
+  end
+  receipt.error_code = error_code
+  receipt.errorCode = error_code
   return enrich_receipt_with_intent(receipt, intent)
 end
 
 function M.live_receipt(payload, opts)
   local options = opts or {}
-  local receipt = M.preview_receipt(payload, "published")
+  local receipt = M.preview_receipt(payload, RECEIPT_STATUSES.published)
   local post_id = tostring(options.id or "")
   receipt.platform_post_id = post_id
   receipt.post_uri = post_id ~= "" and ("https://x.com/i/web/status/" .. post_id) or nil

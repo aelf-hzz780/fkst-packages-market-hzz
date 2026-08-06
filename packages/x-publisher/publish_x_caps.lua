@@ -3,6 +3,7 @@ local core = require("core")
 return {
   blocked_receipt = core.blocked_receipt,
   content_source_ref = core.content_source_ref,
+  evaluate_contract_request = core.evaluate_contract_request,
   extract_publish_intent = core.extract_publish_intent,
   extract_tweet_text = core.extract_tweet_text,
   live_gate = core.live_gate,

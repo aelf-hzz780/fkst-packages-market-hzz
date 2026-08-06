@@ -6,6 +6,7 @@ persistence_class = "saga"
 root = "."
 
 [lib_deps]
+# The contract library exports the pinned generated x_publishing_contract module.
 libraries = ["contract", "forge", "workflow"]
 
 # Package-owned conformance — travels with the package; the engine runs it whenever x-publisher
