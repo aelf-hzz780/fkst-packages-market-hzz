@@ -32,6 +32,8 @@ X_PUBLISH_WRITE=1
 NYXID_URL=<nyxid-api-url>
 NYXID_X_SERVICE_SLUG=<user-owned-x-service-slug>
 X_PUBLISH_EXPECTED_USERNAME=<x-username>
+# Required only for native Quote publishing.
+X_PUBLISH_NATIVE_QUOTE=1
 NYXID_ACCESS_TOKEN=<secret-user-owned-nyxid-agent-key>
 ```
 
@@ -62,6 +64,44 @@ nyxid proxy request <slug> /tweets -m POST -d {"text":"..."}
 The `/tweets` path is relative to the NyxID service base URL `https://api.x.com/2`; do not use
 `/2/tweets`.
 
+## Quote contract / Quote 契约
+
+Quote target 跟随 weekly-content Issue 中的正文保存，schedule-publish Issue 只保留
+`calendar-ref` 和调度字段。`quote-url` 只接受 HTTPS `x.com` 或 `twitter.com` status URL；
+package 会派生 post ID，并规范化为 canonical `x.com` URL。
+
+The Quote target lives with the text in the weekly-content Issue. The schedule-publish Issue keeps
+only `calendar-ref` and scheduling fields. `quote-url` accepts only an HTTPS `x.com` or
+`twitter.com` status URL; the package derives the post ID and canonicalizes the URL.
+
+````md
+type: weekly-content
+project: example-project
+week: 2026-W32
+operation: quote
+quote-mode: native
+quote-url: https://x.com/example/status/1234567890123456789
+
+tweet-text:
+```
+Quote commentary text.
+```
+````
+
+- `native` keeps the commentary unchanged and sends `quote_tweet_id`. It requires
+  `X_PUBLISH_NATIVE_QUOTE=1` in addition to the ordinary live-write gates.
+- `link` appends exactly two newlines plus the canonical target URL and never sends
+  `quote_tweet_id`.
+- Native provider failure is terminal for that dispatch. The package never retries as Link Quote.
+- The final publishable text uses X weighted-length validation, including Unicode/emoji weights and
+  the transformed canonical Quote URL length.
+
+- `native` 保持评论正文不变并发送 `quote_tweet_id`，除普通 live-write gate 外还要求
+  `X_PUBLISH_NATIVE_QUOTE=1`。
+- `link` 在正文后追加两个换行和 canonical URL，绝不发送 `quote_tweet_id`。
+- Native provider 失败即终止本次 dispatch，不会自动改发 Link Quote。
+- 最终发布正文按 X weighted length 校验，包括 Unicode/emoji 权重和 Quote URL 转换长度。
+
 ## Content resolution
 
 The publish payload stays pointer-only. For GitHub issue driven workflows, `content_ref` points to
@@ -79,8 +119,9 @@ FKST live publish verification for example_user via NyxID. Test post.
 ```
 ````
 
-MVP live publishing supports one text-only X post up to 280 characters. Media upload and thread
-publication are intentionally separate follow-up capabilities.
+MVP live publishing supports one text-only X Post or Quote per content Issue, within X's weighted
+280-character limit. Media upload, Thread, and Quote + Thread are intentionally separate follow-up
+capabilities.
 
 Invalid requests are skipped with a greppable log and never masquerade as successful publishes.
 `core.preview_receipt(payload, "skipped")` exists as a safe shape helper for hosts/tests that need

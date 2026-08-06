@@ -2,6 +2,7 @@
 -- small control fields and a source_ref pointer; post content is re-fetched by the host seam.
 local M = {}
 local strings = require("contract.strings")
+local x_text = require("contract.x_text")
 
 local TOP_LEVEL_FIELDS = {
   artifact_id = true,
@@ -402,7 +403,7 @@ local function render_tweet_template(text, payload)
   return rendered, nil
 end
 
-local function normalize_tweet_text(text, payload)
+local function normalize_tweet_text(text, payload, transformed_urls)
   local rendered, template_why = render_tweet_template(text, payload)
   if rendered == nil then
     return nil, template_why
@@ -411,29 +412,170 @@ local function normalize_tweet_text(text, payload)
   if cleaned == "" then
     return nil, "missing tweet text"
   end
-  if #cleaned > 280 then
+  local analysis = x_text.analyze(cleaned, { transformed_urls = transformed_urls })
+  if not analysis.valid then
     return nil, "tweet text too long"
   end
-  return cleaned, nil
+  return cleaned, nil, analysis.weighted_length
 end
 
-function M.extract_tweet_text(body, payload)
+local function extract_tweet_text_value(body)
   local text = tostring(body or "")
   for _, marker in ipairs({ "tweet%-text", "tweet", "x%-post", "post" }) do
     local fenced = text:match(marker .. "%s*:%s*```[^\n]*\n(.-)\n```")
     if fenced ~= nil then
-      return normalize_tweet_text(fenced, payload)
+      return fenced
     end
   end
   for line in text:gmatch("[^\r\n]+") do
     for _, marker in ipairs({ "tweet%-text", "tweet", "x%-post", "post" }) do
       local inline = line:match("^%s*" .. marker .. "%s*:%s*(.-)%s*$")
       if inline ~= nil and strings.trim(inline) ~= "" and inline:sub(1, 3) ~= "```" then
-        return normalize_tweet_text(inline, payload)
+        return inline
       end
     end
   end
   return nil, "missing tweet text"
+end
+
+function M.extract_tweet_text(body, payload)
+  local value, why = extract_tweet_text_value(body)
+  if value == nil then
+    return nil, why
+  end
+  return normalize_tweet_text(value, payload)
+end
+
+local QUOTE_CONTROL_FIELDS = {
+  operation = true,
+  ["quote-mode"] = true,
+  ["quote-url"] = true,
+}
+
+local function content_control_fields(body)
+  local fields = {}
+  local seen = {}
+  local in_fence = false
+  local text = tostring(body or ""):gsub("\r\n", "\n"):gsub("\r", "\n") .. "\n"
+  for line in text:gmatch("(.-)\n") do
+    if line:match("^%s*```") then
+      in_fence = not in_fence
+    elseif not in_fence then
+      local key, value = line:match("^%s*([%w_-]+)%s*:%s*(.-)%s*$")
+      local normalized = tostring(key or ""):lower():gsub("_", "-")
+      if QUOTE_CONTROL_FIELDS[normalized] then
+        if seen[normalized] then
+          return nil, "duplicate quote control field"
+        end
+        seen[normalized] = true
+        local cleaned = strings.trim(value)
+        if cleaned ~= "" and #cleaned <= 512 then
+          fields[normalized] = cleaned
+        end
+      end
+    end
+  end
+  return fields, nil
+end
+
+local function normalize_quote_target(mode, raw_url)
+  if mode ~= "native" and mode ~= "link" then
+    return nil, mode == "" and "missing quote mode" or "unsupported quote mode"
+  end
+  local url = strings.trim(raw_url)
+  if url == "" then
+    return nil, "missing quote url"
+  end
+  if #url > 512 or url:find("#", 1, true) or url:find("%s") then
+    return nil, "invalid quote url"
+  end
+
+  local scheme, remainder = url:match("^([%a]+)://(.+)$")
+  if tostring(scheme or ""):lower() ~= "https" then
+    return nil, "invalid quote url"
+  end
+  local authority, raw_path = tostring(remainder or ""):match("^([^/]+)(/.*)$")
+  if authority == nil or authority:find("@", 1, true) or authority:find(":", 1, true) then
+    return nil, "invalid quote url"
+  end
+  local hostname = authority:lower():gsub("^www%.", "")
+  if hostname ~= "x.com" and hostname ~= "twitter.com" then
+    return nil, "invalid quote url"
+  end
+
+  local path = raw_path:match("^([^?]+)")
+  local handle, post_id = path:match("^/([A-Za-z0-9_]+)/status/(%d+)/?$")
+  if post_id == nil then
+    post_id = path:match("^/i/web/status/(%d+)/?$")
+    handle = nil
+  end
+  if post_id == nil or (handle ~= nil and (#handle < 1 or #handle > 15)) then
+    return nil, "invalid quote url"
+  end
+  local author_handle = handle and handle:lower() or nil
+  local canonical_owner = author_handle or "i/web"
+  return {
+    mode = mode,
+    provider_post_id = post_id,
+    url = "https://x.com/" .. canonical_owner .. "/status/" .. post_id,
+    author_handle = author_handle,
+  }, nil
+end
+
+function M.extract_publish_intent(body, payload)
+  local fields, fields_why = content_control_fields(body)
+  if fields == nil then
+    return nil, fields_why
+  end
+  local operation = strings.trim(fields.operation or "post"):lower()
+  local has_quote_fields = fields["quote-mode"] ~= nil or fields["quote-url"] ~= nil
+  if operation ~= "post" and operation ~= "quote" then
+    return nil, "unsupported operation"
+  end
+  if operation ~= "quote" and has_quote_fields then
+    return nil, "quote fields require quote operation"
+  end
+
+  local value, value_why = extract_tweet_text_value(body)
+  if value == nil then
+    return nil, value_why
+  end
+  if operation == "post" then
+    local text, why, weighted = normalize_tweet_text(value, payload)
+    if text == nil then
+      return nil, why
+    end
+    return { operation = "post", text = text, publish_text = text, weighted_length = weighted }, nil
+  end
+
+  local quote_post, quote_why = normalize_quote_target(
+    strings.trim(fields["quote-mode"]):lower(),
+    fields["quote-url"]
+  )
+  if quote_post == nil then
+    return nil, quote_why
+  end
+  local text, text_why = normalize_tweet_text(value, payload)
+  if text == nil then
+    return nil, text_why
+  end
+  local publish_text = quote_post.mode == "link" and (text .. "\n\n" .. quote_post.url) or text
+  local transformed_urls = quote_post.mode == "link" and { quote_post.url } or nil
+  local normalized_publish_text, publish_why, weighted = normalize_tweet_text(
+    publish_text,
+    nil,
+    transformed_urls
+  )
+  if normalized_publish_text == nil then
+    return nil, publish_why
+  end
+  return {
+    operation = "quote",
+    text = text,
+    publish_text = normalized_publish_text,
+    weighted_length = weighted,
+    quote_post = quote_post,
+  }, nil
 end
 
 local function json_escape(value)
@@ -448,6 +590,31 @@ end
 
 function M.tweet_body_json(text)
   return '{"text":"' .. json_escape(text) .. '"}'
+end
+
+function M.publish_body_json(intent)
+  if type(intent) ~= "table" or type(intent.publish_text) ~= "string" then
+    return nil
+  end
+  local body = '{"text":"' .. json_escape(intent.publish_text) .. '"'
+  if intent.operation == "quote" and type(intent.quote_post) == "table"
+      and intent.quote_post.mode == "native" then
+    body = body .. ',"quote_tweet_id":"' .. json_escape(intent.quote_post.provider_post_id) .. '"'
+  end
+  return body .. "}"
+end
+
+local function enrich_receipt_with_intent(receipt, intent)
+  if type(intent) ~= "table" then
+    return receipt
+  end
+  receipt.operation = intent.operation
+  if intent.operation == "quote" and type(intent.quote_post) == "table" then
+    receipt.quote_mode = intent.quote_post.mode
+    receipt.quote_target_uri = intent.quote_post.url
+    receipt.quote_target_post_id = intent.quote_post.provider_post_id
+  end
+  return receipt
 end
 
 local function decode_json(stdout)
@@ -477,10 +644,10 @@ function M.parse_nyxid_tweet_id(stdout)
   return nil
 end
 
-function M.blocked_receipt(payload, reason)
+function M.blocked_receipt(payload, reason, intent)
   local receipt = M.preview_receipt(payload, "blocked")
   receipt.blocked_reason = reason
-  return receipt
+  return enrich_receipt_with_intent(receipt, intent)
 end
 
 function M.live_receipt(payload, opts)
@@ -491,7 +658,7 @@ function M.live_receipt(payload, opts)
   receipt.post_uri = post_id ~= "" and ("https://x.com/i/web/status/" .. post_id) or nil
   receipt.account_username = options.username
   receipt.nyxid_x_service = safe_service_slug(options.nyxid_x_service)
-  return receipt
+  return enrich_receipt_with_intent(receipt, options.intent)
 end
 
 return M

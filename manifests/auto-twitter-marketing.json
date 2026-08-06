@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "name": "auto-twitter-marketing",
-  "description": "Business-only GitHub issue driven Auto Twitter marketing workflow for FKST hosted multi-workspace package import. Shadow mode previews by default; live text-only X publishing is gated by the user's Environment Profile and brokered by NyxID.",
+  "description": "Business-only GitHub issue driven Auto Twitter marketing workflow for FKST hosted multi-workspace package import. Shadow mode previews by default; live X Post and Quote publishing is gated by the user's Environment Profile and brokered by NyxID.",
   "packages": [
-    "aelf-hzz780/fkst-packages-market-hzz@v0.1.1:packages/x-publisher",
-    "aelf-hzz780/fkst-packages-market-hzz@v0.1.1:packages/github-auto-twitter-marketing",
-    "aelf-hzz780/fkst-packages-market-hzz@v0.1.1:packages/marketing-radar"
+    "aelf-hzz780/fkst-packages-market-hzz@feature/quote-post-publishing:packages/x-publisher",
+    "aelf-hzz780/fkst-packages-market-hzz@feature/quote-post-publishing:packages/github-auto-twitter-marketing",
+    "aelf-hzz780/fkst-packages-market-hzz@feature/quote-post-publishing:packages/marketing-radar"
   ],
   "github": {
     "workLabels": [
@@ -20,6 +20,7 @@
     "xPublishServiceEnv": "NYXID_X_SERVICE_SLUG",
     "xPublishWriteSwitchEnv": "X_PUBLISH_WRITE",
     "xPublishExpectedUsernameEnv": "X_PUBLISH_EXPECTED_USERNAME",
+    "xPublishNativeQuoteCapabilityEnv": "X_PUBLISH_NATIVE_QUOTE",
     "rawTokenPolicy": "forbidden-in-repo-manifest-issue-payload"
   },
   "workflow": {
@@ -40,7 +41,11 @@
     "timezoneField": "timezone",
     "livePublishMode": "live",
     "contentRefField": "calendar-ref",
-    "mvpPublishSurface": "text-only-tweet",
+    "supportedXOperations": ["post", "quote-native", "quote-link"],
+    "quoteOperationField": "operation",
+    "quoteModeField": "quote-mode",
+    "quoteUrlField": "quote-url",
+    "mvpPublishSurface": "text-only-post-and-quote",
     "scheduleDispatch": "github-observed-resync"
   }
 }
