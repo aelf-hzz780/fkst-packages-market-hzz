@@ -5,6 +5,7 @@ local ports_lib = require("forge.ports")
 local saga = require("workflow.saga")
 local env = require("workflow.env")
 local strings = require("contract.strings")
+local package_env = require("x_publisher_package_env")
 
 local spec = {
   consumes = { "x_publish_request" },
@@ -63,6 +64,17 @@ local function first_non_empty_env(names)
     end
   end
   return ""
+end
+
+local function native_quote_enabled()
+  local process_value = first_non_empty_env({
+    "X_PUBLISH_NATIVE_QUOTE",
+    "FKST_X_PUBLISH_NATIVE_QUOTE",
+  })
+  if process_value == "1" then
+    return true
+  end
+  return strings.trim(package_env.get("FKST_X_PUBLISH_NATIVE_QUOTE") or "") == "1"
 end
 
 local function live_options()
@@ -232,7 +244,7 @@ local function make_department(ports)
       return
     end
     if intent.operation == "quote" and intent.quote_post.mode == "native"
-        and first_non_empty_env({ "X_PUBLISH_NATIVE_QUOTE", "FKST_X_PUBLISH_NATIVE_QUOTE" }) ~= "1" then
+        and not native_quote_enabled() then
       block(payload, "native quote capability disabled", intent)
       return
     end
