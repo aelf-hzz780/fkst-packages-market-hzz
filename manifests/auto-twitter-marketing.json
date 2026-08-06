@@ -21,6 +21,7 @@
     "xPublishWriteSwitchEnv": "X_PUBLISH_WRITE",
     "xPublishExpectedUsernameEnv": "X_PUBLISH_EXPECTED_USERNAME",
     "xPublishNativeQuoteCapabilityEnv": "X_PUBLISH_NATIVE_QUOTE",
+    "xPublishNativeQuotePackageEnv": "FKST_X_PUBLISH_NATIVE_QUOTE",
     "rawTokenPolicy": "forbidden-in-repo-manifest-issue-payload"
   },
   "workflow": {

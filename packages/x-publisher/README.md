@@ -37,6 +37,12 @@ X_PUBLISH_NATIVE_QUOTE=1
 NYXID_ACCESS_TOKEN=<secret-user-owned-nyxid-agent-key>
 ```
 
+Hosted trigger Issues expose the same Native Quote capability through the package-owned setting
+`FKST_X_PUBLISH_NATIVE_QUOTE=1` under `### Package Env` / `#### x-publisher`.
+
+Hosted trigger Issue 通过 `### Package Env` / `#### x-publisher` 下的 package 配置
+`FKST_X_PUBLISH_NATIVE_QUOTE=1` 开启同一 Native Quote 能力。
+
 `NYXID_ACCESS_TOKEN` is checked for presence only; the package does not read,
 log, persist, or include the token in receipts. The `nyxid` CLI consumes it from
 the environment when making proxy requests.
@@ -89,7 +95,9 @@ Quote commentary text.
 ````
 
 - `native` keeps the commentary unchanged and sends `quote_tweet_id`. It requires
-  `X_PUBLISH_NATIVE_QUOTE=1` in addition to the ordinary live-write gates.
+  `X_PUBLISH_NATIVE_QUOTE=1` in the Environment Profile or
+  `FKST_X_PUBLISH_NATIVE_QUOTE=1` in Hosted `### Package Env`, in addition to the ordinary
+  live-write gates.
 - `link` appends exactly two newlines plus the canonical target URL and never sends
   `quote_tweet_id`.
 - Native provider failure is terminal for that dispatch. The package never retries as Link Quote.
@@ -97,7 +105,8 @@ Quote commentary text.
   the transformed canonical Quote URL length.
 
 - `native` 保持评论正文不变并发送 `quote_tweet_id`，除普通 live-write gate 外还要求
-  `X_PUBLISH_NATIVE_QUOTE=1`。
+  Environment Profile 中的 `X_PUBLISH_NATIVE_QUOTE=1`，或 Hosted `### Package Env` 中的
+  `FKST_X_PUBLISH_NATIVE_QUOTE=1`。
 - `link` 在正文后追加两个换行和 canonical URL，绝不发送 `quote_tweet_id`。
 - Native provider 失败即终止本次 dispatch，不会自动改发 Link Quote。
 - 最终发布正文按 X weighted length 校验，包括 Unicode/emoji 权重和 Quote URL 转换长度。

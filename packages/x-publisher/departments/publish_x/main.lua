@@ -20,6 +20,7 @@ local VALUE_ENV = {
   FKST_GITHUB_AUTHORIZED_LOGINS = true,
   FKST_GITHUB_BOT_LOGIN = true,
   FKST_NYXID_X_SERVICE_SLUG = true,
+  FKST_X_PUBLISH_NATIVE_QUOTE = true,
   FKST_X_PUBLISH_EXPECTED_USERNAME = true,
   FKST_X_PUBLISH_WRITE = true,
   NYXID_X_SERVICE_SLUG = true,
@@ -231,7 +232,7 @@ local function make_department(ports)
       return
     end
     if intent.operation == "quote" and intent.quote_post.mode == "native"
-        and strings.trim(read_env("X_PUBLISH_NATIVE_QUOTE")) ~= "1" then
+        and first_non_empty_env({ "X_PUBLISH_NATIVE_QUOTE", "FKST_X_PUBLISH_NATIVE_QUOTE" }) ~= "1" then
       block(payload, "native quote capability disabled", intent)
       return
     end
