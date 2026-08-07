@@ -73,6 +73,26 @@ local function receipt_comment(payload)
     body = body .. "post_uri: " .. post_uri .. "\n"
   end
 
+  local operation = safe_line(payload.operation, 32)
+  if operation ~= "" then
+    body = body .. "operation: " .. operation .. "\n"
+  end
+
+  local quote_mode = safe_line(payload.quote_mode, 32)
+  if quote_mode ~= "" then
+    body = body .. "quote_mode: " .. quote_mode .. "\n"
+  end
+
+  local quote_target_uri = safe_line(payload.quote_target_uri, 256)
+  if quote_target_uri ~= "" then
+    body = body .. "quote_target_uri: " .. quote_target_uri .. "\n"
+  end
+
+  local quote_target_post_id = safe_line(payload.quote_target_post_id, 64)
+  if quote_target_post_id ~= "" then
+    body = body .. "quote_target_post_id: " .. quote_target_post_id .. "\n"
+  end
+
   local blocked_reason = safe_line(payload.blocked_reason, 256)
   if blocked_reason ~= "" then
     body = body .. "blocked_reason: " .. blocked_reason .. "\n"

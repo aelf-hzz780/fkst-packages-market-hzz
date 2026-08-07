@@ -1,0 +1,12 @@
+{
+  "artifactSha256": {
+    "libraries/contract/x_publishing_contract.lua": "4fc31c306b279b7e97d44bbba0a0286c73c8c54d3851b18af26c57f778900a0b",
+    "packages/x-publisher/tests/fixtures/x_publishing_conformance.lua": "a6e6ae2104b190fbb4f99898ac072d3304e1679cf6769fad718cf7e41dc0b2af"
+  },
+  "contractVersion": "1.0.0",
+  "generated": true,
+  "generatorVersion": "1.0.0",
+  "schemaVersion": 1,
+  "sourcePath": "packages/specs/company/x-publishing.contract.v1.json",
+  "sourceSha256": "ae367786950c6284f1c6dbed6c03309bdd07be18a89ba3f62cf3712fa99f8ef6"
+}
