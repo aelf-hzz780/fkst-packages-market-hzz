@@ -31,6 +31,28 @@ class StableSemverTest(unittest.TestCase):
             with self.subTest(version=version):
                 self.assertIsNone(checker.SEMVER_PATTERN.fullmatch(version))
 
+    def test_release_manifest_uses_one_stable_semver_ref(self) -> None:
+        self.assertEqual(checker.validate_release_manifest(), "v0.2.0")
+
+    def test_rejects_mutable_or_mixed_package_refs(self) -> None:
+        mutable = [
+            "aelf-hzz780/fkst-packages-market-hzz@feature/quote-post-publishing:packages/x-publisher",
+            "aelf-hzz780/fkst-packages-market-hzz@feature/quote-post-publishing:packages/github-auto-twitter-marketing",
+            "aelf-hzz780/fkst-packages-market-hzz@feature/quote-post-publishing:packages/marketing-radar",
+        ]
+        with self.assertRaises(checker.ContractCheckError) as mutable_error:
+            checker.validate_package_descriptors(mutable)
+        self.assertEqual(mutable_error.exception.code, "mutable_or_invalid_package_ref")
+
+        mixed = [
+            "aelf-hzz780/fkst-packages-market-hzz@v0.2.0:packages/x-publisher",
+            "aelf-hzz780/fkst-packages-market-hzz@v0.2.0:packages/github-auto-twitter-marketing",
+            "aelf-hzz780/fkst-packages-market-hzz@v0.1.1:packages/marketing-radar",
+        ]
+        with self.assertRaises(checker.ContractCheckError) as mixed_error:
+            checker.validate_package_descriptors(mixed)
+        self.assertEqual(mixed_error.exception.code, "inconsistent_manifest_packages")
+
     def test_cli_rejects_a_temporary_malformed_lock_without_credentials(self) -> None:
         source_lock = json.loads((REPO_ROOT / checker.LOCK_PATH).read_text(encoding="utf-8"))
         with tempfile.TemporaryDirectory(prefix="x-publishing-checker-") as temporary:

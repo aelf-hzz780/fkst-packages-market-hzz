@@ -13,6 +13,7 @@ from typing import NoReturn
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCK_PATH = Path("contract-locks/x-publishing-contract.lock.json")
+MANIFEST_PATH = Path("manifests/auto-twitter-marketing.json")
 GENERATED_PATHS = (
     Path("libraries/contract/x_publishing_contract.lua"),
     Path("packages/x-publisher/tests/fixtures/x_publishing_conformance.lua"),
@@ -27,6 +28,16 @@ HEADER_PATTERN = re.compile(
     r"-- Contract version: (?P<version>[^;]+); source SHA-256: (?P<digest>[0-9a-f]{64})$",
     re.MULTILINE,
 )
+PACKAGE_DESCRIPTOR_PATTERN = re.compile(
+    r"^aelf-hzz780/fkst-packages-market-hzz@"
+    r"(?P<ref>v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)):"
+    r"packages/(?P<package>x-publisher|github-auto-twitter-marketing|marketing-radar)$"
+)
+EXPECTED_PACKAGES = {
+    "x-publisher",
+    "github-auto-twitter-marketing",
+    "marketing-radar",
+}
 
 
 class ContractCheckError(Exception):
@@ -96,6 +107,37 @@ def discovered_generated_paths() -> set[str]:
     return candidates
 
 
+def validate_package_descriptors(packages: object) -> str:
+    if not isinstance(packages, list) or not all(
+        isinstance(descriptor, str) for descriptor in packages
+    ):
+        fail("invalid_manifest_packages", MANIFEST_PATH.as_posix())
+    refs: set[str] = set()
+    names: set[str] = set()
+    for descriptor in packages:
+        match = PACKAGE_DESCRIPTOR_PATTERN.fullmatch(descriptor)
+        if match is None:
+            fail("mutable_or_invalid_package_ref", MANIFEST_PATH.as_posix())
+        refs.add(match.group("ref"))
+        names.add(match.group("package"))
+    if names != EXPECTED_PACKAGES or len(refs) != 1:
+        fail("inconsistent_manifest_packages", MANIFEST_PATH.as_posix())
+    return next(iter(refs))
+
+
+def validate_release_manifest() -> str:
+    path = ROOT / MANIFEST_PATH
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        fail("missing_manifest", MANIFEST_PATH.as_posix())
+    except (OSError, json.JSONDecodeError):
+        fail("invalid_manifest", MANIFEST_PATH.as_posix())
+    if not isinstance(manifest, dict):
+        fail("invalid_manifest", MANIFEST_PATH.as_posix())
+    return validate_package_descriptors(manifest.get("packages"))
+
+
 def validate_artifact(
     relative_path: Path,
     expected_version: str,
@@ -143,9 +185,11 @@ def main() -> int:
             generator,
             artifact_hashes[relative_path.as_posix()],
         )
+    package_ref = validate_release_manifest()
     print(
         "X_PUBLISHING_CONTRACT_CHECK_OK "
-        f"version={version} source_sha256={digest} artifacts={len(GENERATED_PATHS)}"
+        f"version={version} source_sha256={digest} artifacts={len(GENERATED_PATHS)} "
+        f"package_ref={package_ref}"
     )
     return 0
 

@@ -23,27 +23,30 @@ These libraries are retained only until the official SDK libraries are available
 
 The intended hosted shape is official + user packages. Import the official
 GitHub adapter separately, then import this repository's business-only
-marketing manifest:
+marketing manifest at the stable release tag:
+
+Hosted 运行时由 official package 与用户 package 组合。请单独导入官方 GitHub adapter，
+并使用稳定 release tag 导入本仓库的 business-only marketing manifest：
 
 ```text
 ChronoAIProject/fkst-hosted@packages:packages/github-proxy
-aelf-hzz780/fkst-packages-market-hzz@main:manifests/auto-twitter-marketing.json
+aelf-hzz780/fkst-packages-market-hzz@v0.2.0:manifests/auto-twitter-marketing.json
 ```
 
-For reproducible production sessions, pin the SemVer tag:
+For reproducible production sessions, keep the SemVer pin. Do not use `main` or
+a mutable feature branch.
 
-```text
-ChronoAIProject/fkst-hosted@packages:packages/github-proxy
-aelf-hzz780/fkst-packages-market-hzz@v0.1.1:manifests/auto-twitter-marketing.json
-```
+生产 session 必须保留 SemVer pin，不要改用 `main` 或可变 feature branch。
 
 The market manifest expands only to the business packages:
 
 ```text
-aelf-hzz780/fkst-packages-market-hzz@v0.1.1:packages/x-publisher
-aelf-hzz780/fkst-packages-market-hzz@v0.1.1:packages/github-auto-twitter-marketing
-aelf-hzz780/fkst-packages-market-hzz@v0.1.1:packages/marketing-radar
+aelf-hzz780/fkst-packages-market-hzz@v0.2.0:packages/x-publisher
+aelf-hzz780/fkst-packages-market-hzz@v0.2.0:packages/github-auto-twitter-marketing
+aelf-hzz780/fkst-packages-market-hzz@v0.2.0:packages/marketing-radar
 ```
+
+Manifest 只展开上述三个 business package，不会隐式加载 host/runtime package。
 
 `fkst-hosted` owns GitHub App login, session management, package fetching, and runtime execution. This repository does not require host changes for marketing business logic.
 

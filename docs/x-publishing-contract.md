@@ -109,3 +109,31 @@ one generated artifact.
 
 A rollback does not modify the user's Environment Profile or NyxID authority and does not require
 a real X write.
+
+## 稳定发布 / Stable Release
+
+Market PR 合入后，从合入后的 `main` commit 创建 `v0.2.0`。Manifest 与三个展开后的
+business package descriptor 必须全部固定到该 tag；不要从 feature branch 创建 tag。
+
+After the market PR merges, create `v0.2.0` from the merged `main` commit. The manifest and all
+three expanded business package descriptors must be pinned to that tag. Never create the tag from
+a feature branch.
+
+从全新 checkout 验证 tag：
+
+Verify the tag from a clean checkout:
+
+```bash
+git checkout v0.2.0
+python3 scripts/check_x_publishing_contract.py
+scripts/run.sh check
+scripts/run.sh test x-publisher
+scripts/run.sh test-composed
+```
+
+只有上述命令全部通过，才可声明 package release 完成。回滚时把 hosted manifest pin
+恢复到上一个已验证 stable tag，不修改用户 Environment Profile 或 NyxID authority。
+
+Declare the package release complete only after every command passes. To roll back, restore the
+hosted manifest pin to the previous verified stable tag without changing the user's Environment
+Profile or NyxID authority.

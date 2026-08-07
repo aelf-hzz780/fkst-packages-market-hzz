@@ -5,26 +5,30 @@ This document defines the issue-driven contracts for the marketing package set. 
 ## Runtime package set
 
 Import the official GitHub adapter separately, then import this repository's
-business-only marketing manifest:
+business-only marketing manifest at the stable release tag.
+
+请单独导入官方 GitHub adapter，并通过稳定 release tag 导入本仓库的 business-only
+marketing manifest。
 
 ```text
 ChronoAIProject/fkst-hosted@packages:packages/github-proxy
-aelf-hzz780/fkst-packages-market-hzz@main:manifests/auto-twitter-marketing.json
+aelf-hzz780/fkst-packages-market-hzz@v0.2.0:manifests/auto-twitter-marketing.json
 ```
 
 The market manifest expands only to:
 
 ```text
-aelf-hzz780/fkst-packages-market-hzz@v0.1.1:packages/x-publisher
-aelf-hzz780/fkst-packages-market-hzz@v0.1.1:packages/github-auto-twitter-marketing
-aelf-hzz780/fkst-packages-market-hzz@v0.1.1:packages/marketing-radar
+aelf-hzz780/fkst-packages-market-hzz@v0.2.0:packages/x-publisher
+aelf-hzz780/fkst-packages-market-hzz@v0.2.0:packages/github-auto-twitter-marketing
+aelf-hzz780/fkst-packages-market-hzz@v0.2.0:packages/marketing-radar
 ```
 
-For reproducible hosted runs, prefer the pinned manifest reference:
+The pinned manifest and all expanded package descriptors must use the same
+stable SemVer tag. Mutable `main` and feature refs are rejected by the offline
+checker.
 
-```text
-aelf-hzz780/fkst-packages-market-hzz@v0.1.1:manifests/auto-twitter-marketing.json
-```
+Manifest 与展开后的 package descriptor 必须使用同一个稳定 SemVer tag。离线 checker
+会拒绝可变的 `main` 或 feature ref。
 
 ## Shared issue label
 
