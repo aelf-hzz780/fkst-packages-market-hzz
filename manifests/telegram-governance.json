@@ -22,6 +22,27 @@
     "destructiveWriteSwitchEnv": "TELEGRAM_GOVERNANCE_DESTRUCTIVE_WRITE",
     "trustedAuthorLoginsEnv": "TELEGRAM_GOVERNANCE_TRUSTED_AUTHOR_LOGINS",
     "approverLoginsEnv": "TELEGRAM_GOVERNANCE_APPROVER_LOGINS",
+    "retryPolicy": {
+      "maxAttemptsEnv": "TELEGRAM_GOVERNANCE_NYXID_MAX_ATTEMPTS",
+      "maxAttemptsDefault": 3,
+      "maxAttemptsBounds": [
+        1,
+        5
+      ],
+      "baseSecondsEnv": "TELEGRAM_GOVERNANCE_NYXID_RETRY_BASE_SECONDS",
+      "baseSecondsDefault": 1,
+      "maxSecondsEnv": "TELEGRAM_GOVERNANCE_NYXID_RETRY_MAX_SECONDS",
+      "maxSecondsDefault": 5,
+      "retryableConditions": [
+        "tls_handshake",
+        "connect_timeout",
+        "http_429",
+        "http_502",
+        "http_503",
+        "http_504"
+      ],
+      "postRequirement": "byte-identical-payload-and-idempotency-key"
+    },
     "serviceBasePath": "/api/automation/v1",
     "rawTelegramCredentialPolicy": "forbidden-outside-nyxid"
   },

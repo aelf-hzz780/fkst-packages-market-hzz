@@ -326,6 +326,17 @@ return {
         client = fake_nyxid({ { exit_code = 1, stdout = "", stderr = "service unavailable" } }),
         why = "Automation API capabilities request failed",
       },
+      {
+        client = fake_nyxid({ {
+          exit_code = 1,
+          stdout = "",
+          stderr = "transport unavailable",
+          attempt_count = 3,
+          error_class = "connect_timeout",
+          retry_exhausted = true,
+        } }),
+        why = "Automation API capabilities request failed",
+      },
     }
     for _, case in ipairs(cases) do
       local department = load_department("departments.execute_command.main", {

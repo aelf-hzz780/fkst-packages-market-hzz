@@ -66,6 +66,10 @@ Live force-fresh re-reads the Issue and approval, then calls `GET /capabilities`
 
 The same Issue, mode, and canonical command always produce the same `client_command_id`, `trace_id`, and `Idempotency-Key`. Requests also send an `X-Trace-ID` identical to the body trace. Periodic `github_issue_observed` events resubmit the identical payload/key so TG returns the existing command's latest state; the package never changes the key to replay a Telegram action.
 
+NyxID transport retry 只覆盖 GET，以及携带合法 `Idempotency-Key` 的 POST。TLS/connect timeout、HTTP 429/502/503/504 最多尝试 3 次，默认 backoff 为 1 秒、2 秒，`Retry-After` 会被 bounded max 截断。每次 POST 都复用逐字一致的 service、path、body、headers 和 key。401/403/409、其他 4xx、validation error 和缺少 idempotency key 的 POST 不重试。
+
+NyxID transport retry applies only to GET and POST requests carrying a valid `Idempotency-Key`. TLS/connect timeouts and HTTP 429/502/503/504 receive at most three attempts with default backoff of one and two seconds; `Retry-After` is capped by the bounded maximum. Every POST attempt reuses the byte-identical service, path, body, headers, and key. The adapter does not retry 401/403/409, other 4xx responses, validation errors, or POST requests without an idempotency key.
+
 ## R2 Approval / R2 审批
 
 `reply.decision.execute`、`moderation.message.execute`、`moderation.profile.scan` 和 `moderation.user.restore` 属于 R2。Live R2 同时要求：Issue 作者在 trusted allowlist；批准人与作者不同；批准人在 approver allowlist；普通与 destructive write switches 都开启；两套 NyxID service 独立。
@@ -94,12 +98,19 @@ TELEGRAM_GOVERNANCE_SERVICE_SLUG=telegram-automation-online
 TELEGRAM_GOVERNANCE_DESTRUCTIVE_SERVICE_SLUG=telegram-automation-destructive-online
 TELEGRAM_GOVERNANCE_TRUSTED_AUTHOR_LOGINS=alice
 TELEGRAM_GOVERNANCE_APPROVER_LOGINS=bob,carol
+TELEGRAM_GOVERNANCE_NYXID_MAX_ATTEMPTS=3
+TELEGRAM_GOVERNANCE_NYXID_RETRY_BASE_SECONDS=1
+TELEGRAM_GOVERNANCE_NYXID_RETRY_MAX_SECONDS=5
 NYXID_ACCESS_TOKEN=<session-exclusive-agent-key>
 ```
 
 TG API keys 只能保存在 NyxID。Environment Profile 只保存 session 独占的 NyxID agent key、service slugs、allowlists 和 switches。每个 FKST agent/session 使用独立的 `NYXID_ACCESS_TOKEN`，保留 audit isolation 和独立 revoke 能力。
 
 TG API keys live only in NyxID. The Environment Profile contains only a session-exclusive NyxID agent key, service slugs, allowlists, and switches. Every FKST agent/session uses a distinct `NYXID_ACCESS_TOKEN` for audit isolation and independent revocation.
+
+Retry attempts 被限制为 1 到 5，base delay 被限制为 0.1 到 10 秒，max delay 被限制为 base delay 到 30 秒。空值使用上面的默认值。Retry 日志只包含 request kind、attempt count、安全 error class、operation 和 trace ID，不记录 body、provider response 或 credential。
+
+Retry attempts are bounded from one to five, base delay from 0.1 to 10 seconds, and maximum delay from the base delay to 30 seconds. Empty values use the defaults shown above. Retry logs contain only the request kind, attempt count, safe error class, operation, and trace ID; they exclude bodies, provider responses, and credentials.
 
 ## Receipts And Failure Posture / Receipt 与失败策略
 
@@ -110,6 +121,10 @@ TG command states are `accepted | running | succeeded | blocked | failed`. The i
 `execution_outcome=unknown` 必须人工介入。不要更换 idempotency key 自动重试；先核验 Telegram 实际状态和 TG audit evidence，再决定 reconcile、restore 或接受现状。Receipt 不包含 result、provider raw response、Issue body、approval body 或 credential-shaped fields。
 
 `execution_outcome=unknown` requires human intervention. Do not retry with a new idempotency key; inspect actual Telegram state and TG audit evidence before reconciling, restoring, or accepting the result. Receipts exclude results, raw provider responses, Issue bodies, approval bodies, and credential-shaped fields.
+
+Transport retry 的中间失败不生成 receipt。成功恢复后只处理最终 TG response；retry exhausted 后只生成一个 terminal blocked receipt，并继续沿用原 idempotency key 供后续 observed poll 安全重放。
+
+Intermediate transport retry failures do not emit receipts. Recovery processes only the final TG response; exhaustion emits one terminal blocked receipt and retains the original idempotency key for safe replay by a later observed poll.
 
 ## Canary And Rollback / Canary 与回滚
 

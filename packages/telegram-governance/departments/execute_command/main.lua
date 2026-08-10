@@ -21,6 +21,9 @@ local VALUE_ENV = {
   TELEGRAM_GOVERNANCE_DESTRUCTIVE_SERVICE_SLUG = true,
   TELEGRAM_GOVERNANCE_DESTRUCTIVE_WRITE = true,
   TELEGRAM_GOVERNANCE_DRY_RUN = true,
+  TELEGRAM_GOVERNANCE_NYXID_MAX_ATTEMPTS = true,
+  TELEGRAM_GOVERNANCE_NYXID_RETRY_BASE_SECONDS = true,
+  TELEGRAM_GOVERNANCE_NYXID_RETRY_MAX_SECONDS = true,
   TELEGRAM_GOVERNANCE_SERVICE_SLUG = true,
   TELEGRAM_GOVERNANCE_TRUSTED_AUTHOR_LOGINS = true,
   TELEGRAM_GOVERNANCE_WRITE = true,
@@ -66,14 +69,21 @@ local function runtime_options()
     trusted_author_logins = login_list(read_env("TELEGRAM_GOVERNANCE_TRUSTED_AUTHOR_LOGINS")),
     approver_logins = login_list(read_env("TELEGRAM_GOVERNANCE_APPROVER_LOGINS")),
     nyxid_access_token_present = strings.trim(read_token_presence("NYXID_ACCESS_TOKEN") or "") == "1",
+    nyxid_max_attempts = tonumber(strings.trim(read_env("TELEGRAM_GOVERNANCE_NYXID_MAX_ATTEMPTS") or "")),
+    nyxid_retry_base_seconds = tonumber(strings.trim(read_env("TELEGRAM_GOVERNANCE_NYXID_RETRY_BASE_SECONDS") or "")),
+    nyxid_retry_max_seconds = tonumber(strings.trim(read_env("TELEGRAM_GOVERNANCE_NYXID_RETRY_MAX_SECONDS") or "")),
   }
 end
 
-local function production_nyxid()
+local function production_nyxid(options)
   local run = type(exec_argv) == "function" and exec_argv or function()
     return { exit_code = 127, stdout = "", stderr = "exec_argv unavailable" }
   end
-  return nyxid_adapter.new(run)
+  return nyxid_adapter.new(run, {
+    max_attempts = options.nyxid_max_attempts,
+    retry_base_seconds = options.nyxid_retry_base_seconds,
+    retry_max_seconds = options.nyxid_retry_max_seconds,
+  })
 end
 
 local function valid_request(payload)
@@ -132,10 +142,26 @@ local function raise_blocked(document, current_issue, reason)
   raise("telegram_command_receipt", receipt)
 end
 
+local function log_nyxid_retry(document, trace_id, request_kind, response)
+  local attempts = type(response) == "table" and tonumber(response.attempt_count) or nil
+  if attempts == nil or attempts <= 1 then
+    return
+  end
+  local error_class = response.error_class or response.last_retry_error_class or "unknown"
+  log.warn("telegram-governance dept=execute_command tag=NYXID_RETRY"
+    .. " request_kind=" .. tostring(request_kind)
+    .. " attempt_count=" .. tostring(attempts)
+    .. " recovered=" .. tostring(response.recovered_after_retry == true)
+    .. " exhausted=" .. tostring(response.retry_exhausted == true)
+    .. " error_class=" .. tostring(error_class)
+    .. " operation=" .. tostring(document and document.operation or "unknown")
+    .. " trace_id=" .. tostring(trace_id or "unknown"))
+end
+
 local function make_department(ports)
   local handles = ports or {}
   local github = handles.github
-  local nyxid = handles.nyxid or production_nyxid()
+  local injected_nyxid = handles.nyxid
 
   local function options()
     if handles.options ~= nil then
@@ -177,12 +203,14 @@ local function make_department(ports)
       raise_blocked(document, current_issue, authorization_why)
       return
     end
+    local nyxid = injected_nyxid or production_nyxid(dispatch_options)
     if type(nyxid.available) ~= "function" or not nyxid.available() then
       raise_blocked(document, current_issue, "nyxid cli unavailable")
       return
     end
 
     local capabilities_result = nyxid.request(dispatch_options.ordinary_service, "/capabilities", "GET")
+    log_nyxid_retry(document, payload.trace_id, "capabilities", capabilities_result)
     if type(capabilities_result) ~= "table" or capabilities_result.exit_code ~= 0 then
       raise_blocked(document, current_issue, "Automation API capabilities request failed")
       return
@@ -207,6 +235,7 @@ local function make_department(ports)
       ["Idempotency-Key"] = command.idempotency_key,
       ["X-Trace-ID"] = command.body.trace_id,
     })
+    log_nyxid_retry(document, command.body.trace_id, "command", command_result)
     if type(command_result) ~= "table" or command_result.exit_code ~= 0 then
       raise_blocked(document, current_issue, "Automation API command request failed")
       return
