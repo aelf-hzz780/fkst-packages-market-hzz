@@ -52,7 +52,7 @@ Telegram governance is a separate composition and session:
 
 ```text
 ChronoAIProject/fkst-hosted@packages:packages/github-proxy
-aelf-hzz780/fkst-packages-market-hzz@v0.2.0-rc.1:manifests/telegram-governance.json
+aelf-hzz780/fkst-packages-market-hzz@v0.2.0-rc.2:manifests/telegram-governance.json
 ```
 
 It does not modify or share runtime state with the existing Auto Twitter session. See `packages/telegram-governance/README.md` for its Issue, approval, NyxID, and receipt contracts.

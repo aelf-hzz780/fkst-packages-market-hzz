@@ -3,7 +3,7 @@
   "name": "telegram-governance",
   "description": "GitHub issue driven Telegram governance workflow for Telethon Auto's canonical automation.v1 contract. Preview is local-only, dry-run dispatches shadow commands through NyxID, and live commands require explicit write switches plus independent two-person approval for R2 operations.",
   "packages": [
-    "aelf-hzz780/fkst-packages-market-hzz@feature/telegram-governance:packages/telegram-governance"
+    "aelf-hzz780/fkst-packages-market-hzz@v0.2.0-rc.2:packages/telegram-governance"
   ],
   "github": {
     "workLabels": [
