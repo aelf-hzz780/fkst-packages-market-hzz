@@ -12,15 +12,15 @@ marketing manifest。
 
 ```text
 ChronoAIProject/fkst-hosted@packages:packages/github-proxy
-aelf-hzz780/fkst-packages-market-hzz@v0.2.0:manifests/auto-twitter-marketing.json
+aelf-hzz780/fkst-packages-market-hzz@v0.2.1:manifests/auto-twitter-marketing.json
 ```
 
 The market manifest expands only to:
 
 ```text
-aelf-hzz780/fkst-packages-market-hzz@v0.2.0:packages/x-publisher
-aelf-hzz780/fkst-packages-market-hzz@v0.2.0:packages/github-auto-twitter-marketing
-aelf-hzz780/fkst-packages-market-hzz@v0.2.0:packages/marketing-radar
+aelf-hzz780/fkst-packages-market-hzz@v0.2.1:packages/x-publisher
+aelf-hzz780/fkst-packages-market-hzz@v0.2.1:packages/github-auto-twitter-marketing
+aelf-hzz780/fkst-packages-market-hzz@v0.2.1:packages/marketing-radar
 ```
 
 The pinned manifest and all expanded package descriptors must use the same

@@ -112,10 +112,10 @@ a real X write.
 
 ## 稳定发布 / Stable Release
 
-Market PR 合入后，从合入后的 `main` commit 创建 `v0.2.0`。Manifest 与三个展开后的
+Market PR 合入后，从合入后的 `main` commit 创建 `v0.2.1`。Manifest 与三个展开后的
 business package descriptor 必须全部固定到该 tag；不要从 feature branch 创建 tag。
 
-After the market PR merges, create `v0.2.0` from the merged `main` commit. The manifest and all
+After the market PR merges, create `v0.2.1` from the merged `main` commit. The manifest and all
 three expanded business package descriptors must be pinned to that tag. Never create the tag from
 a feature branch.
 
@@ -124,7 +124,7 @@ a feature branch.
 Verify the tag from a clean checkout:
 
 ```bash
-git checkout v0.2.0
+git checkout v0.2.1
 python3 scripts/check_x_publishing_contract.py
 scripts/run.sh check
 scripts/run.sh test x-publisher
