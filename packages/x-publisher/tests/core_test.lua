@@ -151,6 +151,30 @@ return {
     t.eq(ok, false)
     t.eq(why, "missing source_ref")
   end,
+  test_usable_request_rejects_noncanonical_dedup_keys = function()
+    local base = {
+      artifact_id = "artifact-1",
+      source_ref = { ref = "owner/repo#issue/43" },
+    }
+    for _, dedup_key in ipairs({
+      42,
+      "",
+      " leading-space",
+      "trailing-space ",
+      "line\nbreak",
+      "carriage\rreturn",
+      "control\1byte",
+      string.rep("x", 513),
+    }) do
+      base.dedup_key = dedup_key
+      local ok, why = core.validate_publish_request(base)
+      t.eq(ok, false)
+      t.eq(why, "invalid dedup_key")
+    end
+
+    base.dedup_key = string.rep("x", 512)
+    t.eq(core.validate_publish_request(base), true)
+  end,
   test_preview_receipt_shape_is_safe = function()
     local receipt = core.preview_receipt({
       artifact_id = "artifact-1",
@@ -230,6 +254,171 @@ return {
     t.is_true(key:find("#", 1, true) == nil)
     t.is_true(key:find(":", 1, true) == nil)
     t.is_true(key:find("+", 1, true) == nil)
+  end,
+  test_trusted_published_receipt_requires_author_key_marker_and_valid_status_uri = function()
+    local dedup_key = "auto-twitter-marketing/chronoai/2026-W31/schedule/owner/repo#issue/43/occurrence/x-publish"
+    local marker = "<!-- fkst:github-proxy:comment:" .. dedup_key
+      .. "/status/x-publish-published -->"
+    local evidence, why = core.trusted_published_receipt({
+      {
+        author_login = "fkst-test-bot[bot]",
+        body = "Auto Twitter marketing: X published\n\n"
+          .. "status: published\n"
+          .. "post_uri: https://x.com/example_user/status/2087115957424840733\n"
+          .. "dedup_key: " .. dedup_key .. "\n\n"
+          .. marker .. "\n" .. marker,
+      },
+    }, dedup_key, function(login)
+      return login == "fkst-test-bot[bot]"
+    end)
+
+    t.eq(why, nil)
+    t.eq(evidence.post_id, "2087115957424840733")
+    t.eq(evidence.post_uri, "https://x.com/example_user/status/2087115957424840733")
+  end,
+  test_trusted_published_receipt_rejects_noncanonical_expected_keys = function()
+    local authorize = function()
+      return true
+    end
+    for _, dedup_key in ipairs({
+      " leading-space",
+      "trailing-space ",
+      "line\nbreak",
+      "control\1byte",
+      string.rep("x", 513),
+    }) do
+      local evidence, why = core.trusted_published_receipt({}, dedup_key, authorize)
+      t.is_nil(evidence)
+      t.eq(why, "published receipt validation unavailable")
+    end
+  end,
+  test_trusted_published_receipt_ignores_forged_wrong_key_and_blocked_only_comments = function()
+    local dedup_key = "stable/x-publish"
+    local function published_comment(author, key, post_id)
+      return {
+        author_login = author,
+        body = "Auto Twitter marketing: X published\n\n"
+          .. "status: published\n"
+          .. "post_uri: https://x.com/i/web/status/" .. post_id .. "\n"
+          .. "dedup_key: " .. key .. "\n\n"
+          .. "<!-- fkst:github-proxy:comment:" .. key
+          .. "/status/x-publish-published -->",
+      }
+    end
+    local comments = {
+      published_comment("untrusted-user", dedup_key, "111"),
+      published_comment("fkst-test-bot", "other/x-publish", "222"),
+      {
+        author_login = "fkst-test-bot",
+        body = "Auto Twitter marketing: X published\n\n"
+          .. "status: published\n"
+          .. "post_uri: https://x.com/i/web/status/333",
+      },
+      {
+        author_login = "fkst-test-bot",
+        body = "Auto Twitter marketing: X publish blocked\n\n"
+          .. "status: blocked\n"
+          .. "dedup_key: " .. dedup_key .. "\n\n"
+          .. "<!-- fkst:github-proxy:comment:" .. dedup_key
+          .. "/status/x-publish-blocked -->",
+      },
+    }
+
+    local evidence, why = core.trusted_published_receipt(comments, dedup_key, function(login)
+      return login == "fkst-test-bot"
+    end)
+
+    t.is_nil(evidence)
+    t.eq(why, nil)
+  end,
+  test_trusted_published_receipt_survives_later_blocked_receipt = function()
+    local dedup_key = "stable/x-publish"
+    local evidence, why = core.trusted_published_receipt({
+      {
+        author_login = "fkst-test-bot",
+        body = "Auto Twitter marketing: X published\n\n"
+          .. "status: published\n"
+          .. "post_uri: https://twitter.com/example/status/1234567890\n"
+          .. "dedup_key: " .. dedup_key .. "\n\n"
+          .. "<!-- fkst:github-proxy:comment:" .. dedup_key
+          .. "/status/x-publish-published -->",
+      },
+      {
+        author_login = "fkst-test-bot",
+        body = "Auto Twitter marketing: X publish blocked\n\n"
+          .. "status: blocked\n"
+          .. "dedup_key: " .. dedup_key,
+      },
+    }, dedup_key, function()
+      return true
+    end)
+
+    t.eq(why, nil)
+    t.eq(evidence.post_id, "1234567890")
+  end,
+  test_trusted_published_receipt_fails_closed_on_corruption_or_conflict = function()
+    local dedup_key = "stable/x-publish"
+    local function comment(post_uri, platform_post_id, legacy_post_id)
+      return {
+        author_login = "fkst-test-bot",
+        body = "Auto Twitter marketing: X published\n\n"
+          .. "status: published\n"
+          .. "post_uri: " .. post_uri .. "\n"
+          .. (platform_post_id and ("platform_post_id: " .. platform_post_id .. "\n") or "")
+          .. (legacy_post_id and ("post_id: " .. legacy_post_id .. "\n") or "")
+          .. "dedup_key: " .. dedup_key .. "\n\n"
+          .. "<!-- fkst:github-proxy:comment:" .. dedup_key
+          .. "/status/x-publish-published -->",
+      }
+    end
+    local authorize = function()
+      return true
+    end
+
+    local malformed, malformed_why = core.trusted_published_receipt({
+      comment("https://example.com/example/status/123", nil),
+    }, dedup_key, authorize)
+    local mismatched, mismatched_why = core.trusted_published_receipt({
+      comment("https://x.com/example/status/123", "456"),
+    }, dedup_key, authorize)
+    local alias_conflict, alias_conflict_why = core.trusted_published_receipt({
+      comment("https://x.com/example/status/123", "123", "456"),
+    }, dedup_key, authorize)
+    local matching_key_without_marker, missing_marker_why = core.trusted_published_receipt({
+      {
+        author_login = "fkst-test-bot",
+        body = "Auto Twitter marketing: X published\n\n"
+          .. "status: published\n"
+          .. "post_uri: https://x.com/example/status/123\n"
+          .. "dedup_key: " .. dedup_key,
+      },
+    }, dedup_key, authorize)
+    local wrong_title, wrong_title_why = core.trusted_published_receipt({
+      {
+        author_login = "fkst-test-bot",
+        body = "Damaged receipt title\n\n"
+          .. "status: published\n"
+          .. "post_uri: https://x.com/example/status/123\n"
+          .. "dedup_key: " .. dedup_key,
+      },
+    }, dedup_key, authorize)
+    local conflict, conflict_why = core.trusted_published_receipt({
+      comment("https://x.com/example/status/123", nil),
+      comment("https://x.com/example/status/456", nil),
+    }, dedup_key, authorize)
+
+    t.is_nil(malformed)
+    t.eq(malformed_why, "corrupt published receipt marker")
+    t.is_nil(mismatched)
+    t.eq(mismatched_why, "corrupt published receipt marker")
+    t.is_nil(alias_conflict)
+    t.eq(alias_conflict_why, "corrupt published receipt marker")
+    t.is_nil(matching_key_without_marker)
+    t.eq(missing_marker_why, "corrupt published receipt marker")
+    t.is_nil(wrong_title)
+    t.eq(wrong_title_why, "corrupt published receipt marker")
+    t.is_nil(conflict)
+    t.eq(conflict_why, "conflicting published receipt markers")
   end,
   test_calendar_issue_ref_resolves_against_schedule_issue_repo = function()
     local ref, why = core.content_source_ref({

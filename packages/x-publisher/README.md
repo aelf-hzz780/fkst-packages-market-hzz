@@ -55,6 +55,21 @@ names above.
 If a live request is missing the access token or cannot execute `nyxid --version`, the package emits
 an `x_published` receipt with `status = "blocked"` and does not call the X API.
 
+Before any live provider request, `x-publisher` force-refreshes the schedule Issue referenced by
+`source_ref`. A `published` receipt suppresses the provider POST only when its comment author is in
+the bot-only allowlist (`FKST_GITHUB_BOT_LOGIN` plus `FKST_DEVLOOP_MANAGED_BOT_LOGINS`, excluding
+general `FKST_GITHUB_AUTHORIZED_LOGINS`), its `dedup_key` exactly matches the current publish
+request, and its X status URI and optional post-id fields agree. Publish keys are 1-512 bytes with
+no leading/trailing whitespace or ASCII control characters. The package replays the original post
+ID. A failed fresh read, damaged matching marker, or conflicting trusted marker fails closed;
+forged comments, receipts for another key, unscoped damaged comments, and blocked-only receipts do
+not suppress publishing. The runtime-local `once` marker remains a second same-runtime guard.
+
+This receipt check is immediate cross-session containment, not provider-side atomic idempotency.
+Concurrent first attempts and a crash after a successful provider POST but before the GitHub receipt
+is durable can still duplicate a post. Closing that window requires an atomic deduplication ledger at
+the provider write boundary that returns the first `post_id` for repeated stable keys.
+
 When `X_PUBLISH_EXPECTED_USERNAME` is set, the package first calls:
 
 ```text

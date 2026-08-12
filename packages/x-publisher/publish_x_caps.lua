@@ -14,5 +14,6 @@ return {
   publish_once_key = core.publish_once_key,
   publish_body_json = core.publish_body_json,
   tweet_body_json = core.tweet_body_json,
+  trusted_published_receipt = core.trusted_published_receipt,
   validate_publish_request = core.validate_publish_request,
 }

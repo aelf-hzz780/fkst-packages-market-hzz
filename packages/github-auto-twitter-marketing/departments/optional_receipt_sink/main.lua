@@ -1,4 +1,28 @@
 local saga = require("workflow.saga")
+local strings = require("contract.strings")
+
+local MAX_DEDUP_KEY_BYTES = 512
+
+local function is_canonical_dedup_key(value)
+  return strings.is_bounded_string(value, MAX_DEDUP_KEY_BYTES)
+    and strings.trim(value) == value
+    and value:find("[%z\1-\31\127]") == nil
+end
+
+local function receipt_key_values(payload)
+  if payload.dedup_key ~= nil then
+    if not is_canonical_dedup_key(payload.dedup_key) then
+      return nil, nil, "invalid-dedup-key"
+    end
+    return payload.dedup_key, payload.dedup_key, nil
+  end
+
+  local fallback = payload.artifact_id or "x-publish-receipt"
+  if not is_canonical_dedup_key(fallback) then
+    return nil, nil, "invalid-artifact-id"
+  end
+  return fallback, "", nil
+end
 
 local spec = {
   consumes = {
@@ -56,6 +80,10 @@ local function receipt_comment(payload)
   if type(payload) ~= "table" then
     return nil
   end
+  local comment_key_base, receipt_dedup_key, key_why = receipt_key_values(payload)
+  if comment_key_base == nil then
+    return nil, key_why
+  end
   local repo, issue_number = issue_target(payload.source_ref)
   if repo == nil or issue_number == nil then
     return nil
@@ -105,11 +133,10 @@ local function receipt_comment(payload)
 
   body = body
     .. "source_ref: " .. safe_line((payload.source_ref or {}).ref or (payload.source_ref or {}).reference, 256) .. "\n"
-    .. "dedup_key: " .. safe_line(payload.dedup_key, 256) .. "\n"
+    .. "dedup_key: " .. receipt_dedup_key .. "\n"
 
-  local comment_key = tostring(payload.dedup_key or payload.artifact_id or "x-publish-receipt")
-    .. "/status/x-publish-" .. status
-  body = body .. "\n<!-- fkst:github-proxy:comment:" .. safe_line(comment_key, 256) .. " -->\n"
+  local comment_key = comment_key_base .. "/status/x-publish-" .. status
+  body = body .. "\n<!-- fkst:github-proxy:comment:" .. comment_key .. " -->\n"
 
   return {
     schema = "github-proxy.v1",
@@ -132,9 +159,11 @@ local function act(event)
     .. " artifact_id="
     .. tostring(payload.artifact_id or payload.comment_id))
   if event and event.queue == "x-publisher.x_published" then
-    local comment = receipt_comment(payload)
+    local comment, why = receipt_comment(payload)
     if comment ~= nil then
       raise("github-proxy.github_issue_comment_request", comment)
+    elseif why ~= nil then
+      log.warn("github-auto-twitter-marketing dept=optional_receipt_sink tag=SKIP why=" .. why)
     end
   end
 end
