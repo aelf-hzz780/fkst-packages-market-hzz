@@ -21,15 +21,38 @@ local function json_escape(value)
   return text
 end
 
-local function issue_rest_json(issue_number, body)
+local function labels_rest_json(labels)
+  local rows = {}
+  for _, label in ipairs(labels or { "auto-twitter-marketing" }) do
+    rows[#rows + 1] = '{"name":"' .. json_escape(label) .. '"}'
+  end
+  return "[" .. table.concat(rows, ",") .. "]"
+end
+
+local function issue_rest_json(issue_number, body, labels)
   return string.format(
-    '{"number":%d,"title":"Auto Twitter marketing %d","body":"%s","html_url":"https://github.example/%s/issues/%d","updated_at":"2026-07-24T09:00:00Z","state":"open","labels":[{"name":"auto-twitter-marketing"}],"assignees":[],"user":{"login":"fkst-test-bot"}}\n',
+    '{"number":%d,"title":"Auto Twitter marketing %d","body":"%s","html_url":"https://github.example/%s/issues/%d","updated_at":"2026-07-24T09:00:00Z","state":"open","labels":%s,"assignees":[],"user":{"login":"fkst-test-bot"}}\n',
     issue_number,
     issue_number,
     json_escape(body),
     repo,
-    issue_number
+    issue_number,
+    labels_rest_json(labels)
   )
+end
+
+local function comments_rest_json(comments)
+  local rows = {}
+  for index, comment in ipairs(comments or {}) do
+    rows[#rows + 1] = string.format(
+      '{"id":%d,"body":"%s","created_at":"2026-07-24T09:%02d:00Z","user":{"login":"%s"}}',
+      index,
+      json_escape(comment.body),
+      index,
+      json_escape(comment.author_login)
+    )
+  end
+  return "[" .. table.concat(rows, ",") .. "]\n"
 end
 
 local function mock_env(opts)
@@ -101,17 +124,34 @@ local function mock_env(opts)
   end
 end
 
-local function mock_issue_read(issue_number, body)
-  t.mock_command("gh api repos/" .. repo .. "/issues/" .. tostring(issue_number), {
-    stdout = issue_rest_json(issue_number, body),
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command("gh api --paginate --slurp 'repos/" .. repo .. "/issues/" .. tostring(issue_number) .. "/comments?per_page=100'", {
-    stdout = "[]\n",
-    stderr = "",
-    exit_code = 0,
-  })
+local function mock_issue_read(issue_number, body, count, opts)
+  local options = opts or {}
+  for _ = 1, count or 1 do
+    t.mock_command("gh api repos/" .. repo .. "/issues/" .. tostring(issue_number), {
+      stdout = issue_rest_json(issue_number, body, options.labels),
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh api --paginate --slurp 'repos/" .. repo .. "/issues/" .. tostring(issue_number) .. "/comments?per_page=100'", {
+      stdout = comments_rest_json(options.comments),
+      stderr = "",
+      exit_code = 0,
+    })
+  end
+end
+
+local function count_calls(needle)
+  local count = 0
+  for _, call in ipairs(t.command_calls()) do
+    local rendered = tostring(call.rendered or call.command or call.cmd or "")
+    if rendered == "" and type(call.argv) == "table" then
+      rendered = table.concat(call.argv, " ")
+    end
+    if rendered:find(needle, 1, true) then
+      count = count + 1
+    end
+  end
+  return count
 end
 
 local function issue_event(issue_number)
@@ -431,7 +471,7 @@ week: 2026-W31
 calendar-ref: #42
 mode: live
 scheduled-at: 2026-07-25T09:00:00Z
-]])
+]], 2)
     mock_issue_read(42, [[
 type: weekly-content
 project: chronoai
@@ -485,7 +525,7 @@ week: 2026-W32
 calendar-ref: #53
 mode: live
 scheduled-at: 2026-07-25T09:00:00Z
-]])
+]], 2)
     mock_issue_read(53, [[
 type: weekly-content
 project: chronoai
@@ -528,6 +568,95 @@ tweet: Native Quote composed graph verification
       return tostring((raised.payload or {}).body or ""):find("quote_mode: native", 1, true) ~= nil
     end)
     t.is_true(comment.payload.body:find("quote_mode: native", 1, true) ~= nil)
+  end,
+
+  test_cold_start_observed_retired_schedule_replays_trusted_publish_without_post = function()
+    local schedule_number = 82
+    local content_number = 81
+    local post_id = "2083133986071839073"
+    local dedup_key = "auto-twitter-marketing/chronoai/2026-W31/schedule/owner/repo#issue/82/2026-07-25T09-00-00Z/x-publish"
+    local published_comment = {
+      author_login = "fkst-test-bot",
+      body = "Auto Twitter marketing: X published\n\n"
+        .. "status: published\n"
+        .. "post_uri: https://x.com/i/web/status/" .. post_id .. "\n"
+        .. "source_ref: owner/repo#issue/82\n"
+        .. "dedup_key: " .. dedup_key .. "\n\n"
+        .. "<!-- fkst:github-proxy:comment:" .. dedup_key
+        .. "/status/x-publish-published -->",
+    }
+    mock_env({ live = true })
+    mock_issue_read(schedule_number, [[
+type: schedule-publish
+project: chronoai
+week: 2026-W31
+calendar-ref: #81
+mode: live
+scheduled-at: 2026-07-25T09:00:00Z
+]], 2, {
+      labels = { "auto-twitter-marketing", "fkst-session-retired" },
+      comments = { published_comment },
+    })
+    local cold_start = observed_issue_event(schedule_number)
+    cold_start.payload.labels = { "auto-twitter-marketing", "fkst-session-retired" }
+
+    local trace = graph.require_quiescent(graph.run(cold_start, { max_steps = 12 }))
+
+    graph.assert_covers(trace, {
+      "github-proxy.github_issue_observed -> github-auto-twitter-marketing.import_issue",
+      "x-publisher.x_publish_request -> x-publisher.publish_x",
+    })
+    local request = graph.require_raise(trace, "x-publisher.x_publish_request")
+    local receipt = graph.require_raise(trace, "x-publisher.x_published")
+    t.eq(request.payload.dedup_key, dedup_key)
+    t.eq(receipt.payload.status, "published")
+    t.eq(receipt.payload.platform_post_id, post_id)
+    t.eq(count_calls("gh api repos/" .. repo .. "/issues/" .. schedule_number), 2)
+    t.eq(count_calls("gh api repos/" .. repo .. "/issues/" .. content_number), 0)
+    t.eq(count_calls("nyxid proxy request"), 0)
+  end,
+
+  test_512_byte_receipt_key_round_trips_from_sink_to_publisher_replay = function()
+    local ending = "/x-publish"
+    local dedup_key = string.rep("k", 512 - #ending) .. ending
+    local post_id = "2087115967956839247"
+    local ref = source_ref(83)
+    local sink = t.run_department("departments/optional_receipt_sink/main.lua", {
+      queue = "x-publisher.x_published",
+      payload = {
+        schema = "x-publisher.x-published.v1",
+        artifact_id = "long-dedup-receipt",
+        status = "published",
+        post_uri = "https://x.com/i/web/status/" .. post_id,
+        dedup_key = dedup_key,
+        source_ref = ref,
+      },
+      source_ref = ref,
+    })
+    local persisted = sink.raises[1].payload.body
+    mock_env({ live = true })
+    mock_issue_read(83, "type: schedule-publish", 1, {
+      comments = {
+        { author_login = "fkst-test-bot[bot]", body = persisted },
+      },
+    })
+
+    local trace = graph.require_quiescent(graph.run({
+      queue = "x-publisher.x_publish_request",
+      payload = {
+        artifact_id = "long-dedup-replay",
+        platform = "x",
+        channel = "live",
+        dedup_key = dedup_key,
+        source_ref = ref,
+      },
+      source_ref = ref,
+    }, { max_steps = 6 }))
+
+    local receipt = graph.require_raise(trace, "x-publisher.x_published")
+    t.eq(receipt.payload.status, "published")
+    t.eq(receipt.payload.platform_post_id, post_id)
+    t.eq(count_calls("nyxid proxy request"), 0)
   end,
 
   test_non_issue_source_ref_skips_without_github_read = function()

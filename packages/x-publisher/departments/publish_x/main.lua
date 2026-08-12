@@ -2,6 +2,7 @@
 -- fails closed unless host env explicitly enables writes and supplies a NyxID X service slug.
 local publish_caps = require("publish_x_caps")
 local ports_lib = require("forge.ports")
+local content_filter = require("forge.github.content_filter")
 local saga = require("workflow.saga")
 local env = require("workflow.env")
 local strings = require("contract.strings")
@@ -46,6 +47,21 @@ local function read_env_command(name)
 end
 
 local read_env = env.read_env(read_env_command, { propagate_exec_errors = true })
+
+local author_env_cache = {}
+local function read_author_env(name)
+  if author_env_cache[name] == nil then
+    author_env_cache[name] = { value = read_env(name) }
+  end
+  return author_env_cache[name].value
+end
+
+local receipt_author_options = ports_lib.github_author_options(read_author_env, "x-publisher receipt", {
+  bot_login_env = "FKST_GITHUB_BOT_LOGIN",
+  extra_login_envs = {
+    "FKST_DEVLOOP_MANAGED_BOT_LOGINS",
+  },
+})
 
 local function read_env_presence_command(name)
   if not PRESENCE_ENV[name] then
@@ -166,6 +182,35 @@ local function resolve_publish_intent(github, payload)
   return publish_caps.extract_publish_intent(issue.body, payload)
 end
 
+local function resolve_prior_publish(github, payload)
+  if github == nil or type(github.read_issue) ~= "function"
+      or type(github.is_authorized_author) ~= "function" then
+    return nil, "github publish receipt resolver unavailable"
+  end
+  local ok, issue = pcall(function()
+    return github.read_issue(payload.source_ref, {
+      consumer = "x-publisher-publish-guard",
+      force_fresh = true,
+    })
+  end)
+  if not ok or type(issue) ~= "table" or type(issue.comments) ~= "table" then
+    return nil, "github publish receipt read failed"
+  end
+  return publish_caps.trusted_published_receipt(
+    issue.comments,
+    payload.dedup_key,
+    function(login)
+      if github.is_authorized_author(login) ~= true then
+        return false
+      end
+      local receipt_whitelist = content_filter.policy_whitelist(
+        receipt_author_options.trusted_author_policy
+      )
+      return content_filter.is_authorized(login, receipt_whitelist)
+    end
+  )
+end
+
 local function publish_tweet(payload, options, username, intent)
   local result = nyxid_request({
     "nyxid",
@@ -226,6 +271,19 @@ local function make_department(ports)
       return
     end
 
+    local prior_publish, prior_why = resolve_prior_publish(github, payload)
+    if prior_why ~= nil then
+      block(payload, prior_why)
+      return
+    end
+    if prior_publish ~= nil then
+      local receipt = publish_caps.live_receipt(payload, { id = prior_publish.post_id })
+      log.info("x-publisher dept=publish_x tag=REPLAY_PUBLISHED artifact_id="
+        .. tostring(payload.artifact_id) .. " post_uri=" .. tostring(receipt.post_uri))
+      raise("x_published", receipt)
+      return
+    end
+
     local environment_ok, environment_why = live_environment_ready(options)
     if not environment_ok then
       block(payload, environment_why)
@@ -269,7 +327,7 @@ end
 
 return ports_lib.install(
   make_department,
-  ports_lib.github_author_options(read_env, "x-publisher", {
+  ports_lib.github_author_options(read_author_env, "x-publisher", {
     bot_login_env = "FKST_GITHUB_BOT_LOGIN",
     extra_login_envs = {
       "FKST_DEVLOOP_MANAGED_BOT_LOGINS",

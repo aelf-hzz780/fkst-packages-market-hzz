@@ -32,7 +32,7 @@ class StableSemverTest(unittest.TestCase):
                 self.assertIsNone(checker.SEMVER_PATTERN.fullmatch(version))
 
     def test_release_manifest_uses_one_stable_semver_ref(self) -> None:
-        self.assertEqual(checker.validate_release_manifest(), "v0.2.0")
+        self.assertEqual(checker.validate_release_manifest(), "v0.2.1")
 
     def test_rejects_mutable_or_mixed_package_refs(self) -> None:
         mutable = [
@@ -45,9 +45,9 @@ class StableSemverTest(unittest.TestCase):
         self.assertEqual(mutable_error.exception.code, "mutable_or_invalid_package_ref")
 
         mixed = [
-            "aelf-hzz780/fkst-packages-market-hzz@v0.2.0:packages/x-publisher",
-            "aelf-hzz780/fkst-packages-market-hzz@v0.2.0:packages/github-auto-twitter-marketing",
-            "aelf-hzz780/fkst-packages-market-hzz@v0.1.1:packages/marketing-radar",
+            "aelf-hzz780/fkst-packages-market-hzz@v0.2.1:packages/x-publisher",
+            "aelf-hzz780/fkst-packages-market-hzz@v0.2.1:packages/github-auto-twitter-marketing",
+            "aelf-hzz780/fkst-packages-market-hzz@v0.2.0:packages/marketing-radar",
         ]
         with self.assertRaises(checker.ContractCheckError) as mixed_error:
             checker.validate_package_descriptors(mixed)

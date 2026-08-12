@@ -4,6 +4,8 @@ local M = {}
 local strings = require("contract.strings")
 local x_text = require("contract.x_text")
 local x_publishing_contract = require("contract.x_publishing_contract")
+local published_receipt = require("published_receipt")
+local dedup_keys = require("x_publisher_dedup_key")
 
 local function values_by_name(values)
   local names = {}
@@ -244,6 +246,10 @@ function M.validate_publish_request(payload)
       return false, metadata_why
     end
   end
+  local dedup_key = payload.dedup_key
+  if dedup_key ~= nil and not dedup_keys.is_canonical(dedup_key) then
+    return false, "invalid dedup_key"
+  end
   for _, field in ipairs({ "channel", "dedup_key", "trace_id", "approval_id", "scheduled_at" }) do
     if payload[field] ~= nil and not is_small_scalar(payload[field]) then
       return false, "invalid " .. field
@@ -353,6 +359,8 @@ function M.publish_once_key(payload)
   end
   return "x-publisher/publish/" .. segment
 end
+
+M.trusted_published_receipt = published_receipt.trusted_published_receipt
 
 local function metadata_tag_content_ref(payload)
   if type(payload) ~= "table" or type(payload.metadata) ~= "table" then

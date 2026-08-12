@@ -30,7 +30,7 @@ Hosted 运行时由 official package 与用户 package 组合。请单独导入�
 
 ```text
 ChronoAIProject/fkst-hosted@packages:packages/github-proxy
-aelf-hzz780/fkst-packages-market-hzz@v0.2.0:manifests/auto-twitter-marketing.json
+aelf-hzz780/fkst-packages-market-hzz@v0.2.1:manifests/auto-twitter-marketing.json
 ```
 
 For reproducible production sessions, keep the SemVer pin. Do not use `main` or
@@ -41,9 +41,9 @@ a mutable feature branch.
 The market manifest expands only to the business packages:
 
 ```text
-aelf-hzz780/fkst-packages-market-hzz@v0.2.0:packages/x-publisher
-aelf-hzz780/fkst-packages-market-hzz@v0.2.0:packages/github-auto-twitter-marketing
-aelf-hzz780/fkst-packages-market-hzz@v0.2.0:packages/marketing-radar
+aelf-hzz780/fkst-packages-market-hzz@v0.2.1:packages/x-publisher
+aelf-hzz780/fkst-packages-market-hzz@v0.2.1:packages/github-auto-twitter-marketing
+aelf-hzz780/fkst-packages-market-hzz@v0.2.1:packages/marketing-radar
 ```
 
 Manifest 只展开上述三个 business package，不会隐式加载 host/runtime package。

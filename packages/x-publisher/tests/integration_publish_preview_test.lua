@@ -2,6 +2,7 @@ local t = fkst.test
 
 local repo = "owner/repo"
 local run_counter = 0
+local prepare_github_live_read
 
 local function unique_root(label)
   run_counter = run_counter + 1
@@ -16,8 +17,9 @@ local function event(payload)
   }
 end
 
-local function run_publish(payload, env)
+local function run_publish(payload, env, opts)
   local env_values = env or {}
+  prepare_github_live_read(opts or {})
   t.mock_command('printf %s "$X_PUBLISH_WRITE"', {
     stdout = env_values.X_PUBLISH_WRITE or "",
     stderr = "",
@@ -85,30 +87,46 @@ local function json_escape(value)
   return text
 end
 
-local function issue_rest_json(issue_number, body)
+local function issue_rest_json(issue_number, body, author_login)
   return string.format(
-    '{"number":%d,"title":"Auto Twitter marketing content %d","body":"%s","html_url":"https://github.example/%s/issues/%d","updated_at":"2026-07-24T09:00:00Z","state":"open","labels":[{"name":"auto-twitter-marketing"}],"assignees":[],"user":{"login":"fkst-test-bot"}}\n',
+    '{"number":%d,"title":"Auto Twitter marketing content %d","body":"%s","html_url":"https://github.example/%s/issues/%d","updated_at":"2026-07-24T09:00:00Z","state":"open","labels":[{"name":"auto-twitter-marketing"}],"assignees":[],"user":{"login":"%s"}}\n',
     issue_number,
     issue_number,
     json_escape(body),
     repo,
-    issue_number
+    issue_number,
+    json_escape(author_login or "fkst-test-bot")
   )
 end
 
-local function mock_author_env()
+local function comments_rest_json(comments)
+  local rows = {}
+  for index, comment in ipairs(comments or {}) do
+    rows[#rows + 1] = string.format(
+      '{"id":%d,"body":"%s","created_at":"2026-07-24T09:%02d:00Z","user":{"login":"%s"}}',
+      index,
+      json_escape(comment.body),
+      index,
+      json_escape(comment.author_login or "fkst-test-bot")
+    )
+  end
+  return "[" .. table.concat(rows, ",") .. "]\n"
+end
+
+local function mock_author_env(opts)
+  local options = opts or {}
   t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
-    stdout = "fkst-test-bot",
+    stdout = options.bot_login or "fkst-test-bot",
     stderr = "",
     exit_code = 0,
   })
   t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', {
-    stdout = "fkst-test-bot",
+    stdout = options.managed_bot_logins or "fkst-test-bot",
     stderr = "",
     exit_code = 0,
   })
   t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', {
-    stdout = "fkst-test-bot",
+    stdout = options.authorized_logins or "fkst-test-bot",
     stderr = "",
     exit_code = 0,
   })
@@ -125,6 +143,45 @@ local function mock_content_issue(issue_number, body)
     stderr = "",
     exit_code = 0,
   })
+end
+
+local function mock_schedule_issue(comments)
+  t.mock_command("gh api repos/" .. repo .. "/issues/43", {
+    stdout = issue_rest_json(43, "type: schedule-publish"),
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("gh api --paginate --slurp 'repos/" .. repo .. "/issues/43/comments?per_page=100'", {
+    stdout = comments_rest_json(comments),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function published_receipt_comment(dedup_key, post_id, author_login)
+  return {
+    author_login = author_login or "fkst-test-bot",
+    body = "Auto Twitter marketing: X published\n\n"
+      .. "status: published\n"
+      .. "post_uri: https://x.com/i/web/status/" .. tostring(post_id) .. "\n"
+      .. "source_ref: " .. repo .. "#issue/43\n"
+      .. "dedup_key: " .. dedup_key .. "\n\n"
+      .. "<!-- fkst:github-proxy:comment:" .. dedup_key
+      .. "/status/x-publish-published -->",
+  }
+end
+
+prepare_github_live_read = function(opts)
+  mock_author_env(opts)
+  if opts.schedule_read_failure then
+    t.mock_command("gh api repos/" .. repo .. "/issues/43", {
+      stdout = "",
+      stderr = "schedule issue unavailable",
+      exit_code = 1,
+    })
+    return
+  end
+  mock_schedule_issue(opts.schedule_comments or {})
 end
 
 local function mock_nyxid_cli_available()
@@ -686,6 +743,159 @@ tweet: Link Quote commentary
     t.eq(count_calls("quote_tweet_id"), 0)
   end,
 
+  test_live_publish_replays_trusted_receipt_across_two_fresh_runtime_roots_without_post = function()
+    local payload = live_payload("historical-replay")
+    local comments = {
+      published_receipt_comment(payload.dedup_key, "2087115957424840733", "fkst-test-bot[bot]"),
+      published_receipt_comment(payload.dedup_key, "2087115957424840733", "app/fkst-test-bot"),
+      {
+        author_login = "fkst-test-bot",
+        body = "Auto Twitter marketing: X publish blocked\n\n"
+          .. "status: blocked\n"
+          .. "dedup_key: " .. payload.dedup_key,
+      },
+    }
+
+    local first = run_publish(payload, live_env(), { schedule_comments = comments })
+    local second = run_publish(payload, live_env(), { schedule_comments = comments })
+
+    t.eq(first.exit_code, 0)
+    t.eq(second.exit_code, 0)
+    t.eq(first.raises[1].payload.status, "published")
+    t.eq(second.raises[1].payload.status, "published")
+    t.eq(first.raises[1].payload.platform_post_id, "2087115957424840733")
+    t.eq(second.raises[1].payload.platform_post_id, "2087115957424840733")
+    t.eq(count_calls("gh api repos/" .. repo .. "/issues/43"), 2)
+    t.eq(count_calls("gh api repos/" .. repo .. "/issues/42"), 0)
+    t.eq(count_calls("nyxid proxy request"), 0)
+  end,
+
+  test_live_publish_rejects_noncanonical_dedup_keys_without_post = function()
+    for index, dedup_key in ipairs({ " leading-space", "line\nbreak" }) do
+      local payload = live_payload("invalid-dedup-" .. tostring(index))
+      payload.dedup_key = dedup_key
+
+      local result = run_publish(payload, live_env())
+
+      t.eq(result.exit_code, 0)
+      t.eq(#result.raises, 0)
+    end
+    t.eq(count_calls("nyxid proxy request"), 0)
+  end,
+
+  test_live_publish_posts_once_then_fresh_runtime_replays_persisted_receipt = function()
+    local payload = live_payload("fresh-runtime-sequence")
+    local post_id = "2087115963800109098"
+    mock_content_issue(42, "tweet: publish once before receipt persistence")
+    mock_nyxid_cli_available()
+    t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
+      stdout = '{"data":{"id":"100000000000000001","name":"Example User","username":"example_user"}}',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("nyxid proxy request api-twitter-2-media /tweets -m POST", {
+      stdout = '{"data":{"id":"' .. post_id .. '"}}',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local first = run_publish(payload, live_env())
+    local second = run_publish(payload, live_env(), {
+      schedule_comments = { published_receipt_comment(payload.dedup_key, post_id) },
+    })
+
+    t.eq(first.exit_code, 0)
+    t.eq(second.exit_code, 0)
+    t.eq(first.raises[1].payload.status, "published")
+    t.eq(second.raises[1].payload.status, "published")
+    t.eq(first.raises[1].payload.platform_post_id, post_id)
+    t.eq(second.raises[1].payload.platform_post_id, post_id)
+    t.eq(count_calls("gh api repos/" .. repo .. "/issues/43"), 2)
+    t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 1)
+  end,
+
+  test_live_publish_fails_closed_when_schedule_receipt_read_fails = function()
+    local result = run_publish(live_payload("schedule-read-failed"), live_env(), {
+      schedule_read_failure = true,
+    })
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].payload.status, "blocked")
+    t.eq(result.raises[1].payload.blocked_reason, "github publish receipt read failed")
+    t.eq(count_calls("nyxid proxy request"), 0)
+  end,
+
+  test_live_publish_fails_closed_on_corrupt_trusted_receipt_marker = function()
+    local payload = live_payload("corrupt-receipt")
+    local result = run_publish(payload, live_env(), {
+      schedule_comments = {
+        published_receipt_comment(payload.dedup_key, "not-a-post-id"),
+      },
+    })
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].payload.status, "blocked")
+    t.eq(result.raises[1].payload.blocked_reason, "corrupt published receipt marker")
+    t.eq(count_calls("nyxid proxy request"), 0)
+  end,
+
+  test_live_publish_does_not_trust_forged_receipt_comment = function()
+    local payload = live_payload("forged-receipt")
+    mock_content_issue(42, "tweet: forged receipt must not suppress this post")
+    mock_nyxid_cli_available()
+    t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
+      stdout = '{"data":{"id":"100000000000000001","name":"Example User","username":"example_user"}}',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("nyxid proxy request api-twitter-2-media /tweets -m POST", {
+      stdout = '{"data":{"id":"2087115960297967885"}}',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_publish(payload, live_env(), {
+      schedule_comments = {
+        published_receipt_comment(payload.dedup_key, "111", "untrusted-user"),
+      },
+    })
+
+    t.eq(result.exit_code, 0)
+    t.eq(result.raises[1].payload.status, "published")
+    t.eq(result.raises[1].payload.platform_post_id, "2087115960297967885")
+    t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 1)
+  end,
+
+  test_live_publish_does_not_trust_receipt_from_authorized_human = function()
+    local payload = live_payload("authorized-human-forged-receipt")
+    mock_content_issue(42, "tweet: an authorized human receipt must not suppress this post")
+    mock_nyxid_cli_available()
+    t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
+      stdout = '{"data":{"id":"100000000000000001","name":"Example User","username":"example_user"}}',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("nyxid proxy request api-twitter-2-media /tweets -m POST", {
+      stdout = '{"data":{"id":"2087115965062597421"}}',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_publish(payload, live_env(), {
+      authorized_logins = "fkst-test-bot,release-manager",
+      schedule_comments = {
+        published_receipt_comment(payload.dedup_key, "111", "release-manager"),
+      },
+    })
+
+    t.eq(result.exit_code, 0)
+    t.eq(result.raises[1].payload.status, "published")
+    t.eq(result.raises[1].payload.platform_post_id, "2087115965062597421")
+    t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 1)
+  end,
+
   test_live_publish_duplicate_dedup_key_skips_second_post = function()
     local suffix = tostring(now())
     local runtime_root = "/tmp/fkst-marketing-test/x-publisher/live-once-" .. suffix
@@ -693,6 +903,7 @@ tweet: Link Quote commentary
     local dedup_key = "dedup-live-once-" .. suffix
     local function run_once()
       mock_author_env()
+      mock_schedule_issue({})
       mock_content_issue(42, [[
 type: weekly-content
 week: 2026-W31
