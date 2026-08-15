@@ -1,5 +1,12 @@
 local t = fkst.test
 
+local scheduled_at = "2026-07-25T09:00:00Z"
+
+local function one_shot_publish_key(number)
+  return "auto-twitter-marketing/chronoai/2026-W31/schedule/owner/repo#issue/"
+    .. tostring(number) .. "/2026-07-25T09-00-00Z/x-publish"
+end
+
 local function source_ref(number)
   local ref = "owner/repo#issue/" .. tostring(number)
   return {
@@ -46,8 +53,15 @@ return {
       schema = "x-publisher.x-published.v1",
       artifact_id = "auto-twitter-marketing/chronoai/2026-W31/schedule",
       status = "published",
+      platform = "x",
+      platform_post_id = "1234567890",
       post_uri = "https://x.com/i/web/status/1234567890",
-      dedup_key = "auto-twitter-marketing/chronoai/2026-W31/schedule/x-publish",
+      dedup_key = one_shot_publish_key(62),
+      content_ref = "#61",
+      channel = "live",
+      trace_id = "trace-published-one-shot",
+      scheduled_at = scheduled_at,
+      metadata = { schedule_type = "one-shot" },
       source_ref = source_ref(62),
     })
 
@@ -58,6 +72,79 @@ return {
     t.eq(raised.payload.issue_number, 62)
     t.is_true(raised.payload.body:find("X published", 1, true) ~= nil)
     t.is_true(raised.payload.body:find("https://x.com/i/web/status/1234567890", 1, true) ~= nil)
+    t.is_true(raised.payload.body:find("platform_post_id: 1234567890", 1, true) ~= nil)
+    t.eq(raised.payload.handoff.schema, "auto-twitter-marketing.one-shot-close.v1")
+    t.eq(raised.payload.handoff.kind, "published-one-shot")
+    t.eq(raised.payload.handoff.status, "published")
+    t.eq(raised.payload.handoff.schedule_type, "one-shot")
+    t.eq(raised.payload.handoff.scheduled_at, scheduled_at)
+    t.eq(raised.payload.handoff.artifact_id, "auto-twitter-marketing/chronoai/2026-W31/schedule")
+    t.eq(raised.payload.handoff.content_ref, "#61")
+    t.eq(raised.payload.handoff.channel, "live")
+    t.eq(raised.payload.handoff.platform, "x")
+    t.eq(raised.payload.handoff.platform_post_id, "1234567890")
+    t.eq(raised.payload.handoff.post_uri, "https://x.com/i/web/status/1234567890")
+    t.eq(raised.payload.handoff.source_ref.ref, "owner/repo#issue/62")
+    t.eq(raised.payload.handoff.receipt_dedup_key, one_shot_publish_key(62))
+    t.eq(raised.payload.handoff.comment_dedup_key, raised.payload.dedup_key)
+    t.eq(raised.payload.handoff.trace_id, "trace-published-one-shot")
+  end,
+
+  test_receipt_handoff_requires_published_explicit_one_shot = function()
+    for index, fixture in ipairs({
+      { status = "blocked", schedule_type = "one-shot" },
+      { status = "preview", schedule_type = "one-shot" },
+      { status = "skipped", schedule_type = "one-shot" },
+      { status = "published", schedule_type = "daily" },
+      { status = "published", schedule_type = "every-minutes" },
+      { status = "published", schedule_type = nil },
+      { status = "published", schedule_type = "one-shot" },
+    }) do
+      local result = run_receipt({
+        schema = "x-publisher.x-published.v1",
+        artifact_id = "receipt-no-close-" .. tostring(index),
+        status = fixture.status,
+        post_uri = "https://x.com/i/web/status/" .. tostring(index),
+        dedup_key = "receipt-no-close-" .. tostring(index) .. "/x-publish",
+        metadata = { schedule_type = fixture.schedule_type },
+        source_ref = source_ref(70 + index),
+      })
+
+      t.eq(#result.raises, 1)
+      t.is_nil(result.raises[1].payload.handoff)
+    end
+  end,
+
+  test_receipt_handoff_requires_canonical_x_post_evidence = function()
+    local cases = {
+      { platform = nil, platform_post_id = "123", post_uri = "https://x.com/i/web/status/123" },
+      { platform = "twitter", platform_post_id = "123", post_uri = "https://x.com/i/web/status/123" },
+      { platform = "x", platform_post_id = nil, post_uri = "https://x.com/i/web/status/123" },
+      { platform = "x", platform_post_id = "abc", post_uri = "https://x.com/i/web/status/abc" },
+      { platform = "x", platform_post_id = "123", post_uri = nil },
+      { platform = "x", platform_post_id = "123", post_uri = "https://x.com/i/web/status/456" },
+      { platform = "x", platform_post_id = "123", post_uri = "https://twitter.com/example/status/123" },
+    }
+    for index, evidence in ipairs(cases) do
+      local result = run_receipt({
+        schema = "x-publisher.x-published.v1",
+        artifact_id = "auto-twitter-marketing/chronoai/2026-W31/schedule",
+        status = "published",
+        platform = evidence.platform,
+        platform_post_id = evidence.platform_post_id,
+        post_uri = evidence.post_uri,
+        dedup_key = one_shot_publish_key(80 + index),
+        content_ref = "#61",
+        channel = "live",
+        trace_id = "trace-invalid-post-evidence-" .. tostring(index),
+        scheduled_at = scheduled_at,
+        metadata = { schedule_type = "one-shot" },
+        source_ref = source_ref(80 + index),
+      })
+
+      t.eq(#result.raises, 1)
+      t.is_nil(result.raises[1].payload.handoff)
+    end
   end,
 
   test_published_receipt_preserves_512_byte_dedup_key_for_replay = function()
@@ -194,15 +281,9 @@ return {
     t.is_true(body:find("quote_target_post_id: 123", 1, true) ~= nil)
   end,
 
-  test_comment_written_receipts_do_not_loop = function()
-    local result = t.run_department("departments/optional_receipt_sink/main.lua", {
-      queue = "github-proxy.github_comment_written",
-      payload = {
-        schema = "github-proxy.comment-written.v1",
-        comment_id = "comment-1",
-      },
-    })
-
-    t.eq(#result.raises, 0)
+  test_receipt_sink_owns_only_x_published_input = function()
+    local department = require("departments.optional_receipt_sink.main")
+    t.eq(#department.spec.consumes, 1)
+    t.eq(department.spec.consumes[1], "x-publisher.x_published")
   end,
 }

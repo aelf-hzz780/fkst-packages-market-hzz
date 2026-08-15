@@ -642,9 +642,7 @@ function M.x_publish_request(item, opts, decision)
     tag = "calendar:" .. tostring(item.calendar_ref),
     variant = live and "live" or "preview",
   }
-  if item.recurrence ~= nil then
-    metadata.schedule_type = item.recurrence
-  end
+  metadata.schedule_type = item.recurrence or "one-shot"
   if item.interval_minutes ~= nil then
     metadata.interval_minutes = item.interval_minutes
   end

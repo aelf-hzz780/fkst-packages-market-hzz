@@ -2,6 +2,8 @@ local graph = require("testkit.graph")
 local t = fkst.test
 
 local repo = "owner/repo"
+local live_account_id = "100000000000000001"
+local live_scheduled_at = os.date("!%Y-%m-%dT%H:%M:%SZ", math.floor(now()) - 3600)
 
 local function source_ref(issue_number)
   local reference = repo .. "#issue/" .. tostring(issue_number)
@@ -29,14 +31,15 @@ local function labels_rest_json(labels)
   return "[" .. table.concat(rows, ",") .. "]"
 end
 
-local function issue_rest_json(issue_number, body, labels)
+local function issue_rest_json(issue_number, body, labels, state)
   return string.format(
-    '{"number":%d,"title":"Auto Twitter marketing %d","body":"%s","html_url":"https://github.example/%s/issues/%d","updated_at":"2026-07-24T09:00:00Z","state":"open","labels":%s,"assignees":[],"user":{"login":"fkst-test-bot"}}\n',
+    '{"number":%d,"title":"Auto Twitter marketing %d","body":"%s","html_url":"https://github.example/%s/issues/%d","updated_at":"2026-07-24T09:00:00Z","state":"%s","labels":%s,"assignees":[],"user":{"login":"fkst-test-bot"}}\n',
     issue_number,
     issue_number,
     json_escape(body),
     repo,
     issue_number,
+    tostring(state or "open"),
     labels_rest_json(labels)
   )
 end
@@ -58,6 +61,7 @@ end
 local function mock_env(opts)
   local options = opts or {}
   local write_value = options.live == true and "1" or ""
+  local github_write_value = options.github_write == true and "1" or ""
   local service_value = options.live == true and "api-twitter-2-media" or ""
   local username_value = options.live == true and "example_user" or ""
   for _ = 1, 8 do
@@ -77,7 +81,7 @@ local function mock_env(opts)
       exit_code = 0,
     })
     t.mock_command('printf %s "$FKST_GITHUB_WRITE"', {
-      stdout = "",
+      stdout = github_write_value,
       stderr = "",
       exit_code = 0,
     })
@@ -128,7 +132,7 @@ local function mock_issue_read(issue_number, body, count, opts)
   local options = opts or {}
   for _ = 1, count or 1 do
     t.mock_command("gh api repos/" .. repo .. "/issues/" .. tostring(issue_number), {
-      stdout = issue_rest_json(issue_number, body, options.labels),
+      stdout = issue_rest_json(issue_number, body, options.labels, options.state),
       stderr = "",
       exit_code = 0,
     })
@@ -138,6 +142,34 @@ local function mock_issue_read(issue_number, body, count, opts)
       exit_code = 0,
     })
   end
+end
+
+local function live_schedule_body(calendar_ref, week)
+  return table.concat({
+    "type: schedule-publish",
+    "project: chronoai",
+    "week: " .. tostring(week),
+    "calendar-ref: " .. tostring(calendar_ref),
+    "mode: live",
+    "scheduled-at: " .. live_scheduled_at,
+  }, "\n")
+end
+
+local function mock_empty_live_timeline()
+  local encoded_start_time = live_scheduled_at:sub(1, 13)
+    .. "%3A" .. live_scheduled_at:sub(15, 16)
+    .. "%3A" .. live_scheduled_at:sub(18)
+  local path = "/users/" .. live_account_id .. "/tweets"
+    .. "?exclude=retweets%2Creplies"
+    .. "&max_results=100"
+    .. "&start_time=" .. encoded_start_time
+    .. "&tweet.fields=created_at%2Centities%2Creferenced_tweets"
+  t.mock_command("nyxid proxy request api-twitter-2-media '" .. path .. "' -m GET", {
+    stdout = '{"meta":{"result_count":0}}',
+    stderr = "",
+    exit_code = 0,
+  })
+  return path
 end
 
 local function count_calls(needle)
@@ -203,6 +235,74 @@ local function receipt_event(queue, payload)
   }
 end
 
+local function one_shot_publish_key(issue_number)
+  return "auto-twitter-marketing/chronoai/2026-W31/schedule/owner/repo#issue/"
+    .. tostring(issue_number) .. "/2026-07-25T09-00-00Z/x-publish"
+end
+
+local function one_shot_published_event(issue_number, post_id)
+  return receipt_event("x-publisher.x_published", {
+    schema = "x-publisher.x-published.v1",
+    artifact_id = "auto-twitter-marketing/chronoai/2026-W31/schedule",
+    status = "published",
+    platform = "x",
+    platform_post_id = post_id,
+    post_uri = "https://x.com/i/web/status/" .. post_id,
+    dedup_key = one_shot_publish_key(issue_number),
+    content_ref = "#61",
+    channel = "live",
+    trace_id = "trace-composed-one-shot-close-" .. tostring(issue_number),
+    scheduled_at = "2026-07-25T09:00:00Z",
+    metadata = { schedule_type = "one-shot" },
+    source_ref = source_ref(issue_number),
+  })
+end
+
+local function one_shot_schedule_body()
+  return [[
+type: schedule-publish
+project: chronoai
+week: 2026-W31
+calendar-ref: #61
+mode: live
+scheduled-at: 2026-07-25T09:00:00Z
+]]
+end
+
+local function one_shot_comment_ack(issue_number)
+  local scheduled_at = "2026-07-25T09:00:00Z"
+  local publish_key = one_shot_publish_key(issue_number)
+  local comment_key = publish_key .. "/status/x-publish-published"
+  local ref = source_ref(issue_number)
+  return receipt_event("github-proxy.github_comment_written", {
+    schema = "github-proxy.comment-written.v1",
+    repo = repo,
+    target = "issue",
+    issue_number = issue_number,
+    comment_id = "comment-123",
+    request_dedup_key = comment_key,
+    dedup_key = comment_key .. "/written/comment-123",
+    source_ref = ref,
+    handoff = {
+      schema = "auto-twitter-marketing.one-shot-close.v1",
+      kind = "published-one-shot",
+      status = "published",
+      schedule_type = "one-shot",
+      scheduled_at = scheduled_at,
+      artifact_id = "auto-twitter-marketing/chronoai/2026-W31/schedule",
+      content_ref = "#61",
+      channel = "live",
+      platform = "x",
+      platform_post_id = "1234567890",
+      post_uri = "https://x.com/i/web/status/1234567890",
+      receipt_dedup_key = publish_key,
+      comment_dedup_key = comment_key,
+      source_ref = ref,
+      trace_id = "trace-composed-one-shot-close",
+    },
+  })
+end
+
 local function run_issue(issue_number, body)
   mock_env()
   mock_issue_read(issue_number, body)
@@ -210,21 +310,22 @@ local function run_issue(issue_number, body)
 end
 
 return {
-  test_optional_receipt_sink_acks_optional_cross_package_outputs = function()
+  test_cross_package_receipts_route_to_their_own_departments = function()
     local comment_trace = graph.require_quiescent(graph.run(receipt_event("github-proxy.github_comment_written", {
       schema = "github-proxy.comment-written.v1",
       comment_id = "comment-1",
     }), { max_steps = 4 }))
     graph.assert_covers(comment_trace, {
-      "github-proxy.github_comment_written -> github-auto-twitter-marketing.optional_receipt_sink",
+      "github-proxy.github_comment_written -> github-auto-twitter-marketing.one_shot_terminalizer",
     })
 
-    local x_trace = graph.run(receipt_event("x-publisher.x_published", {
+    mock_env()
+    local x_trace = graph.require_quiescent(graph.run(receipt_event("x-publisher.x_published", {
       schema = "x-publisher.x-published.v1",
       artifact_id = "auto-twitter-marketing/chronoai/2026-W31/schedule",
       status = "published",
       post_uri = "https://x.com/i/web/status/1234567890",
-    }), { max_steps = 4 })
+    }), { max_steps = 4 }))
     graph.assert_covers(x_trace, {
       "x-publisher.x_published -> github-auto-twitter-marketing.optional_receipt_sink",
     })
@@ -233,18 +334,116 @@ return {
     t.eq(published_comment.payload.issue_number, 90)
     t.is_true(published_comment.payload.body:find("X published", 1, true) ~= nil)
     t.is_true(published_comment.payload.body:find("https://x.com/i/web/status/1234567890", 1, true) ~= nil)
+    t.eq(count_calls("gh issue close"), 0)
 
-    local blocked_trace = graph.run(receipt_event("x-publisher.x_published", {
+    mock_env()
+    local blocked_trace = graph.require_quiescent(graph.run(receipt_event("x-publisher.x_published", {
       schema = "x-publisher.x-published.v1",
       artifact_id = "auto-twitter-marketing/chronoai/2026-W31/schedule",
       status = "blocked",
       blocked_reason = "unexpected account",
-    }), { max_steps = 4 })
+    }), { max_steps = 4 }))
     local blocked_comment = graph.require_raise(blocked_trace, "github-proxy.github_issue_comment_request")
     t.eq(blocked_comment.payload.issue_number, 90)
     t.is_true(blocked_comment.payload.body:find("X publish blocked", 1, true) ~= nil)
     t.is_true(blocked_comment.payload.body:find("unexpected account", 1, true) ~= nil)
 
+  end,
+
+  test_published_one_shot_comment_ack_closes_fresh_schedule_issue = function()
+    local issue_number = 62
+    mock_env({ github_write = true })
+    mock_issue_read(issue_number, one_shot_schedule_body())
+    t.mock_command("gh issue close " .. tostring(issue_number) .. " --repo " .. repo, {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local trace = graph.require_quiescent(graph.run(one_shot_comment_ack(issue_number), {
+      max_steps = 4,
+    }))
+
+    graph.assert_covers(trace, {
+      "github-proxy.github_comment_written -> github-auto-twitter-marketing.one_shot_terminalizer",
+    })
+    t.eq(count_calls("gh api repos/" .. repo .. "/issues/" .. tostring(issue_number)), 1)
+    t.eq(count_calls("gh issue close " .. tostring(issue_number) .. " --repo " .. repo), 1)
+  end,
+
+  test_published_one_shot_round_trips_new_receipt_through_proxy_before_close = function()
+    local issue_number = 63
+    local post_id = "1234567890123456789"
+    mock_env({ github_write = true })
+    mock_issue_read(issue_number, one_shot_schedule_body(), 2)
+    t.mock_command(
+      "gh api --method POST repos/" .. repo .. "/issues/" .. tostring(issue_number)
+        .. "/comments --field 'body=@/tmp/fkst-github-proxy-comment-owner_repo-issue-"
+        .. tostring(issue_number) .. ".md'",
+      {
+        stdout = '{"id":123456,"body":"created","user":{"login":"fkst-test-bot"}}\n',
+        stderr = "",
+        exit_code = 0,
+      }
+    )
+    t.mock_command("gh issue close " .. tostring(issue_number) .. " --repo " .. repo, {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local trace = graph.require_quiescent(graph.run(one_shot_published_event(issue_number, post_id), {
+      max_steps = 8,
+    }))
+
+    graph.assert_covers(trace, {
+      "x-publisher.x_published -> github-auto-twitter-marketing.optional_receipt_sink",
+      "github-proxy.github_issue_comment_request -> github-proxy.github_comment",
+      "github-proxy.github_comment_written -> github-auto-twitter-marketing.one_shot_terminalizer",
+    })
+    local ack = graph.require_raise(trace, "github-proxy.github_comment_written")
+    t.eq(ack.payload.handoff.platform_post_id, post_id)
+    t.eq(count_calls("gh api --method POST repos/" .. repo .. "/issues/" .. tostring(issue_number) .. "/comments"), 1)
+    t.eq(count_calls("gh issue close " .. tostring(issue_number) .. " --repo " .. repo), 1)
+  end,
+
+  test_published_one_shot_existing_receipt_marker_replays_handoff_and_closes = function()
+    local issue_number = 64
+    local post_id = "2234567890123456789"
+    local comment_key = one_shot_publish_key(issue_number) .. "/status/x-publish-published"
+    local persisted_comment = {
+      author_login = "fkst-test-bot",
+      body = "Auto Twitter marketing: X published\n\n"
+        .. "status: published\n"
+        .. "post_uri: https://x.com/i/web/status/" .. post_id .. "\n"
+        .. "platform_post_id: " .. post_id .. "\n"
+        .. "dedup_key: " .. one_shot_publish_key(issue_number) .. "\n\n"
+        .. "<!-- fkst:github-proxy:comment:" .. comment_key .. " -->",
+    }
+    mock_env({ github_write = true })
+    mock_issue_read(issue_number, one_shot_schedule_body(), 3, {
+      comments = { persisted_comment },
+    })
+    t.mock_command("gh issue close " .. tostring(issue_number) .. " --repo " .. repo, {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local trace = graph.require_quiescent(graph.run(one_shot_published_event(issue_number, post_id), {
+      max_steps = 8,
+    }))
+
+    graph.assert_covers(trace, {
+      "x-publisher.x_published -> github-auto-twitter-marketing.optional_receipt_sink",
+      "github-proxy.github_issue_comment_request -> github-proxy.github_comment",
+      "github-proxy.github_comment_written -> github-auto-twitter-marketing.one_shot_terminalizer",
+    })
+    local ack = graph.require_raise(trace, "github-proxy.github_comment_written")
+    t.eq(ack.payload.comment_id, "1")
+    t.eq(ack.payload.handoff.platform_post_id, post_id)
+    t.eq(count_calls("gh api --method POST repos/" .. repo .. "/issues/" .. tostring(issue_number) .. "/comments"), 0)
+    t.eq(count_calls("gh issue close " .. tostring(issue_number) .. " --repo " .. repo), 1)
   end,
 
   test_strategy_issue_imports_strategy_and_comments_receipt = function()
@@ -464,14 +663,7 @@ scheduled-at: 2026-07-29T00:00:00+08:00
 
   test_live_schedule_publish_issue_flows_to_x_publisher_live_request = function()
     mock_env({ live = true })
-    mock_issue_read(44, [[
-type: schedule-publish
-project: chronoai
-week: 2026-W31
-calendar-ref: #42
-mode: live
-scheduled-at: 2026-07-25T09:00:00Z
-]], 2)
+    mock_issue_read(44, live_schedule_body("#42", "2026-W31"), 2)
     mock_issue_read(42, [[
 type: weekly-content
 project: chronoai
@@ -488,10 +680,12 @@ FKST live publish verification for example_user via NyxID. Test post.
       exit_code = 0,
     })
     t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
-      stdout = '{"data":{"id":"100000000000000001","name":"Example User","username":"example_user"}}',
+      stdout = '{"data":{"id":"' .. live_account_id
+        .. '","name":"Example User","username":"example_user"}}',
       stderr = "",
       exit_code = 0,
     })
+    local timeline_path = mock_empty_live_timeline()
     t.mock_command("nyxid proxy request api-twitter-2-media /tweets -m POST", {
       stdout = '{"data":{"id":"1234567890123456789","text":"FKST live publish verification for example_user via NyxID. Test post."}}',
       stderr = "",
@@ -514,18 +708,13 @@ FKST live publish verification for example_user via NyxID. Test post.
     t.eq(receipt.payload.status, "published")
     t.eq(receipt.payload.platform_post_id, "1234567890123456789")
     t.eq(receipt.payload.account_username, "example_user")
+    t.eq(count_calls(timeline_path), 1)
+    t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 1)
   end,
 
   test_live_schedule_resolves_native_quote_from_weekly_content = function()
     mock_env({ live = true, native_quote = true })
-    mock_issue_read(54, [[
-type: schedule-publish
-project: chronoai
-week: 2026-W32
-calendar-ref: #53
-mode: live
-scheduled-at: 2026-07-25T09:00:00Z
-]], 2)
+    mock_issue_read(54, live_schedule_body("#53", "2026-W32"), 2)
     mock_issue_read(53, [[
 type: weekly-content
 project: chronoai
@@ -541,10 +730,12 @@ tweet: Native Quote composed graph verification
       exit_code = 0,
     })
     t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
-      stdout = '{"data":{"id":"100000000000000001","name":"Example User","username":"example_user"}}',
+      stdout = '{"data":{"id":"' .. live_account_id
+        .. '","name":"Example User","username":"example_user"}}',
       stderr = "",
       exit_code = 0,
     })
+    local timeline_path = mock_empty_live_timeline()
     t.mock_command("nyxid proxy request api-twitter-2-media /tweets -m POST", {
       stdout = '{"data":{"id":"2234567890123456789"}}',
       stderr = "",
@@ -568,6 +759,8 @@ tweet: Native Quote composed graph verification
       return tostring((raised.payload or {}).body or ""):find("quote_mode: native", 1, true) ~= nil
     end)
     t.is_true(comment.payload.body:find("quote_mode: native", 1, true) ~= nil)
+    t.eq(count_calls(timeline_path), 1)
+    t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 1)
   end,
 
   test_cold_start_observed_retired_schedule_replays_trusted_publish_without_post = function()

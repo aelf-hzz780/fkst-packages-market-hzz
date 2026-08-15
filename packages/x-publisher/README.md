@@ -66,9 +66,13 @@ forged comments, receipts for another key, unscoped damaged comments, and blocke
 not suppress publishing. The runtime-local `once` marker remains a second same-runtime guard.
 
 This receipt check is immediate cross-session containment, not provider-side atomic idempotency.
-Concurrent first attempts and a crash after a successful provider POST but before the GitHub receipt
-is durable can still duplicate a post. Closing that window requires an atomic deduplication ledger at
-the provider write boundary that returns the first `post_id` for repeated stable keys.
+For an Auto Twitter occurrence with a valid `scheduled_at`, the timeline reconciliation below also
+recovers a provider POST whose GitHub receipt was not persisted. These two checks make sequential
+Session takeover converge on the same post.
+
+该回执检查用于跨 Session 收敛，但并不等同于 provider 侧的原子幂等。对于带有效
+`scheduled_at` 的 Auto Twitter occurrence，下面的 timeline 对账还可以恢复“X 已发布、GitHub
+回执尚未落盘”的结果，使后启动的 Session 复用同一条 Post。
 
 When `X_PUBLISH_EXPECTED_USERNAME` is set, the package first calls:
 
@@ -84,6 +88,55 @@ nyxid proxy request <slug> /tweets -m POST -d {"text":"..."}
 
 The `/tweets` path is relative to the NyxID service base URL `https://api.x.com/2`; do not use
 `/2/tweets`.
+
+## Cross-session timeline reconciliation / 跨 Session Timeline 对账
+
+Immediately before a live provider POST, a request with `scheduled_at` resolves the authenticated
+account and reads that account's own timeline from the occurrence time. It excludes replies and
+retweets, requests `created_at`, URL entities, and Quote references, reads at most five pages of 100
+posts, and accepts an occurrence no older than 30 days. Matching uses the authenticated account,
+time window, normalized text, expanded `t.co` URLs, and the expected Quote target.
+
+带 `scheduled_at` 的 live 请求会在 provider POST 前解析当前认证账号，并从 occurrence 时间
+开始读取该账号自己的 timeline。查询排除 replies 与 retweets，请求 `created_at`、URL entity
+及 Quote reference，最多读取 5 页、每页 100 条，并且 occurrence 最长只允许回看 30 天。
+匹配同时校验认证账号、时间窗、规范化正文、展开后的 `t.co` URL 与预期 Quote target。
+
+- Exactly one match: recover its post ID and emit the normal `published` receipt. For a published
+  one-shot, the receipt comment is persisted and the terminalizer closes the schedule Issue. For a
+  recurring occurrence, the receipt/comment is restored and the schedule Issue remains open.
+- Zero matches after a complete scan: perform exactly one provider POST.
+- Multiple matches, query failure, problem JSON, malformed evidence, or an unfinished fifth page:
+  emit `blocked` and never POST.
+- Missing `scheduled_at`: preserve the legacy publisher behavior; the package does not guess from a
+  recent-post interval.
+
+- 唯一命中：恢复该 Post ID 并发出正常 `published` 回执。对已发布的 one-shot，持久化回执评论
+  后由 terminalizer 关闭 schedule Issue；对 recurring occurrence，只恢复回执/评论，schedule
+  Issue 继续保持 Open。
+- 完整扫描后零命中：只执行一次 provider POST。
+- 多条命中、查询失败、problem JSON、证据损坏或第 5 页仍未结束：返回 `blocked`，绝不 POST。
+- 缺少 `scheduled_at`：保持原 publisher 行为，不用“最近 N 小时”进行猜测。
+
+This is a recovery guard, not a distributed lease. Operators must not intentionally run two active
+Sessions over the same repository and work scope. If two first attempts query the timeline at the
+same instant, both can observe zero matches; X does not expose an idempotency key for Post creation.
+A provider-side idempotency ledger or shared lease is required before concurrent first-attempt
+exactly-once can be claimed.
+
+这是一层恢复保护，不是 distributed lease。运行侧不应让两个活跃 Session 同时接管同一 repo
+的同一工作范围。若两个首次尝试在同一时刻查询 timeline，仍可能同时看到零命中；X 的 Post
+创建接口没有 idempotency key。只有在 provider 写入边界增加幂等账本或共享租约后，才能承诺
+并发首次尝试的 exactly-once。
+
+Recovery also assumes a successful Post is visible in the account timeline before takeover and that
+no operator manually publishes identical content in the same occurrence window. A visibility lag can
+produce a false zero match; an identical manual Post can produce a false unique match. Neither case
+can be proven away without provider-side correlation metadata.
+
+恢复还假设：后续 Session 接管前，成功 Post 已能在账号 timeline 中读取，且同一 occurrence
+时间窗内没有人工发布完全相同的内容。Timeline 可见性延迟可能造成“假零匹配”，人工同文 Post
+可能造成“假唯一匹配”；没有 provider 侧关联元数据时，package 无法彻底排除这两种情况。
 
 ## Quote contract / Quote 契约
 

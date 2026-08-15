@@ -62,9 +62,28 @@ local function load_sink_department(name)
   }
 end
 
+local function load_terminalizer_department()
+  local old_pipeline = pipeline
+  local module = require("departments.one_shot_terminalizer.main")
+  pipeline = old_pipeline
+  return {
+    path = "departments/one_shot_terminalizer/main.lua",
+    module = module.make_department({
+      github = github(),
+      github_write_enabled = function()
+        return false
+      end,
+      with_lock = function(_key, fn)
+        return fn()
+      end,
+    }),
+  }
+end
+
 local departments = conformance.loaded_departments({
   load_department(),
   load_sink_department("optional_receipt_sink"),
+  load_terminalizer_department(),
   load_sink_department("strategy_import_sink"),
   load_sink_department("weekly_content_sink"),
 })

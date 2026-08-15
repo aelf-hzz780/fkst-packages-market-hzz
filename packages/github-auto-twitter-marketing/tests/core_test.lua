@@ -242,6 +242,7 @@ scheduled-at: 2026-07-25T09:00:00Z
     t.eq(request.scheduled_at, "2026-07-25T09:00:00Z")
     t.eq(request.metadata.campaign_id, "chronoai")
     t.eq(request.metadata.content_type, "weekly-content")
+    t.eq(request.metadata.schedule_type, "one-shot")
     t.eq(request.metadata.tag, "calendar:#124")
     t.is_nil(request.body)
     t.is_nil(request.text)
