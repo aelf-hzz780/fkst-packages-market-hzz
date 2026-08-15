@@ -3,9 +3,9 @@
   "name": "auto-twitter-marketing",
   "description": "Business-only GitHub issue driven Auto Twitter marketing workflow for FKST hosted multi-workspace package import. Shadow mode previews by default; live X Post and Quote publishing is gated by the user's Environment Profile and brokered by NyxID.",
   "packages": [
-    "aelf-hzz780/fkst-packages-market-hzz@v0.2.1:packages/x-publisher",
-    "aelf-hzz780/fkst-packages-market-hzz@v0.2.1:packages/github-auto-twitter-marketing",
-    "aelf-hzz780/fkst-packages-market-hzz@v0.2.1:packages/marketing-radar"
+    "aelf-hzz780/fkst-packages-market-hzz@v0.2.2:packages/x-publisher",
+    "aelf-hzz780/fkst-packages-market-hzz@v0.2.2:packages/github-auto-twitter-marketing",
+    "aelf-hzz780/fkst-packages-market-hzz@v0.2.2:packages/marketing-radar"
   ],
   "github": {
     "workLabels": [
