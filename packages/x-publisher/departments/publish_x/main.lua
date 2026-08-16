@@ -134,8 +134,8 @@ local function skip_duplicate(payload)
   raise("x_published", receipt)
 end
 
-local function preflight_username(payload, options)
-  if options.expected_username == "" then
+local function preflight_account(payload, options, required)
+  if not required and options.expected_username == "" then
     return nil, nil
   end
   local result = nyxid_request({
@@ -150,16 +150,16 @@ local function preflight_username(payload, options)
   if type(result) ~= "table" or result.exit_code ~= 0 then
     return nil, "nyxid account preflight failed"
   end
-  local username = publish_caps.parse_nyxid_username(result.stdout)
-  if username == nil or username == "" then
+  local account = publish_caps.parse_nyxid_account(result.stdout)
+  if account == nil then
     return nil, "nyxid account preflight failed"
   end
-  if username ~= options.expected_username then
+  if options.expected_username ~= "" and account.username ~= options.expected_username then
     return nil, "unexpected account"
   end
   log.info("x-publisher dept=publish_x tag=ACCOUNT_OK artifact_id=" .. tostring(payload.artifact_id)
-    .. " username=" .. tostring(username))
-  return username, nil
+    .. " username=" .. tostring(account.username))
+  return account, nil
 end
 
 local function resolve_publish_intent(github, payload)
@@ -239,6 +239,63 @@ local function publish_tweet(payload, options, username, intent)
   }), nil
 end
 
+local function reconcile_timeline_publish(payload, options, account, intent, window)
+  if window == nil then
+    return nil, nil
+  end
+  if type(account) ~= "table" or type(account.id) ~= "string" then
+    return nil, "nyxid account preflight failed"
+  end
+
+  local matched_ids = {}
+  local matched_by_id = {}
+  local pagination_token = nil
+  for _ = 1, publish_caps.max_timeline_pages() do
+    local path = publish_caps.timeline_path(account.id, window.start_time, pagination_token)
+    if path == nil then
+      return nil, "invalid X timeline reconciliation request"
+    end
+    local result = nyxid_request({
+      "nyxid",
+      "proxy",
+      "request",
+      options.nyxid_x_service,
+      path,
+      "-m",
+      "GET",
+    }, 30)
+    if type(result) ~= "table" or result.exit_code ~= 0 then
+      return nil, "nyxid timeline reconciliation failed"
+    end
+    local page = publish_caps.parse_timeline_page(result.stdout)
+    if page == nil then
+      return nil, "invalid X timeline reconciliation response"
+    end
+    local page_matches, match_why = publish_caps.matching_timeline_post_ids(
+      page.posts,
+      intent,
+      window
+    )
+    if page_matches == nil then
+      return nil, match_why or "invalid X timeline reconciliation response"
+    end
+    for _, post_id in ipairs(page_matches) do
+      if not matched_by_id[post_id] then
+        matched_by_id[post_id] = true
+        matched_ids[#matched_ids + 1] = post_id
+      end
+    end
+    if #matched_ids > 1 then
+      return nil, "ambiguous X timeline publish match"
+    end
+    pagination_token = page.next_token
+    if pagination_token == nil then
+      return matched_ids[1], nil
+    end
+  end
+  return nil, "incomplete X timeline reconciliation"
+end
+
 local function make_department(ports)
   local handles = ports or {}
   local github = handles.github
@@ -296,9 +353,37 @@ local function make_department(ports)
       return
     end
 
-    local username, username_why = preflight_username(payload, options)
-    if username_why ~= nil then
-      block(payload, username_why, intent)
+    local window, window_why = publish_caps.reconciliation_window(payload, now())
+    if window_why ~= nil then
+      block(payload, window_why, intent)
+      return
+    end
+    local account, account_why = preflight_account(payload, options, window ~= nil)
+    if account_why ~= nil then
+      block(payload, account_why, intent)
+      return
+    end
+    local reconciled_post_id, reconcile_why = reconcile_timeline_publish(
+      payload,
+      options,
+      account,
+      intent,
+      window
+    )
+    if reconcile_why ~= nil then
+      block(payload, reconcile_why, intent)
+      return
+    end
+    if reconciled_post_id ~= nil then
+      local receipt = publish_caps.live_receipt(payload, {
+        id = reconciled_post_id,
+        username = account.username,
+        nyxid_x_service = options.nyxid_x_service,
+        intent = intent,
+      })
+      log.info("x-publisher dept=publish_x tag=RECONCILED_PUBLISHED artifact_id="
+        .. tostring(payload.artifact_id) .. " post_uri=" .. tostring(receipt.post_uri))
+      raise("x_published", receipt)
       return
     end
     if intent.operation == "quote" and intent.quote_post.mode == "native"
@@ -308,7 +393,12 @@ local function make_department(ports)
     end
 
     local ran = once(publish_once_key, function()
-      local receipt, publish_why = publish_tweet(payload, options, username, intent)
+      local receipt, publish_why = publish_tweet(
+        payload,
+        options,
+        account and account.username or nil,
+        intent
+      )
       if receipt == nil then
         block(payload, publish_why, intent)
         return

@@ -1,5 +1,6 @@
 local saga = require("workflow.saga")
 local strings = require("contract.strings")
+local one_shot_close = require("one_shot_close")
 
 local MAX_DEDUP_KEY_BYTES = 512
 
@@ -26,7 +27,6 @@ end
 
 local spec = {
   consumes = {
-    "github-proxy.github_comment_written",
     "x-publisher.x_published",
   },
   produces = {
@@ -101,6 +101,11 @@ local function receipt_comment(payload)
     body = body .. "post_uri: " .. post_uri .. "\n"
   end
 
+  local platform_post_id = safe_line(payload.platform_post_id, 64)
+  if platform_post_id ~= "" then
+    body = body .. "platform_post_id: " .. platform_post_id .. "\n"
+  end
+
   local operation = safe_line(payload.operation, 32)
   if operation ~= "" then
     body = body .. "operation: " .. operation .. "\n"
@@ -138,7 +143,7 @@ local function receipt_comment(payload)
   local comment_key = comment_key_base .. "/status/x-publish-" .. status
   body = body .. "\n<!-- fkst:github-proxy:comment:" .. comment_key .. " -->\n"
 
-  return {
+  local request = {
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
@@ -150,6 +155,8 @@ local function receipt_comment(payload)
       reference = (payload.source_ref or {}).reference or (payload.source_ref or {}).ref,
     },
   }
+  request.handoff = one_shot_close.handoff_for_receipt(payload, comment_key)
+  return request
 end
 
 local function act(event)
@@ -158,13 +165,11 @@ local function act(event)
     .. tostring(event and event.queue)
     .. " artifact_id="
     .. tostring(payload.artifact_id or payload.comment_id))
-  if event and event.queue == "x-publisher.x_published" then
-    local comment, why = receipt_comment(payload)
-    if comment ~= nil then
-      raise("github-proxy.github_issue_comment_request", comment)
-    elseif why ~= nil then
-      log.warn("github-auto-twitter-marketing dept=optional_receipt_sink tag=SKIP why=" .. why)
-    end
+  local comment, why = receipt_comment(payload)
+  if comment ~= nil then
+    raise("github-proxy.github_issue_comment_request", comment)
+  elseif why ~= nil then
+    log.warn("github-auto-twitter-marketing dept=optional_receipt_sink tag=SKIP why=" .. why)
   end
 end
 
