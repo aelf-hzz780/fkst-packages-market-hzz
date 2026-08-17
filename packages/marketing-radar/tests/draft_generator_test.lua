@@ -89,7 +89,15 @@ return {
     end
   end,
 
-  test_generator_rejects_missing_or_oversized_trusted_body_context = function()
+  test_generator_accepts_real_world_9kb_body_and_rejects_missing_or_oversized_context = function()
+    local real_world = signals()
+    real_world[1].trusted_body_context = string.rep("x", 9000)
+    local generated = draft_generator.generate(real_world, 1, runner(
+      '{"tweet_text":"A cited reviewed update.","evidence_refs":["owner/repo#issue/11","owner/repo#issue/12"],"action":"add","target_ref":"","semantic_conflict":false,"conflict_reason":""}',
+      {}
+    ))
+    t.is_true(generated ~= nil)
+
     local missing = signals()
     missing[1].trusted_body_context = nil
     local generated, why = draft_generator.generate(missing, 1, runner("{}", {}))
@@ -97,7 +105,7 @@ return {
     t.eq(why, "unauthorized-or-unbounded-signal")
 
     local oversized = signals()
-    oversized[1].trusted_body_context = string.rep("x", 8001)
+    oversized[1].trusted_body_context = string.rep("x", 12001)
     generated, why = draft_generator.generate(oversized, 1, runner("{}", {}))
     t.is_nil(generated)
     t.eq(why, "unauthorized-or-unbounded-signal")

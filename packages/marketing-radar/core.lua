@@ -1,6 +1,7 @@
 -- Pure v2 contracts for account-scoped marketing radar review workflows.
 local marketing_content = require("contract.marketing_content")
 local action_strategies = require("action_strategies")
+local limits = require("limits")
 local session_route = require("contract.session_route")
 local session_authority = require("session_authority")
 local sha256 = require("contract.sha256")
@@ -13,7 +14,6 @@ local M = {}
 local CONTROL_VALUE_LIMIT = 512
 local ISSUE_BODY_LIMIT = 11000
 local SIGNAL_SET_LIMIT = 20
-local TRUSTED_SIGNAL_BODY_LIMIT = 8000
 local CONFIG_CONTRACT = "marketing-radar.radar-config.v2"
 local PROPOSAL_CONTRACT = "marketing-radar.weekly-plan-change.v2"
 local SIGNAL_CONTRACT = "marketing-radar.radar-signal.v2"
@@ -311,7 +311,7 @@ function M.classify_issue(payload, options)
         and not authorized_login(options.authorized_signal_authors, issue_author) then
       item.status = "needs-triage"
       item.triage_reason = "unauthorized-signal-author"
-    elseif #trusted_body > TRUSTED_SIGNAL_BODY_LIMIT then
+    elseif #trusted_body > limits.TRUSTED_SIGNAL_BODY_BYTES then
       item.status = "needs-triage"
       item.triage_reason = "signal-body-too-large"
     elseif strategy == nil then

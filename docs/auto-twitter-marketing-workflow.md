@@ -18,25 +18,26 @@ release tag. The manifest intentionally declares no shared work label.
 Manifest 有意不声明共享 work label。
 
 The operator procedure for the RC Shadow is
-[`hzz780-v0.3.0-rc.1-acceptance.md`](hzz780-v0.3.0-rc.1-acceptance.md). It is the authoritative
+[`hzz780-v0.3.0-rc.2-acceptance.md`](hzz780-v0.3.0-rc.2-acceptance.md). It is the authoritative
 runbook for fixture isolation, account normalization, evidence capture, canary approval, and
 rollback.
 
 RC Shadow 的运营步骤见
-[`hzz780-v0.3.0-rc.1-acceptance.md`](hzz780-v0.3.0-rc.1-acceptance.md)。该 Runbook 是隔离
+[`hzz780-v0.3.0-rc.2-acceptance.md`](hzz780-v0.3.0-rc.2-acceptance.md)。该 Runbook 是隔离
 fixture、账号归一、证据留存、Canary 批准与回滚的权威操作说明。
 
 ```text
 ChronoAIProject/fkst-hosted@packages:packages/github-proxy
-aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.1:manifests/auto-twitter-marketing.json
+aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.2:manifests/auto-twitter-marketing.json
 ```
 
-The isolated acceptance Session pins `v0.3.0-rc.1`; after shadow acceptance, replace the descriptor
-above with `v0.3.0`. RC and stable Sessions must use different work labels and may not process the
-same Issues concurrently.
+The isolated acceptance Session pins `v0.3.0-rc.2`; after shadow acceptance, replace the descriptor
+above with `v0.3.0`. Stop the RC Session first, then let stable sequentially take over the same
+account-specific work label. They may not process the same Issues concurrently.
 
-隔离验收 Session 固定使用 `v0.3.0-rc.1`；Shadow 验收通过后再把上述 descriptor 替换为
-`v0.3.0`。RC 与 stable Session 必须使用不同 work label，且不得并发处理同一批 Issue。
+隔离验收 Session 固定使用 `v0.3.0-rc.2`；Shadow 验收通过后再把上述 descriptor 替换为
+`v0.3.0`。必须先停止 RC，再由 stable 顺序接管同一个账号专属 work label；二者不得并发处理
+同一批 Issue。
 
 Each X account has one Hosted Session with a stable, account-specific `### Work Label`. The Host
 injects `FKST_SESSION_WORK_LABEL`, `FKST_SESSION_WORK_LABEL_MAP_JSON`, and

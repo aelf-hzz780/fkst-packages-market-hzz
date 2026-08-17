@@ -1,4 +1,5 @@
 local strings = require("contract.strings")
+local limits = require("limits")
 local workflow_codex = require("workflow.codex")
 
 local M = {}
@@ -26,7 +27,8 @@ local function bounded(value, limit)
 end
 
 local function bounded_body(value)
-  return type(value) == "string" and value ~= "" and #value <= 8000
+  return type(value) == "string" and value ~= ""
+    and #value <= limits.TRUSTED_SIGNAL_BODY_BYTES
     and value:find("[%z\1-\8\11\12\14-\31\127]") == nil
 end
 

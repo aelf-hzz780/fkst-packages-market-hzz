@@ -168,6 +168,15 @@ return {
     t.eq(account_mismatch.triage_reason, "account-session-mismatch")
   end,
 
+  test_signal_admission_accepts_real_world_9kb_body_and_rejects_over_limit = function()
+    local accepted = classify(11, signal_body() .. string.rep("n", 9000))
+    t.eq(accepted.status, "awaiting-review")
+
+    local oversized = classify(12, signal_body() .. string.rep("n", 12001))
+    t.eq(oversized.status, "needs-triage")
+    t.eq(oversized.triage_reason, "signal-body-too-large")
+  end,
+
   test_signal_action_contract_marks_field_conflicts_for_triage = function()
     local add = classify(11, signal_body())
     local revise = classify(12, signal_body({ action = "revise", ["target-ref"] = "#99" }))

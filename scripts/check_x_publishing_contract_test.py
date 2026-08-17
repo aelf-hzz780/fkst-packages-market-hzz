@@ -58,7 +58,7 @@ class SemverValidationTest(unittest.TestCase):
                 self.assertEqual(error.exception.code, "mutable_or_invalid_package_ref")
 
     def test_release_manifest_uses_one_rc_semver_ref(self) -> None:
-        self.assertEqual(checker.validate_release_manifest(), "v0.3.0-rc.1")
+        self.assertEqual(checker.validate_release_manifest(), "v0.3.0-rc.2")
 
     def test_contract_and_generator_versions_remain_stable_only(self) -> None:
         source_lock = json.loads((REPO_ROOT / checker.LOCK_PATH).read_text(encoding="utf-8"))
@@ -79,8 +79,8 @@ class SemverValidationTest(unittest.TestCase):
         self.assertEqual(mutable_error.exception.code, "mutable_or_invalid_package_ref")
 
         mixed = [
-            "aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.1:packages/x-publisher",
-            "aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.1:packages/github-auto-twitter-marketing",
+            "aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.2:packages/x-publisher",
+            "aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.2:packages/github-auto-twitter-marketing",
             "aelf-hzz780/fkst-packages-market-hzz@v0.2.2:packages/marketing-radar",
         ]
         with self.assertRaises(checker.ContractCheckError) as mixed_error:

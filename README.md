@@ -30,17 +30,17 @@ Hosted 运行时由 official package 与用户 package 组合。请单独导入�
 
 ```text
 ChronoAIProject/fkst-hosted@packages:packages/github-proxy
-aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.1:manifests/auto-twitter-marketing.json
+aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.2:manifests/auto-twitter-marketing.json
 ```
 
 For reproducible production sessions, keep the SemVer pin. Do not use `main` or
 a mutable feature branch.
 
-The isolated shadow rollout uses `v0.3.0-rc.1`. After acceptance, replace every RC descriptor with
+The isolated shadow rollout uses `v0.3.0-rc.2`. After acceptance, replace every RC descriptor with
 `v0.3.0`. Stop the RC Session before starting stable; the stable Session then takes over the same
 account-specific work label sequentially. RC and stable must never be active on that label together.
 
-隔离 Shadow 阶段使用 `v0.3.0-rc.1`；验收通过后再把所有 RC descriptor 替换为 `v0.3.0`。
+隔离 Shadow 阶段使用 `v0.3.0-rc.2`；验收通过后再把所有 RC descriptor 替换为 `v0.3.0`。
 启动 stable 前先停止 RC，再由 stable Session 顺序接管同一个账号专属 work label；二者不得在
 该 label 上同时处于 active 状态。
 
@@ -49,9 +49,9 @@ account-specific work label sequentially. RC and stable must never be active on 
 The market manifest expands only to the business packages:
 
 ```text
-aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.1:packages/x-publisher
-aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.1:packages/github-auto-twitter-marketing
-aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.1:packages/marketing-radar
+aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.2:packages/x-publisher
+aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.2:packages/github-auto-twitter-marketing
+aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.2:packages/marketing-radar
 ```
 
 Manifest 只展开上述三个 business package，不会隐式加载 host/runtime package。
@@ -71,10 +71,10 @@ assignee 必须是 Session creator；Issue 的 `account` 还必须与
 `X_PUBLISH_EXPECTED_USERNAME` 一致。
 
 The RC acceptance procedure for the `hzz780` account is documented in
-[`docs/hzz780-v0.3.0-rc.1-acceptance.md`](docs/hzz780-v0.3.0-rc.1-acceptance.md).
+[`docs/hzz780-v0.3.0-rc.2-acceptance.md`](docs/hzz780-v0.3.0-rc.2-acceptance.md).
 
 `hzz780` 账号的 RC 验收步骤见
-[`docs/hzz780-v0.3.0-rc.1-acceptance.md`](docs/hzz780-v0.3.0-rc.1-acceptance.md)。
+[`docs/hzz780-v0.3.0-rc.2-acceptance.md`](docs/hzz780-v0.3.0-rc.2-acceptance.md)。
 
 ## Credential posture
 
