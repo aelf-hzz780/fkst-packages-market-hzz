@@ -1,5 +1,5 @@
--- X text length helpers aligned with twitter-text v3 weights. Callers may pass URLs that are
--- already validated by their domain contract; each such URL receives X's transformed length.
+-- X text length helpers aligned with twitter-text v3 weights. Ordinary HTTP(S) URLs receive
+-- X's transformed length automatically; callers may still identify prevalidated URL spans.
 local M = {}
 
 local MAX_WEIGHTED_LENGTH = 280
@@ -115,9 +115,10 @@ end
 
 local function transformed_url_ranges(text, urls)
   local ranges = {}
+  local covered = {}
   for _, url in ipairs(urls or {}) do
     if type(url) ~= "string" or url == "" then
-      return nil, "invalid transformed url"
+      return nil, nil, "invalid transformed url"
     end
     local start_at = 1
     local found = false
@@ -127,17 +128,123 @@ local function transformed_url_ranges(text, urls)
         break
       end
       if ranges[first] ~= nil then
-        return nil, "overlapping transformed url"
+        return nil, nil, "overlapping transformed url"
       end
       ranges[first] = last
+      for index = first, last do
+        covered[index] = true
+      end
       start_at = last + 1
       found = true
     end
     if not found then
-      return nil, "missing transformed url"
+      return nil, nil, "missing transformed url"
     end
   end
-  return ranges, nil
+  return ranges, covered, nil
+end
+
+local function http_scheme_length(text, index)
+  local previous = index > 1 and text:sub(index - 1, index - 1) or ""
+  if previous:match("[%w_]") then
+    return nil
+  end
+  if text:sub(index, index + 7):lower() == "https://" then
+    return 8
+  end
+  if text:sub(index, index + 6):lower() == "http://" then
+    return 7
+  end
+  return nil
+end
+
+local function url_terminator(byte)
+  return byte == nil or byte <= 0x20 or byte == 0x7F
+    or byte == 0x22 or byte == 0x27 or byte == 0x3C or byte == 0x3E or byte == 0x60
+end
+
+local function valid_url_text(text, first, last)
+  local index = first
+  while index <= last do
+    local codepoint, next_index = decode_codepoint(text, index)
+    if codepoint == nil or next_index > last + 1
+        or codepoint == 0xFEFF or codepoint == 0xFFFE or codepoint == 0xFFFF then
+      return false
+    end
+    index = next_index
+  end
+  return true
+end
+
+local function trim_url_end(text, first, last)
+  local balance = { [")"] = 0, ["]"] = 0, ["}"] = 0 }
+  local opening = { ["("] = ")", ["["] = "]", ["{"] = "}" }
+  for index = first, last do
+    local char = text:sub(index, index)
+    if opening[char] ~= nil then
+      balance[opening[char]] = balance[opening[char]] + 1
+    elseif balance[char] ~= nil then
+      balance[char] = balance[char] - 1
+    end
+  end
+
+  while last >= first do
+    local char = text:sub(last, last)
+    if char:match("[.,!?;:]") or opening[char] ~= nil then
+      last = last - 1
+    elseif balance[char] ~= nil and balance[char] < 0 then
+      balance[char] = balance[char] + 1
+      last = last - 1
+    else
+      break
+    end
+  end
+  return last
+end
+
+local function ordinary_url_end(text, index)
+  local scheme_length = http_scheme_length(text, index)
+  if scheme_length == nil then
+    return nil
+  end
+  local content_start = index + scheme_length
+  local cursor = content_start
+  while cursor <= #text and not url_terminator(text:byte(cursor)) do
+    cursor = cursor + 1
+  end
+  local last = trim_url_end(text, content_start, cursor - 1)
+  if last < content_start then
+    return nil
+  end
+  local remainder = text:sub(content_start, last)
+  local authority = remainder:match("^([^/?#]+)")
+  if authority == nil or authority == "" or authority:find("[%w\128-\255]") == nil
+      or not valid_url_text(text, index, last) then
+    return nil
+  end
+  return last
+end
+
+local function add_ordinary_url_ranges(text, ranges, covered)
+  local index = 1
+  while index <= #text do
+    local last = ordinary_url_end(text, index)
+    if last == nil then
+      index = index + 1
+    else
+      local overlaps_explicit = false
+      for cursor = index, last do
+        if covered[cursor] then
+          overlaps_explicit = true
+          break
+        end
+      end
+      if not overlaps_explicit then
+        ranges[index] = last
+      end
+      index = last + 1
+    end
+  end
 end
 
 function M.analyze(text, opts)
@@ -145,11 +252,12 @@ function M.analyze(text, opts)
     return { valid = false, weighted_length = 0, max_weighted_length = MAX_WEIGHTED_LENGTH,
       reason = "empty text" }
   end
-  local ranges, ranges_why = transformed_url_ranges(text, opts and opts.transformed_urls)
+  local ranges, covered, ranges_why = transformed_url_ranges(text, opts and opts.transformed_urls)
   if ranges == nil then
     return { valid = false, weighted_length = 0, max_weighted_length = MAX_WEIGHTED_LENGTH,
       reason = ranges_why }
   end
+  add_ordinary_url_ranges(text, ranges, covered)
 
   local weighted = 0
   local index = 1

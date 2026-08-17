@@ -2,20 +2,32 @@
 -- The durable payload carries only source_ref plus small control fields; strategy
 -- and weekly content stay in the GitHub issue and are re-fetched through source_ref.
 local M = {}
+local content_filter = require("forge.github.content_filter")
+local marketing_content = require("contract.marketing_content")
+local marketing_schedule = require("contract.marketing_schedule")
+local session_route = require("contract.session_route")
+local sha256 = require("contract.sha256")
 local strings = require("contract.strings")
 
-local WORK_LABEL = "auto-twitter-marketing"
 local CONTROL_VALUE_LIMIT = 512
 
 local ALLOWED_CONTROL_FIELDS = {
   account = true,
-  ["calendar-ref"] = true,
+  ["approval-id"] = true,
   channel = true,
+  contract = true,
+  ["content-digest"] = true,
+  ["content-id"] = true,
+  ["content-ref"] = true,
+  ["content-revision"] = true,
+  ["content-status"] = true,
   ["interval-minutes"] = true,
   locale = true,
   mode = true,
   owner = true,
   project = true,
+  ["proposal-id"] = true,
+  ["proposal-revision"] = true,
   recurrence = true,
   ["scheduled-at"] = true,
   ["strategy-ref"] = true,
@@ -23,6 +35,7 @@ local ALLOWED_CONTROL_FIELDS = {
   timezone = true,
   type = true,
   week = true,
+  ["work-label"] = true,
 }
 
 local SENSITIVE_PATTERNS = {
@@ -111,24 +124,20 @@ local function runtime_key_segment(value, limit)
   return safe
 end
 
-function M.work_label()
-  return WORK_LABEL
+function M.work_label(value)
+  local label = strings.trim(value)
+  if label == "" then
+    return nil
+  end
+  return label
 end
 
 function M.saga_conformance_errors()
   return {}
 end
 
-function M.has_work_label(labels)
-  if type(labels) ~= "table" then
-    return false
-  end
-  for _, label in ipairs(labels) do
-    if tostring(label) == WORK_LABEL then
-      return true
-    end
-  end
-  return false
+function M.has_work_label(labels, work_label)
+  return session_route.has_label(labels, work_label)
 end
 
 function M.parse_control_fields(body)
@@ -165,36 +174,139 @@ local function control_fields(payload, opts)
   return fields
 end
 
-local function source_ref_for(payload)
-  local source_ref = copy_source_ref(payload.source_ref)
-  if source_ref.ref ~= nil and source_ref.ref ~= "" then
-    return source_ref
+function M.canonical_issue_source_ref(payload)
+  if type(payload) ~= "table" or type(payload.repo) ~= "string"
+      or #payload.repo > 200 or payload.repo:match("^[%w_.-]+/[%w_.-]+$") == nil then
+    return nil, "invalid issue identity"
   end
-  if payload.repo ~= nil and payload.number ~= nil then
-    local reference = tostring(payload.repo) .. "#issue/" .. tostring(payload.number)
-    return {
-      kind = "external",
-      ref = reference,
-      reference = reference,
-    }
+  local number = tonumber(payload.number)
+  if number == nil or number < 1 or number ~= math.floor(number) then
+    return nil, "invalid issue identity"
   end
-  return nil
+  local derived = payload.repo .. "#issue/" .. string.format("%.0f", number)
+  if payload.source_ref ~= nil then
+    local supplied = payload.source_ref
+    if type(supplied) ~= "table" or supplied.kind ~= "external"
+        or (supplied.ref ~= nil and supplied.reference ~= nil and supplied.ref ~= supplied.reference) then
+      return nil, "source_ref does not match issue identity"
+    end
+    local reference = supplied.ref or supplied.reference
+    if type(reference) ~= "string" or #reference > CONTROL_VALUE_LIMIT or reference ~= derived then
+      return nil, "source_ref does not match issue identity"
+    end
+  end
+  return {
+    kind = "external",
+    ref = derived,
+    reference = derived,
+  }, nil
 end
 
 local function trace_id_for(source_ref)
   return "github:auto-twitter-marketing:" .. tostring(source_ref.ref)
 end
 
-local function dedup_key_for(kind, fields, payload, source_ref)
+local function canonical_digest_for(kind, fields, source_ref)
+  return sha256.tagged(table.concat({
+    tostring(kind or ""),
+    tostring(fields.project or ""),
+    tostring(fields.account or ""),
+    tostring(fields.week or ""),
+    tostring(fields["content-id"] or ""),
+    tostring(fields["content-revision"] or ""),
+    tostring(fields["content-ref"] or ""),
+    tostring(fields["content-digest"] or ""),
+    tostring(fields["approval-id"] or ""),
+    tostring(fields["strategy-ref"] or ""),
+    tostring(fields.recurrence or ""),
+    tostring(fields["scheduled-at"] or ""),
+    tostring(fields["interval-minutes"] or ""),
+    tostring(fields.time or ""),
+    tostring(fields.timezone or ""),
+    tostring(source_ref.ref or ""),
+  }, "\n"))
+end
+
+local function dedup_key_for(kind, fields, source_ref)
+  local digest = canonical_digest_for(kind, fields, source_ref)
   local parts = {
     "auto-twitter-marketing",
+    safe_id(fields.account),
     safe_id(kind),
     safe_id(fields.project),
-    safe_id(fields.week or fields.account or "default"),
+    safe_id(fields.week or "default"),
     safe_id(source_ref.ref),
-    safe_id(payload.updated_at or payload.dedup_key or "unversioned"),
+    safe_id(digest),
   }
   return table.concat(parts, "/")
+end
+
+local function canonical_login(value)
+  local login = strings.trim(value):lower()
+  if login == "" then
+    return nil
+  end
+  return login
+end
+
+local function session_from_options(options)
+  local supplied = type(options.session) == "table" and options.session or {}
+  local effective = options.effective_work_label
+    or supplied.effective_work_label
+    or supplied.session_work_label
+  local logical = options.logical_work_label
+    or supplied.logical_work_label
+    or supplied.work_label
+  local creator = options.session_creator or supplied.creator
+  local account = options.expected_account or supplied.account
+  account = session_route.normalize_account(account)
+  creator = canonical_login(creator)
+  if type(effective) ~= "string" or effective == ""
+      or type(logical) ~= "string" or logical == ""
+      or creator == nil or account == nil then
+    return nil
+  end
+  return {
+    effective_work_label = effective,
+    logical_work_label = logical,
+    creator = creator,
+    account = account,
+  }
+end
+
+function M.resolve_session_authority(values)
+  local source = type(values) == "table" and values or {}
+  local route, why = session_route.resolve(
+    source.FKST_SESSION_WORK_LABEL,
+    source.FKST_SESSION_WORK_LABEL_MAP_JSON
+  )
+  if route == nil then
+    return nil, why
+  end
+  local primary_raw = strings.trim(source.X_PUBLISH_EXPECTED_USERNAME)
+  local fallback_raw = strings.trim(source.FKST_X_PUBLISH_EXPECTED_USERNAME)
+  local primary = primary_raw ~= "" and session_route.normalize_account(primary_raw) or nil
+  local fallback = fallback_raw ~= "" and session_route.normalize_account(fallback_raw) or nil
+  if primary_raw ~= "" and primary == nil or fallback_raw ~= "" and fallback == nil then
+    return nil, "invalid expected account"
+  end
+  if primary ~= nil and fallback ~= nil and primary ~= fallback then
+    return nil, "conflicting expected account"
+  end
+  local account = primary or fallback
+  local creator = canonical_login(source.FKST_SESSION_CREATOR)
+  if creator == nil then
+    return nil, "invalid session creator"
+  end
+  if account == nil then
+    return nil, "invalid expected account"
+  end
+  return {
+    effective_work_label = route.effective_label,
+    logical_work_label = route.logical_label,
+    creator = creator,
+    account = account,
+  }, nil
 end
 
 local function normalize_kind(value)
@@ -454,8 +566,17 @@ function M.classify_issue(payload, opts)
   if payload.type ~= "issue" then
     return nil, "not issue"
   end
-  if not M.has_work_label(payload.labels) and not M.has_work_label(options.issue_labels) then
-    return nil, "missing work label"
+  local session = session_from_options(options)
+  if session == nil then
+    return nil, "missing session authority"
+  end
+  local labels = options.issue_labels or payload.labels
+  if not M.has_work_label(labels, session.effective_work_label) then
+    return nil, "missing session work label"
+  end
+  local assignee = session_route.single_assignee(options.issue_assignees or payload.assignees)
+  if canonical_login(assignee) ~= session.creator then
+    return nil, "session creator must be sole assignee"
   end
 
   local fields = control_fields(payload, options)
@@ -466,10 +587,23 @@ function M.classify_issue(payload, opts)
   if fields.project == nil then
     return nil, "missing project"
   end
+  if fields.account == nil then
+    return nil, "missing account"
+  end
+  local account = session_route.normalize_account(fields.account)
+  if account == nil or account ~= session.account then
+    return nil, "account does not match session"
+  end
+  if fields["work-label"] == nil then
+    return nil, "missing work label field"
+  end
+  if fields["work-label"] ~= session.logical_work_label then
+    return nil, "work label does not match session"
+  end
 
-  local source_ref = source_ref_for(payload)
+  local source_ref, source_why = M.canonical_issue_source_ref(payload)
   if source_ref == nil then
-    return nil, "missing source_ref"
+    return nil, source_why
   end
 
   local raw_type = normalized_key(fields.type)
@@ -481,10 +615,14 @@ function M.classify_issue(payload, opts)
   local out = {
     kind = kind,
     project = safe_id(fields.project),
-    account = safe_id(fields.account or "main"),
+    account = account,
+    work_label = session.logical_work_label,
+    effective_work_label = session.effective_work_label,
     week = fields.week,
     strategy_ref = fields["strategy-ref"],
-    calendar_ref = fields["calendar-ref"],
+    content_ref = fields["content-ref"],
+    content_digest = fields["content-digest"],
+    approval_id = fields["approval-id"],
     mode = normalize_mode(fields.mode or fields.channel),
     recurrence = recurrence,
     scheduled_at = fields["scheduled-at"],
@@ -498,15 +636,90 @@ function M.classify_issue(payload, opts)
     source_ref = source_ref,
     trace_id = trace_id_for(source_ref),
   }
-  out.dedup_key = dedup_key_for(kind, fields, payload, source_ref)
 
-  if kind == "weekly-content" and out.week == nil then
-    return nil, "missing week"
+  if kind == "weekly-content" then
+    local issue_author = content_filter.canon_login(options.issue_author_login or payload.author_login)
+    local trusted_author = content_filter.canon_login(options.trusted_content_author_login)
+    if trusted_author == nil or issue_author ~= trusted_author then
+      return nil, "weekly content author is not trusted bot"
+    end
+    if fields.contract ~= marketing_content.CONTRACT then
+      return nil, "unsupported weekly content contract"
+    end
+    if fields["content-id"] == nil then
+      return nil, "missing content id"
+    end
+    local content_revision = tonumber(fields["content-revision"])
+    if content_revision == nil or content_revision < 1 or content_revision ~= math.floor(content_revision) then
+      return nil, "invalid content revision"
+    end
+    if fields["proposal-id"] == nil then
+      return nil, "missing proposal id"
+    end
+    local proposal_revision = tonumber(fields["proposal-revision"])
+    if proposal_revision == nil or proposal_revision < 1 or proposal_revision ~= math.floor(proposal_revision) then
+      return nil, "invalid proposal revision"
+    end
+    if fields["approval-id"] ~= fields["proposal-id"] .. "@" .. tostring(proposal_revision) then
+      return nil, "approval does not match proposal revision"
+    end
+    if fields["content-status"] ~= "approved" then
+      return nil, "content is not approved"
+    end
+    local content, content_why = marketing_content.parse(options.issue_body)
+    if content == nil then
+      if content_why == "invalid content digest" or content_why == "content digest mismatch" then
+        return nil, content_why
+      end
+      return nil, "invalid weekly content:" .. tostring(content_why)
+    end
+    if content.account ~= out.account or content.work_label ~= out.work_label
+        or safe_id(content.project) ~= out.project or content.week ~= out.week then
+      return nil, "weekly content identity mismatch"
+    end
+    out.content_id = content.content_id
+    out.content_revision = content.content_revision
+    out.proposal_id = content.proposal_id
+    out.proposal_revision = content.proposal_revision
+    out.approval_id = content.approval_id
+    out.content_status = content.content_status
+    out.content_digest = content.content_digest
+    out.tweet_text = content.tweet_text
+    out.operation = content.operation
+    out.quote_mode = content.quote_mode
+    out.quote_url = content.quote_url
+    if out.week == nil then
+      return nil, "missing week"
+    end
   end
   if kind == "schedule-publish" then
-    if out.week == nil or out.calendar_ref == nil then
-      return nil, "missing schedule fields"
+    local schedule, schedule_why = marketing_schedule.parse(options.issue_body)
+    if schedule == nil then
+      if schedule_why == "unsupported schedule contract" then
+        return nil, schedule_why
+      end
+      if fields["content-ref"] == nil or fields["content-digest"] == nil or fields["approval-id"] == nil then
+        return nil, "missing schedule content fields"
+      end
+      if not sha256.is_tagged(fields["content-digest"]) then
+        return nil, "invalid content digest"
+      end
+      return nil, "invalid schedule:" .. tostring(schedule_why)
     end
+    if schedule.account ~= out.account or schedule.work_label ~= out.work_label
+        or safe_id(schedule.project) ~= out.project or schedule.week ~= out.week then
+      return nil, "schedule identity mismatch"
+    end
+    out.content_ref = schedule.content_ref
+    out.content_digest = schedule.content_digest
+    out.schedule_digest = schedule.schedule_digest
+    out.approval_id = schedule.approval_id
+    out.mode = schedule.mode
+    out.recurrence = schedule.recurrence
+    out.scheduled_at = schedule.scheduled_at
+    out.interval_minutes = schedule.interval_minutes
+    out.time = schedule.time
+    out.timezone = schedule.timezone
     if out.recurrence == "daily" then
       if out.time == nil or out.timezone == nil then
         return nil, "missing recurring schedule fields"
@@ -530,30 +743,34 @@ function M.classify_issue(payload, opts)
     elseif fields.recurrence ~= nil then
       return nil, "unsupported recurrence"
     elseif out.scheduled_at == nil then
-      return nil, "missing schedule fields"
+      return nil, "missing schedule timing fields"
     elseif parse_iso8601_seconds(out.scheduled_at) == nil then
       return nil, "invalid scheduled-at"
     end
   end
+  out.dedup_key = dedup_key_for(kind, fields, source_ref)
   return out
 end
 
 function M.artifact_id(item)
   if item.kind == "strategy" then
-    return "auto-twitter-marketing/" .. item.project .. "/strategy"
+    return "auto-twitter-marketing/" .. item.account .. "/" .. item.project .. "/strategy"
   end
   if item.kind == "weekly-content" then
-    return "auto-twitter-marketing/" .. item.project .. "/" .. tostring(item.week) .. "/weekly-content"
+    return "auto-twitter-marketing/" .. item.account .. "/" .. item.project .. "/"
+      .. tostring(item.week) .. "/weekly-content/" .. safe_id(item.content_id)
   end
-  return "auto-twitter-marketing/" .. item.project .. "/" .. tostring(item.week) .. "/schedule"
+  return "auto-twitter-marketing/" .. item.account .. "/" .. item.project .. "/"
+    .. tostring(item.week) .. "/schedule"
 end
 
 function M.strategy_imported(item)
   return {
-    schema = "auto-twitter-marketing.strategy-imported.v1",
+    schema = "auto-twitter-marketing.strategy-imported.v2",
     artifact_id = M.artifact_id(item),
     project = item.project,
     account = item.account,
+    work_label = item.work_label,
     source_ref = copy_source_ref(item.source_ref),
     dedup_key = item.dedup_key,
     trace_id = item.trace_id,
@@ -562,11 +779,20 @@ end
 
 function M.weekly_content_imported(item)
   return {
-    schema = "auto-twitter-marketing.weekly-content-imported.v1",
+    schema = "auto-twitter-marketing.weekly-content-imported.v2",
     artifact_id = M.artifact_id(item),
     project = item.project,
+    account = item.account,
+    work_label = item.work_label,
     week = item.week,
     strategy_ref = item.strategy_ref,
+    content_id = item.content_id,
+    content_revision = item.content_revision,
+    proposal_id = item.proposal_id,
+    proposal_revision = item.proposal_revision,
+    approval_id = item.approval_id,
+    content_digest = item.content_digest,
+    content_status = item.content_status,
     source_ref = copy_source_ref(item.source_ref),
     dedup_key = item.dedup_key,
     trace_id = item.trace_id,
@@ -575,8 +801,11 @@ end
 
 function M.live_gate(item, opts)
   opts = opts or {}
+  local expected = session_route.normalize_account(opts.expected_username)
   return item ~= nil
     and item.mode == "live"
+    and expected ~= nil
+    and expected == item.account
     and type(opts.nyxid_x_service) == "string"
     and opts.nyxid_x_service ~= ""
     and opts.live_write_enabled == true
@@ -614,10 +843,14 @@ function M.schedule_once_key(item, decision)
   return table.concat({
     "auto-twitter-marketing",
     "schedule",
+    runtime_key_segment(item and item.account or "account", 80),
     runtime_key_segment(item and item.project or "project", 80),
     runtime_key_segment(item and item.week or "week", 80),
     runtime_key_segment(item and item.source_ref and item.source_ref.ref or "source", 120),
     runtime_key_segment(occurrence, 120),
+    runtime_key_segment(item and item.mode or "mode", 32),
+    runtime_key_segment(item and item.content_digest or "content", 120),
+    runtime_key_segment(item and item.approval_id or "approval", 120),
   }, "/")
 end
 
@@ -625,6 +858,7 @@ function M.schedule_publish_dedup_key(item, decision)
   local occurrence = decision and decision.occurrence_id or item.scheduled_at or "unscheduled"
   return table.concat({
     "auto-twitter-marketing",
+    safe_id(item.account),
     safe_id(item.project),
     safe_id(item.week),
     "schedule",
@@ -635,12 +869,12 @@ function M.schedule_publish_dedup_key(item, decision)
 end
 
 function M.x_publish_request(item, opts, decision)
-  local live = M.live_gate(item, opts)
+  local channel = item.mode == "live" and "live" or "shadow"
   local metadata = {
     campaign_id = item.project,
     content_type = "weekly-content",
-    tag = "calendar:" .. tostring(item.calendar_ref),
-    variant = live and "live" or "preview",
+    tag = "content:" .. tostring(item.content_ref),
+    variant = channel == "live" and "live" or "preview",
   }
   metadata.schedule_type = item.recurrence or "one-shot"
   if item.interval_minutes ~= nil then
@@ -656,11 +890,17 @@ function M.x_publish_request(item, opts, decision)
     metadata.owner = item.owner
   end
   return {
+    schema = "x-publisher.publish-request.v2",
     artifact_id = M.artifact_id(item),
     source_ref = copy_source_ref(item.source_ref),
-    content_ref = item.calendar_ref,
+    account = item.account,
+    work_label = item.work_label,
+    content_ref = item.content_ref,
+    content_digest = item.content_digest,
+    schedule_digest = item.schedule_digest,
+    approval_id = item.approval_id,
     platform = "x",
-    channel = live and "live" or "shadow",
+    channel = channel,
     dedup_key = M.schedule_publish_dedup_key(item, decision),
     trace_id = item.trace_id,
     scheduled_at = decision and decision.scheduled_at or item.scheduled_at,
@@ -673,6 +913,10 @@ M.runtime_key_segment = runtime_key_segment
 
 function M.status_comment(item, status)
   local body = "Auto Twitter marketing: " .. tostring(status) .. "\n\n"
+    .. "account: " .. tostring(item.account) .. "\n"
+    .. "work_label: " .. tostring(item.work_label) .. "\n"
+    .. "content_digest: " .. tostring(item.content_digest or "") .. "\n"
+    .. "approval_id: " .. tostring(item.approval_id or "") .. "\n"
     .. "source_ref: " .. tostring((item.source_ref or {}).ref) .. "\n"
     .. "dedup_key: " .. tostring(item.dedup_key)
   return {

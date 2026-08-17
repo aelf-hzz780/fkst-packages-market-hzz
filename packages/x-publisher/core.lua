@@ -1,6 +1,8 @@
 -- x-publisher/core.lua - pure, side-effect-free publish contract helpers. Payloads carry only
 -- small control fields and a source_ref pointer; post content is re-fetched by the host seam.
 local M = {}
+local session_route = require("contract.session_route")
+local sha256 = require("contract.sha256")
 local strings = require("contract.strings")
 local x_text = require("contract.x_text")
 local x_publishing_contract = require("contract.x_publishing_contract")
@@ -40,6 +42,8 @@ local CONSUMER_CAPABILITIES = x_publishing_contract.consumer_capabilities["fkst-
 local NATIVE_PROVIDER_POST_ID_FIELD = "quote_tweet_id"
 
 local TOP_LEVEL_FIELDS = {
+  schema = true,
+  account = true,
   artifact_id = true,
   source_ref = true,
   content_ref = true,
@@ -48,7 +52,10 @@ local TOP_LEVEL_FIELDS = {
   dedup_key = true,
   trace_id = true,
   approval_id = true,
+  content_digest = true,
+  schedule_digest = true,
   scheduled_at = true,
+  work_label = true,
   metadata = true,
 }
 
@@ -214,9 +221,11 @@ end
 -- A publish request is usable only if it carries an artifact_id and a safe source_ref pointer.
 -- Fail-closed: unsupported fields, content fields, or sensitive field names are rejected.
 function M.validate_publish_request(payload)
-  payload = payload or {}
   if type(payload) ~= "table" then
     return false, "invalid payload"
+  end
+  if payload.schema ~= "x-publisher.publish-request.v2" then
+    return false, "unsupported schema"
   end
   for key, _ in pairs(payload) do
     if type(key) ~= "string" or not TOP_LEVEL_FIELDS[key] then
@@ -228,6 +237,36 @@ function M.validate_publish_request(payload)
   end
   if type(payload.artifact_id) ~= "string" or payload.artifact_id == "" then
     return false, "missing artifact_id"
+  end
+  local account = session_route.normalize_account(payload.account)
+  if account == nil or payload.account ~= account then
+    return false, "invalid account"
+  end
+  if type(payload.work_label) ~= "string" or payload.work_label == ""
+      or payload.work_label ~= strings.trim(payload.work_label) or #payload.work_label > 80
+      or payload.work_label:find("[%z\1-\31\127]") ~= nil then
+    return false, "invalid work_label"
+  end
+  if type(payload.content_ref) ~= "string" or strings.trim(payload.content_ref) == ""
+      or #payload.content_ref > 512 then
+    return false, "invalid content_ref"
+  end
+  if not sha256.is_tagged(payload.content_digest) then
+    return false, "invalid content_digest"
+  end
+  if not sha256.is_tagged(payload.schedule_digest) then
+    return false, "invalid schedule_digest"
+  end
+  if type(payload.approval_id) ~= "string" or strings.trim(payload.approval_id) == ""
+      or #payload.approval_id > 256 then
+    return false, "invalid approval_id"
+  end
+  if type(payload.trace_id) ~= "string" or strings.trim(payload.trace_id) == ""
+      or #payload.trace_id > 512 then
+    return false, "invalid trace_id"
+  end
+  if payload.channel ~= "shadow" and payload.channel ~= "live" then
+    return false, "invalid channel"
   end
   if source_ref_reference(payload.source_ref) == nil then
     return false, "missing source_ref"
@@ -247,16 +286,13 @@ function M.validate_publish_request(payload)
     end
   end
   local dedup_key = payload.dedup_key
-  if dedup_key ~= nil and not dedup_keys.is_canonical(dedup_key) then
+  if not dedup_keys.is_canonical(dedup_key) then
     return false, "invalid dedup_key"
   end
   for _, field in ipairs({ "channel", "dedup_key", "trace_id", "approval_id", "scheduled_at" }) do
     if payload[field] ~= nil and not is_small_scalar(payload[field]) then
       return false, "invalid " .. field
     end
-  end
-  if payload.content_ref ~= nil and not is_small_scalar(payload.content_ref) then
-    return false, "invalid content_ref"
   end
   return true, nil
 end
@@ -287,12 +323,18 @@ function M.preview_receipt(payload, status)
     source_ref.reference = source_ref.ref
   end
   return {
+    schema = "x-publisher.publish-receipt.v2",
+    account = payload.account,
+    authenticated_account = nil,
     artifact_id = payload.artifact_id,
     platform = "x",
     status = status or RECEIPT_STATUSES.preview,
     post_uri = nil,
     source_ref = source_ref,
     content_ref = payload.content_ref,
+    content_digest = payload.content_digest,
+    schedule_digest = payload.schedule_digest,
+    work_label = payload.work_label,
     channel = payload.channel,
     dedup_key = payload.dedup_key,
     trace_id = receipt_trace_id(payload),
@@ -300,6 +342,7 @@ function M.preview_receipt(payload, status)
     approval_id = payload.approval_id,
     scheduled_at = payload.scheduled_at,
     metadata = copy_allowed_scalars(payload.metadata, METADATA_FIELDS),
+    publish_attempted = false,
   }
 end
 
@@ -875,8 +918,11 @@ function M.parse_nyxid_tweet_id(stdout)
   return nil
 end
 
-function M.blocked_receipt(payload, reason, intent)
+function M.blocked_receipt(payload, reason, intent, opts)
   local receipt = M.preview_receipt(payload, RECEIPT_STATUSES.blocked)
+  local options = opts or {}
+  receipt.authenticated_account = session_route.normalize_account(options.authenticated_account)
+  receipt.publish_attempted = options.publish_attempted == true
   receipt.blocked_reason = reason
   local error_code = ERROR_CODES.provider_failure
   if reason == "native quote capability disabled" or reason == "live gate disabled"
@@ -905,8 +951,8 @@ function M.live_receipt(payload, opts)
   local post_id = tostring(options.id or "")
   receipt.platform_post_id = post_id
   receipt.post_uri = post_id ~= "" and ("https://x.com/i/web/status/" .. post_id) or nil
-  receipt.account_username = options.username
-  receipt.nyxid_x_service = safe_service_slug(options.nyxid_x_service)
+  receipt.authenticated_account = session_route.normalize_account(options.username)
+  receipt.publish_attempted = true
   return enrich_receipt_with_intent(receipt, options.intent)
 end
 

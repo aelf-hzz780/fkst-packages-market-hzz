@@ -1,4 +1,6 @@
 local saga = require("workflow.saga")
+local session_route = require("contract.session_route")
+local sha256 = require("contract.sha256")
 local strings = require("contract.strings")
 local one_shot_close = require("one_shot_close")
 
@@ -11,18 +13,10 @@ local function is_canonical_dedup_key(value)
 end
 
 local function receipt_key_values(payload)
-  if payload.dedup_key ~= nil then
-    if not is_canonical_dedup_key(payload.dedup_key) then
-      return nil, nil, "invalid-dedup-key"
-    end
-    return payload.dedup_key, payload.dedup_key, nil
+  if not is_canonical_dedup_key(payload.dedup_key) then
+    return nil, nil, "invalid-dedup-key"
   end
-
-  local fallback = payload.artifact_id or "x-publish-receipt"
-  if not is_canonical_dedup_key(fallback) then
-    return nil, nil, "invalid-artifact-id"
-  end
-  return fallback, "", nil
+  return payload.dedup_key, payload.dedup_key, nil
 end
 
 local spec = {
@@ -76,9 +70,27 @@ local function comment_title(status)
   return "X publish receipt"
 end
 
-local function receipt_comment(payload)
-  if type(payload) ~= "table" then
-    return nil
+local function canonical_published_evidence(payload)
+  local post_id = type(payload) == "table" and tostring(payload.platform_post_id or "") or ""
+  return type(payload) == "table"
+    and payload.status == "published"
+    and payload.platform == "x"
+    and payload.channel == "live"
+    and post_id:match("^%d+$") ~= nil
+    and #post_id <= 32
+    and payload.post_uri == "https://x.com/i/web/status/" .. post_id
+    and session_route.normalize_account(payload.authenticated_account) == payload.account
+end
+
+local function receipt_comments(payload)
+  if type(payload) ~= "table" or payload.schema ~= "x-publisher.publish-receipt.v2" then
+    return nil, "unsupported-receipt-schema"
+  end
+  if not session_route.is_canonical_account(payload.account)
+      or not strings.is_bounded_string(payload.work_label, 80)
+      or not sha256.is_tagged(payload.content_digest)
+      or not strings.is_bounded_string(payload.approval_id, 256) then
+    return nil, "invalid-receipt-correlation"
   end
   local comment_key_base, receipt_dedup_key, key_why = receipt_key_values(payload)
   if comment_key_base == nil then
@@ -94,7 +106,22 @@ local function receipt_comment(payload)
     status = "unknown"
   end
   local body = "Auto Twitter marketing: " .. comment_title(status) .. "\n\n"
+    .. "schema: x-publisher.publish-receipt.v2\n"
     .. "status: " .. status .. "\n"
+
+  for _, field in ipairs({
+    "account",
+    "authenticated_account",
+    "work_label",
+    "content_digest",
+    "schedule_digest",
+    "approval_id",
+  }) do
+    local value = safe_line(payload[field], 512)
+    if value ~= "" then
+      body = body .. field .. ": " .. value .. "\n"
+    end
+  end
 
   local post_uri = safe_line(payload.post_uri, 256)
   if post_uri ~= "" then
@@ -136,6 +163,10 @@ local function receipt_comment(payload)
     body = body .. "skipped_reason: " .. skipped_reason .. "\n"
   end
 
+  if type(payload.publish_attempted) == "boolean" then
+    body = body .. "publish_attempted: " .. tostring(payload.publish_attempted) .. "\n"
+  end
+
   body = body
     .. "source_ref: " .. safe_line((payload.source_ref or {}).ref or (payload.source_ref or {}).reference, 256) .. "\n"
     .. "dedup_key: " .. receipt_dedup_key .. "\n"
@@ -155,8 +186,24 @@ local function receipt_comment(payload)
       reference = (payload.source_ref or {}).reference or (payload.source_ref or {}).ref,
     },
   }
-  request.handoff = one_shot_close.handoff_for_receipt(payload, comment_key)
-  return request
+  local requests = { request }
+  if canonical_published_evidence(payload) then
+    local anchor_ref = one_shot_close.content_anchor_source_ref(payload)
+    local anchor_key = one_shot_close.content_anchor_dedup_key(payload, anchor_ref)
+    local anchor_repo, anchor_number = issue_target(anchor_ref)
+    if anchor_key ~= nil and anchor_repo ~= nil and anchor_number ~= nil then
+      requests[#requests + 1] = {
+        schema = "github-proxy.v1",
+        repo = anchor_repo,
+        issue_number = anchor_number,
+        body = body,
+        dedup_key = anchor_key,
+        source_ref = anchor_ref,
+        handoff = one_shot_close.handoff_for_receipt(payload, anchor_key, anchor_ref),
+      }
+    end
+  end
+  return requests
 end
 
 local function act(event)
@@ -165,9 +212,11 @@ local function act(event)
     .. tostring(event and event.queue)
     .. " artifact_id="
     .. tostring(payload.artifact_id or payload.comment_id))
-  local comment, why = receipt_comment(payload)
-  if comment ~= nil then
-    raise("github-proxy.github_issue_comment_request", comment)
+  local comments, why = receipt_comments(payload)
+  if comments ~= nil then
+    for _, comment in ipairs(comments) do
+      raise("github-proxy.github_issue_comment_request", comment)
+    end
   elseif why ~= nil then
     log.warn("github-auto-twitter-marketing dept=optional_receipt_sink tag=SKIP why=" .. why)
   end

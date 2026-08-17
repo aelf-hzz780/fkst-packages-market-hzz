@@ -3,15 +3,10 @@
   "name": "auto-twitter-marketing",
   "description": "Business-only GitHub issue driven Auto Twitter marketing workflow for FKST hosted multi-workspace package import. Shadow mode previews by default; live X Post and Quote publishing is gated by the user's Environment Profile and brokered by NyxID.",
   "packages": [
-    "aelf-hzz780/fkst-packages-market-hzz@v0.2.2:packages/x-publisher",
-    "aelf-hzz780/fkst-packages-market-hzz@v0.2.2:packages/github-auto-twitter-marketing",
-    "aelf-hzz780/fkst-packages-market-hzz@v0.2.2:packages/marketing-radar"
+    "aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.1:packages/x-publisher",
+    "aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.1:packages/github-auto-twitter-marketing",
+    "aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.1:packages/marketing-radar"
   ],
-  "github": {
-    "workLabels": [
-      "auto-twitter-marketing"
-    ]
-  },
   "nyxid": {
     "xPublishCredential": "user-environment-profile",
     "xPublishRuntimeDependency": "nyxid-cli-on-path",
@@ -25,15 +20,19 @@
     "rawTokenPolicy": "forbidden-in-repo-manifest-issue-payload"
   },
   "workflow": {
+    "contractVersion": 2,
     "strategyIssueType": "strategy",
     "weeklyContentIssueType": "weekly-content",
+    "weeklyPlanChangeIssueType": "weekly-plan-change",
     "schedulePublishIssueType": "schedule-publish",
     "recurringSchedulePublishIssueType": "recurring-schedule-publish",
     "radarConfigIssueType": "radar-config",
     "radarSignalIssueType": "radar-signal",
     "radarRunIssueType": "radar-run",
-    "radarGeneratedWeeklyContent": true,
-    "radarGeneratedScheduleWhenCalendarRefKnown": true,
+    "radarGeneratedReviewProposal": true,
+    "approvedContentRequiresHumanReview": true,
+    "scheduleRequiresSeparateHumanApproval": true,
+    "radarGeneratedSchedule": false,
     "radarGeneratedIssueNumberReturn": false,
     "recurrenceField": "recurrence",
     "intervalMinutesField": "interval-minutes",
@@ -41,7 +40,7 @@
     "dailyPublishTimeField": "time",
     "timezoneField": "timezone",
     "livePublishMode": "live",
-    "contentRefField": "calendar-ref",
+    "contentRefField": "content-ref",
     "supportedXOperations": ["post", "quote"],
     "supportedXQuoteModes": ["native", "link"],
     "quoteOperationField": "operation",

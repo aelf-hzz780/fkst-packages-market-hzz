@@ -37,26 +37,11 @@ local function pending_status(decision)
   return "schedule publish pending until " .. tostring(decision and decision.scheduled_at or "unknown")
 end
 
-local function issue_source_ref(source_ref)
-  local ref = type(source_ref) == "table" and (source_ref.ref or source_ref.reference) or nil
-  if type(source_ref) ~= "table"
-      or source_ref.kind ~= "external"
-      or type(ref) ~= "string"
-      or ref:match("^[^#]+#issue/%d+$") == nil then
-    return nil
-  end
-  return {
-    kind = "external",
-    ref = ref,
-    reference = ref,
-  }
-end
-
 local function fetched_issue(github, payload)
-  if type(payload) ~= "table" or payload.body ~= nil or payload.controls ~= nil then
+  if type(payload) ~= "table" then
     return nil
   end
-  local source_ref = issue_source_ref(payload.source_ref)
+  local source_ref = caps.canonical_issue_source_ref(payload)
   if source_ref == nil then
     return nil
   end
@@ -77,30 +62,101 @@ local function observed_event(event)
   return event and event.queue == "github-proxy.github_issue_observed"
 end
 
-local function classify_event(payload, current_issue)
-  local opts = {}
+local function classification_options(payload, current_issue, authority, trusted_content_author)
+  local opts = { session = authority }
+  opts.trusted_content_author_login = trusted_content_author
   if current_issue ~= nil then
     opts.issue_body = current_issue.body
     opts.issue_labels = current_issue.labels
+    opts.issue_assignees = current_issue.assignees
+    opts.issue_state = current_issue.state
+    opts.issue_author_login = current_issue.author_login
+  else
+    opts.issue_body = payload.body
+    opts.issue_labels = payload.labels
+    opts.issue_assignees = payload.assignees
+    opts.issue_state = payload.state
+    opts.issue_author_login = payload.author_login
   end
-  return caps.classify_issue(payload, opts)
+  return opts
 end
 
 local live_options
+local session_authority
+local trusted_content_author_login
 
 local function make_department(ports)
   local handles = ports or {}
   local github = handles.github
+  local authority_for_run = handles.session_authority or session_authority
+  local live_options_for_run = handles.live_options or live_options
+  local trusted_content_author_for_run = handles.trusted_content_author_login
+    or trusted_content_author_login
+  local run_once = handles.once or function(key, fn)
+    return once(key, fn)
+  end
+
+  local function approved_content(item, authority, trusted_content_author)
+    if type(github) ~= "table" or type(github.read_issue) ~= "function" then
+      return nil, "GitHub content port unavailable"
+    end
+    local content_ref, ref_why = caps.content_source_ref(item)
+    if content_ref == nil then
+      return nil, ref_why
+    end
+    local ok, issue_or_error = pcall(function()
+      return github.read_issue(content_ref, {
+        consumer = "github-auto-twitter-marketing-schedule-content-authority",
+        force_fresh = true,
+      })
+    end)
+    if not ok then
+      return nil, "content fresh read failed"
+    end
+    return caps.validate_content(
+      issue_or_error,
+      item,
+      authority,
+      content_ref,
+      trusted_content_author
+    )
+  end
 
   local function act(event)
     local payload = event.payload or {}
+    local authority, authority_why = authority_for_run()
+    if authority == nil then
+      log.warn("github-auto-twitter-marketing dept=import_issue tag=SKIP reason=session authority invalid: "
+        .. tostring(authority_why))
+      return
+    end
+    local trusted_content_author = trusted_content_author_for_run()
+    if type(trusted_content_author) ~= "string" or strings.trim(trusted_content_author) == "" then
+      log.warn("github-auto-twitter-marketing dept=import_issue tag=SKIP reason=trusted content author unavailable")
+      return
+    end
     local current_issue = nil
     if github ~= nil then
       current_issue = fetched_issue(github, payload)
+      if current_issue == nil then
+        log.warn("github-auto-twitter-marketing dept=import_issue tag=SKIP reason=current issue unavailable")
+        return
+      end
     end
 
-    local item, why = classify_event(payload, current_issue)
+    local classify_options = classification_options(
+      payload,
+      current_issue,
+      authority,
+      trusted_content_author
+    )
+    local item, why = caps.classify_issue(payload, classify_options)
     if item == nil then
+      local blocked_comment = caps.ingress_blocked_comment(payload, classify_options, why)
+      if blocked_comment ~= nil then
+        log.warn("github-auto-twitter-marketing dept=import_issue tag=INGRESS_BLOCKED reason=" .. tostring(why))
+        raise("github-proxy.github_issue_comment_request", blocked_comment)
+      end
       log.info("github-auto-twitter-marketing dept=import_issue tag=SKIP reason=" .. tostring(why))
       return
     end
@@ -113,6 +169,7 @@ local function make_department(ports)
       raise("strategy_imported", caps.strategy_imported(item))
     elseif item.kind == "weekly-content" then
       raise("weekly_content_imported", caps.weekly_content_imported(item))
+      return
     elseif item.kind == "schedule-publish" then
       local decision = caps.schedule_decision(item, now())
       if not decision.due then
@@ -123,8 +180,16 @@ local function make_department(ports)
         end
         return
       end
-      local ran = once(caps.schedule_once_key(item, decision), function()
-        raise("x-publisher.x_publish_request", caps.x_publish_request(item, live_options(), decision))
+      local content, content_why = approved_content(item, authority, trusted_content_author)
+      if content == nil then
+        local status = "schedule publish blocked: " .. tostring(content_why)
+        log.warn("github-auto-twitter-marketing dept=import_issue tag=SCHEDULE_BLOCKED reason="
+          .. tostring(content_why))
+        raise("github-proxy.github_issue_comment_request", caps.status_comment(item, status))
+        return
+      end
+      local ran = run_once(caps.schedule_once_key(item, decision), function()
+        raise("x-publisher.x_publish_request", caps.x_publish_request(item, live_options_for_run(), decision))
         raise("github-proxy.github_issue_comment_request", caps.status_comment(item, status_for(item)))
       end)
       if not ran then
@@ -150,6 +215,9 @@ local function read_env_command(name)
   if name ~= "FKST_GITHUB_BOT_LOGIN"
     and name ~= "FKST_DEVLOOP_MANAGED_BOT_LOGINS"
     and name ~= "FKST_GITHUB_AUTHORIZED_LOGINS"
+    and name ~= "FKST_SESSION_CREATOR"
+    and name ~= "FKST_SESSION_WORK_LABEL"
+    and name ~= "FKST_SESSION_WORK_LABEL_MAP_JSON"
     and name ~= "FKST_NYXID_X_SERVICE_SLUG"
     and name ~= "FKST_X_PUBLISH_EXPECTED_USERNAME"
     and name ~= "FKST_X_PUBLISH_WRITE"
@@ -179,6 +247,20 @@ live_options = function()
     nyxid_x_service = first_non_empty_env({ "NYXID_X_SERVICE_SLUG", "FKST_NYXID_X_SERVICE_SLUG" }),
     expected_username = first_non_empty_env({ "X_PUBLISH_EXPECTED_USERNAME", "FKST_X_PUBLISH_EXPECTED_USERNAME" }),
   }
+end
+
+session_authority = function()
+  return caps.resolve_session_authority({
+    FKST_SESSION_CREATOR = first_non_empty_env({ "FKST_SESSION_CREATOR" }),
+    FKST_SESSION_WORK_LABEL = first_non_empty_env({ "FKST_SESSION_WORK_LABEL" }),
+    FKST_SESSION_WORK_LABEL_MAP_JSON = first_non_empty_env({ "FKST_SESSION_WORK_LABEL_MAP_JSON" }),
+    X_PUBLISH_EXPECTED_USERNAME = first_non_empty_env({ "X_PUBLISH_EXPECTED_USERNAME" }),
+    FKST_X_PUBLISH_EXPECTED_USERNAME = first_non_empty_env({ "FKST_X_PUBLISH_EXPECTED_USERNAME" }),
+  })
+end
+
+trusted_content_author_login = function()
+  return first_non_empty_env({ "FKST_GITHUB_BOT_LOGIN" })
 end
 
 local github_author_policy_env = {

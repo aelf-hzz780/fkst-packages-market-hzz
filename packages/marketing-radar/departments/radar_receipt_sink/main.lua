@@ -1,7 +1,7 @@
 local saga = require("workflow.saga")
 
 local spec = {
-  consumes = { "radar_config_imported", "radar_signal_imported", "radar_brief_created" },
+  consumes = { "radar_config_imported", "radar_signal_imported" },
   produces = {},
   stall_window = "30s",
 }

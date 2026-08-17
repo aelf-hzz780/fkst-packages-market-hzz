@@ -13,6 +13,3 @@ packages = ["github-proxy", "x-publisher"]
 
 [conformance]
 function = "core.saga_conformance_errors"
-
-[github]
-work_labels = ["auto-twitter-marketing"]

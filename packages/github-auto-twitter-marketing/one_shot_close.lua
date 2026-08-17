@@ -1,11 +1,14 @@
 local core = require("core")
+local session_route = require("contract.session_route")
+local sha256 = require("contract.sha256")
 local strings = require("contract.strings")
 
 local M = {}
 
-local HANDOFF_SCHEMA = "auto-twitter-marketing.one-shot-close.v1"
+local HANDOFF_SCHEMA = "auto-twitter-marketing.one-shot-close.v2"
 local HANDOFF_KIND = "published-one-shot"
 local COMMENT_SUFFIX = "/status/x-publish-published"
+local CONTENT_ANCHOR_PREFIX = "auto-twitter-marketing/v2/content-published/"
 local MAX_DEDUP_KEY_BYTES = 512
 local MAX_CONTROL_BYTES = 512
 local MAX_X_POST_ID_BYTES = 32
@@ -83,6 +86,56 @@ local function copy_source_ref(source_ref)
   }
 end
 
+local function content_source_ref(schedule_source_ref, content_ref)
+  local schedule_repo = select(1, issue_target(schedule_source_ref))
+  local raw = strings.trim(content_ref)
+  if schedule_repo == nil or raw == "" or #raw > MAX_CONTROL_BYTES then
+    return nil
+  end
+  local repo, number = raw:match("^([^#]+)#issue/(%d+)$")
+  if repo == nil then
+    repo, number = raw:match("^https://github%.com/([^/]+/[^/]+)/issues/(%d+)")
+  end
+  if repo == nil then
+    number = raw:match("^#(%d+)$") or raw:match("^(%d+)$")
+    repo = number and schedule_repo or nil
+  end
+  local numeric = tonumber(number)
+  if repo == nil or repo:match("^[%w_.-]+/[%w_.-]+$") == nil
+      or numeric == nil or numeric < 1 or numeric ~= math.floor(numeric) then
+    return nil
+  end
+  local ref = repo .. "#issue/" .. string.format("%.0f", numeric)
+  return { kind = "external", ref = ref, reference = ref }
+end
+
+function M.content_anchor_source_ref(payload)
+  if type(payload) ~= "table" then
+    return nil
+  end
+  return content_source_ref(payload.source_ref, payload.content_ref)
+end
+
+function M.content_anchor_dedup_key(payload, anchor_source_ref)
+  if type(payload) ~= "table" or not canonical_dedup_key(payload.dedup_key)
+      or not sha256.is_tagged(payload.content_digest)
+      or not bounded_string(payload.approval_id, MAX_CONTROL_BYTES) then
+    return nil
+  end
+  local expected_anchor = content_source_ref(payload.source_ref, payload.content_ref)
+  local supplied_anchor = copy_source_ref(anchor_source_ref or expected_anchor)
+  if expected_anchor == nil or supplied_anchor == nil
+      or supplied_anchor.ref ~= expected_anchor.ref then
+    return nil
+  end
+  return CONTENT_ANCHOR_PREFIX .. sha256.hex(table.concat({
+    payload.dedup_key,
+    expected_anchor.ref,
+    payload.content_digest,
+    payload.approval_id,
+  }, "\n"))
+end
+
 local function safe_log_value(value)
   local text = tostring(value or ""):gsub("[%z\1-\31\127]", " ")
   text = strings.trim(text)
@@ -92,8 +145,10 @@ local function safe_log_value(value)
   return text
 end
 
-function M.handoff_for_receipt(payload, comment_dedup_key)
-  if type(payload) ~= "table" or payload.status ~= "published" then
+function M.handoff_for_receipt(payload, comment_dedup_key, receipt_anchor_ref)
+  if type(payload) ~= "table"
+      or payload.schema ~= "x-publisher.publish-receipt.v2"
+      or payload.status ~= "published" then
     return nil
   end
   local metadata = type(payload.metadata) == "table" and payload.metadata or {}
@@ -105,11 +160,22 @@ function M.handoff_for_receipt(payload, comment_dedup_key)
     payload.platform_post_id,
     payload.post_uri
   )
+  local account = session_route.normalize_account(payload.account)
+  local authenticated_account = session_route.normalize_account(payload.authenticated_account)
+  local anchor_ref = copy_source_ref(receipt_anchor_ref)
+  local expected_comment_key = anchor_ref ~= nil
+    and M.content_anchor_dedup_key(payload, anchor_ref)
+    or (payload.dedup_key .. COMMENT_SUFFIX)
   if not canonical_dedup_key(payload.dedup_key)
-      or comment_dedup_key ~= payload.dedup_key .. COMMENT_SUFFIX
+      or comment_dedup_key ~= expected_comment_key
       or not bounded_string(comment_dedup_key, MAX_DEDUP_KEY_BYTES + #COMMENT_SUFFIX)
       or not bounded_string(payload.artifact_id, MAX_CONTROL_BYTES)
       or not bounded_string(payload.content_ref, MAX_CONTROL_BYTES)
+      or account == nil
+      or authenticated_account ~= account
+      or not bounded_string(payload.work_label, MAX_CONTROL_BYTES)
+      or not sha256.is_tagged(payload.content_digest)
+      or not bounded_string(payload.approval_id, MAX_CONTROL_BYTES)
       or payload.channel ~= "live"
       or not bounded_string(payload.trace_id, MAX_CONTROL_BYTES)
       or not bounded_string(payload.scheduled_at, MAX_CONTROL_BYTES)
@@ -131,6 +197,11 @@ function M.handoff_for_receipt(payload, comment_dedup_key)
     scheduled_at = payload.scheduled_at,
     artifact_id = payload.artifact_id,
     content_ref = payload.content_ref,
+    account = account,
+    authenticated_account = authenticated_account,
+    work_label = payload.work_label,
+    content_digest = payload.content_digest,
+    approval_id = payload.approval_id,
     channel = "live",
     platform = post_evidence.platform,
     platform_post_id = post_evidence.platform_post_id,
@@ -140,6 +211,7 @@ function M.handoff_for_receipt(payload, comment_dedup_key)
     receipt_dedup_key = payload.dedup_key,
     comment_dedup_key = comment_dedup_key,
     source_ref = source_ref,
+    receipt_anchor_ref = anchor_ref,
     trace_id = payload.trace_id,
   }
 end
@@ -164,13 +236,17 @@ function M.ack_context(payload)
   end
 
   local repo, issue_number, ref = issue_target(handoff.source_ref)
+  local receipt_anchor_ref = copy_source_ref(handoff.receipt_anchor_ref)
+  local ack_source_ref = receipt_anchor_ref or copy_source_ref(handoff.source_ref)
   local payload_repo, payload_issue_number, payload_ref = issue_target(payload.source_ref)
+  local ack_repo, ack_issue_number, ack_ref = issue_target(ack_source_ref)
   if repo == nil
-      or payload_repo ~= repo
-      or payload_issue_number ~= issue_number
-      or payload_ref ~= ref
-      or payload.repo ~= repo
-      or tonumber(payload.issue_number) ~= issue_number then
+      or ack_repo == nil
+      or payload_repo ~= ack_repo
+      or payload_issue_number ~= ack_issue_number
+      or payload_ref ~= ack_ref
+      or payload.repo ~= ack_repo
+      or tonumber(payload.issue_number) ~= ack_issue_number then
     return nil, "close-target-mismatch"
   end
 
@@ -179,13 +255,29 @@ function M.ack_context(payload)
     handoff.platform_post_id,
     handoff.post_uri
   )
+  local account = session_route.normalize_account(handoff.account)
+  local authenticated_account = session_route.normalize_account(handoff.authenticated_account)
 
+  local expected_comment_key = receipt_anchor_ref ~= nil
+    and M.content_anchor_dedup_key({
+      dedup_key = handoff.receipt_dedup_key,
+      content_ref = handoff.content_ref,
+      content_digest = handoff.content_digest,
+      approval_id = handoff.approval_id,
+      source_ref = handoff.source_ref,
+    }, receipt_anchor_ref)
+    or (tostring(handoff.receipt_dedup_key or "") .. COMMENT_SUFFIX)
   if not canonical_dedup_key(handoff.receipt_dedup_key)
-      or handoff.comment_dedup_key ~= handoff.receipt_dedup_key .. COMMENT_SUFFIX
+      or handoff.comment_dedup_key ~= expected_comment_key
       or payload.request_dedup_key ~= handoff.comment_dedup_key
       or payload.dedup_key ~= handoff.comment_dedup_key .. "/written/" .. comment_id
       or not bounded_string(handoff.artifact_id, MAX_CONTROL_BYTES)
       or not bounded_string(handoff.content_ref, MAX_CONTROL_BYTES)
+      or account == nil
+      or authenticated_account ~= account
+      or not bounded_string(handoff.work_label, MAX_CONTROL_BYTES)
+      or not sha256.is_tagged(handoff.content_digest)
+      or not bounded_string(handoff.approval_id, MAX_CONTROL_BYTES)
       or handoff.channel ~= "live"
       or not bounded_string(handoff.trace_id, MAX_CONTROL_BYTES)
       or not bounded_string(handoff.scheduled_at, MAX_CONTROL_BYTES)
@@ -197,12 +289,19 @@ function M.ack_context(payload)
   end
 
   return {
+    kind = "one-shot",
     repo = repo,
     issue_number = issue_number,
     source_ref = copy_source_ref(handoff.source_ref),
+    receipt_anchor_ref = receipt_anchor_ref,
     scheduled_at = handoff.scheduled_at,
     artifact_id = handoff.artifact_id,
     content_ref = handoff.content_ref,
+    account = account,
+    authenticated_account = authenticated_account,
+    work_label = handoff.work_label,
+    content_digest = handoff.content_digest,
+    approval_id = handoff.approval_id,
     channel = handoff.channel,
     platform = post_evidence.platform,
     platform_post_id = post_evidence.platform_post_id,
@@ -215,7 +314,7 @@ function M.ack_context(payload)
   }
 end
 
-function M.current_issue_decision(issue, context)
+function M.current_issue_decision(issue, context, authority)
   if type(issue) ~= "table" then
     return "skip", "invalid-current-issue"
   end
@@ -232,7 +331,12 @@ function M.current_issue_decision(issue, context)
       or ref ~= context.source_ref.ref or tonumber(issue.number) ~= context.issue_number then
     return "skip", "current-issue-target-mismatch"
   end
-  if not core.has_work_label(issue.labels) then
+  if type(authority) ~= "table"
+      or authority.account ~= context.account
+      or authority.logical_work_label ~= context.work_label then
+    return "skip", "current-session-correlation-mismatch"
+  end
+  if not core.has_work_label(issue.labels, authority.effective_work_label) then
     return "skip", "current-issue-out-of-scope"
   end
 
@@ -247,6 +351,8 @@ function M.current_issue_decision(issue, context)
   }, {
     issue_body = issue.body,
     issue_labels = issue.labels,
+    issue_assignees = issue.assignees,
+    session = authority,
   })
   if item == nil then
     return "skip", "current-issue-invalid:" .. tostring(why)
@@ -258,7 +364,11 @@ function M.current_issue_decision(issue, context)
     return "skip", "current-occurrence-mismatch"
   end
   if core.artifact_id(item) ~= context.artifact_id
-      or item.calendar_ref ~= context.content_ref
+      or item.content_ref ~= context.content_ref
+      or item.account ~= context.account
+      or item.work_label ~= context.work_label
+      or item.content_digest ~= context.content_digest
+      or item.approval_id ~= context.approval_id
       or item.mode ~= context.channel
       or item.locale ~= context.locale
       or item.owner ~= context.owner then

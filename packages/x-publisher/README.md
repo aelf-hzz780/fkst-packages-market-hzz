@@ -4,8 +4,9 @@ General X release package - **contract + shadow-first live implementation.** A r
 for X that any host repo composes via `pkg.queue`: consume a safe publish request, validate that only
 small control fields plus source pointers are present, and emit a receipt.
 
-- **consumes** `x_publish_request` - `{ artifact_id, source_ref, content_ref?, platform?, channel?,
-  dedup_key?, trace_id?, approval_id?, scheduled_at?, metadata? }`.
+- **consumes** `x_publish_request` - `{ artifact_id, source_ref, account, work_label, content_ref,
+  content_digest, schedule_digest, approval_id, platform, channel, dedup_key, trace_id,
+  scheduled_at?, metadata? }`.
 - **produces** `x_published` - preview receipts in shadow mode, blocked receipts when a requested
   live write is not authorized, and published receipts after NyxID returns an X tweet id.
 - **payload boundary** body/content fields (`tweet`, `body`, `text`, `message`, `media_bytes`,
@@ -14,6 +15,9 @@ small control fields plus source pointers are present, and emit a receipt.
 - **posture** shadow-first: live writes require all of `channel = "live"`,
   `X_PUBLISH_WRITE=1`, `NYXID_X_SERVICE_SLUG=<service-slug>`,
   `NYXID_ACCESS_TOKEN`, and a `nyxid` CLI available on `PATH`.
+- **schedule authority** `schedule_digest` is the canonical SHA-256 of the complete v2 Schedule
+  contract. The publisher force-refreshes the Schedule and blocks stale one-shot or recurring
+  requests before any NyxID call when the digest no longer matches.
 
 ## Live X write contract
 

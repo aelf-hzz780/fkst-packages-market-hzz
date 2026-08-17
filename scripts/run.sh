@@ -168,6 +168,7 @@ check_file_sizes() {
 }
 
 cmd_check() {
+  python3 "$ROOT/scripts/check_x_publishing_contract.py"
   python3 "$ROOT/scripts/check_x_publishing_contract_test.py"
   "$FRAMEWORK_BIN" deps --project-root "$ROOT" >/dev/null
   check_file_sizes
@@ -208,6 +209,7 @@ cmd_test_composed() {
   set_all_roots
   "$FRAMEWORK_BIN" deps --project-root "$ROOT" "${PACKAGE_ROOT_ARGS[@]}" >/dev/null
   "$FRAMEWORK_BIN" conformance --project-root "$ROOT" "${PACKAGE_ROOT_ARGS[@]}"
+  "$FRAMEWORK_BIN" test --project-root "$ROOT" "${PACKAGE_ROOT_ARGS[@]}"
   run_package_test x-publisher
   run_package_test github-auto-twitter-marketing
   run_package_test marketing-radar

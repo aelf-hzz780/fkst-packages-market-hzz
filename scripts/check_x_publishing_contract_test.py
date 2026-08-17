@@ -20,7 +20,7 @@ sys.path.insert(0, str(SCRIPT_ROOT))
 import check_x_publishing_contract as checker  # noqa: E402
 
 
-class StableSemverTest(unittest.TestCase):
+class SemverValidationTest(unittest.TestCase):
     def test_accepts_stable_semver(self) -> None:
         for version in ("0.0.0", "1.0.0", "12.34.56"):
             with self.subTest(version=version):
@@ -31,8 +31,42 @@ class StableSemverTest(unittest.TestCase):
             with self.subTest(version=version):
                 self.assertIsNone(checker.SEMVER_PATTERN.fullmatch(version))
 
-    def test_release_manifest_uses_one_stable_semver_ref(self) -> None:
-        self.assertEqual(checker.validate_release_manifest(), "v0.2.2")
+    def test_package_refs_accept_stable_and_canonical_prerelease_semver(self) -> None:
+        for version in ("v0.3.0", "v0.3.0-rc.1", "v12.34.56-alpha-beta.7"):
+            with self.subTest(version=version):
+                descriptors = [
+                    f"aelf-hzz780/fkst-packages-market-hzz@{version}:packages/{package}"
+                    for package in checker.EXPECTED_PACKAGES
+                ]
+                self.assertEqual(checker.validate_package_descriptors(descriptors), version)
+
+    def test_package_refs_reject_noncanonical_prerelease_or_build_metadata(self) -> None:
+        for version in (
+            "v0.3.0-rc.01",
+            "v0.3.0-rc..1",
+            "v0.3.0-",
+            "v0.3.0+build.1",
+            "v01.3.0-rc.1",
+        ):
+            with self.subTest(version=version):
+                descriptors = [
+                    f"aelf-hzz780/fkst-packages-market-hzz@{version}:packages/{package}"
+                    for package in checker.EXPECTED_PACKAGES
+                ]
+                with self.assertRaises(checker.ContractCheckError) as error:
+                    checker.validate_package_descriptors(descriptors)
+                self.assertEqual(error.exception.code, "mutable_or_invalid_package_ref")
+
+    def test_release_manifest_uses_one_rc_semver_ref(self) -> None:
+        self.assertEqual(checker.validate_release_manifest(), "v0.3.0-rc.1")
+
+    def test_contract_and_generator_versions_remain_stable_only(self) -> None:
+        source_lock = json.loads((REPO_ROOT / checker.LOCK_PATH).read_text(encoding="utf-8"))
+        for field in ("contractVersion", "generatorVersion"):
+            with self.subTest(field=field):
+                with self.assertRaises(checker.ContractCheckError) as error:
+                    checker.validate_lock({**source_lock, field: "1.2.3-rc.1"})
+                self.assertEqual(error.exception.code, "invalid_lock")
 
     def test_rejects_mutable_or_mixed_package_refs(self) -> None:
         mutable = [
@@ -45,9 +79,9 @@ class StableSemverTest(unittest.TestCase):
         self.assertEqual(mutable_error.exception.code, "mutable_or_invalid_package_ref")
 
         mixed = [
-            "aelf-hzz780/fkst-packages-market-hzz@v0.2.2:packages/x-publisher",
-            "aelf-hzz780/fkst-packages-market-hzz@v0.2.2:packages/github-auto-twitter-marketing",
-            "aelf-hzz780/fkst-packages-market-hzz@v0.2.1:packages/marketing-radar",
+            "aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.1:packages/x-publisher",
+            "aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.1:packages/github-auto-twitter-marketing",
+            "aelf-hzz780/fkst-packages-market-hzz@v0.2.2:packages/marketing-radar",
         ]
         with self.assertRaises(checker.ContractCheckError) as mixed_error:
             checker.validate_package_descriptors(mixed)

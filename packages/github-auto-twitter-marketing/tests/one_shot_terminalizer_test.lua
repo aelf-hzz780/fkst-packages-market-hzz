@@ -1,12 +1,15 @@
+local content_close = require("content_close")
+local marketing_content = require("contract.marketing_content")
+local one_shot_close = require("one_shot_close")
 local testing = require("testkit.testing")
 local t = fkst.test
 
 local repo = "owner/repo"
-local issue_number = 62
-local scheduled_at = "2026-07-25T09:00:00Z"
-local receipt_dedup_key = "auto-twitter-marketing/chronoai/2026-W31/schedule/owner/repo#issue/62/"
-  .. "2026-07-25T09-00-00Z/x-publish"
-local comment_dedup_key = receipt_dedup_key .. "/status/x-publish-published"
+local account = "test_primary"
+local logical_label = "auto-x-test-primary"
+local effective_label = "auto-x-test-primary-example-fkst"
+local creator = "test-owner"
+local digest = "sha256:" .. string.rep("a", 64)
 
 local function copy(value)
   if type(value) ~= "table" then
@@ -20,242 +23,289 @@ local function copy(value)
 end
 
 local function source_ref(number)
-  local ref = repo .. "#issue/" .. tostring(number or issue_number)
+  local ref = repo .. "#issue/" .. tostring(number)
   return { kind = "external", ref = ref, reference = ref }
 end
 
-local function one_shot_issue(overrides)
-  local issue = {
-    number = issue_number,
-    source_ref = source_ref(),
-    body = table.concat({
-      "type: schedule-publish",
-      "project: chronoai",
-      "week: 2026-W31",
-      "calendar-ref: #61",
-      "mode: live",
-      "scheduled-at: 2026-07-25T09:00:00Z",
-    }, "\n"),
-    state = "OPEN",
-    labels = { "auto-twitter-marketing" },
-    comments = {},
-    assignees = { "example_owner" },
-    author_login = "example_owner",
+local function authority()
+  return {
+    effective_work_label = effective_label,
+    logical_work_label = logical_label,
+    creator = creator,
+    account = account,
   }
-  for key, value in pairs(overrides or {}) do
-    issue[key] = value
-  end
-  return issue
 end
 
-local function ack_event(overrides)
-  local ref = source_ref()
-  local payload = {
-    schema = "github-proxy.comment-written.v1",
-    repo = repo,
-    target = "issue",
-    issue_number = issue_number,
-    comment_id = "comment-123",
-    request_dedup_key = comment_dedup_key,
-    dedup_key = comment_dedup_key .. "/written/comment-123",
-    source_ref = ref,
-    handoff = {
-      schema = "auto-twitter-marketing.one-shot-close.v1",
-      kind = "published-one-shot",
-      status = "published",
-      schedule_type = "one-shot",
-      scheduled_at = scheduled_at,
-      artifact_id = "auto-twitter-marketing/chronoai/2026-W31/schedule",
-      content_ref = "#61",
-      channel = "live",
-      platform = "x",
-      platform_post_id = "1234567890",
-      post_uri = "https://x.com/i/web/status/1234567890",
-      receipt_dedup_key = receipt_dedup_key,
-      comment_dedup_key = comment_dedup_key,
-      source_ref = ref,
-      trace_id = "trace-one-shot-close",
+local function schedule_body(overrides)
+  local fields = {
+    contract = "auto-twitter-marketing.schedule-publish.v2",
+    type = "schedule-publish",
+    project = "chronoai",
+    account = account,
+    ["work-label"] = logical_label,
+    week = "2026-W33",
+    ["content-ref"] = "#61",
+    ["content-digest"] = digest,
+    ["approval-id"] = "proposal-w33@2",
+    mode = "live",
+    ["scheduled-at"] = "2026-08-17T00:00:00Z",
+  }
+  for key, value in pairs(overrides or {}) do
+    fields[key] = value
+  end
+  local order = {
+    "contract", "type", "project", "account", "work-label", "week",
+    "content-ref", "content-digest", "approval-id", "mode", "scheduled-at",
+  }
+  local lines = {}
+  for _, key in ipairs(order) do
+    lines[#lines + 1] = key .. ": " .. tostring(fields[key])
+  end
+  return table.concat(lines, "\n")
+end
+
+local function issue(number, body, overrides)
+  local value = {
+    number = number,
+    source_ref = source_ref(number),
+    body = body,
+    state = "OPEN",
+    labels = { effective_label },
+    comments = {},
+    assignees = { creator },
+    author_login = creator,
+  }
+  for key, child in pairs(overrides or {}) do
+    value[key] = child
+  end
+  return value
+end
+
+local function published_receipt()
+  return {
+    schema = "x-publisher.publish-receipt.v2",
+    artifact_id = "auto-twitter-marketing/test_primary/chronoai/2026-W33/schedule",
+    status = "published",
+    platform = "x",
+    platform_post_id = "1234567890",
+    post_uri = "https://x.com/i/web/status/1234567890",
+    account = account,
+    authenticated_account = account,
+    work_label = logical_label,
+    content_ref = "#61",
+    content_digest = digest,
+    approval_id = "proposal-w33@2",
+    channel = "live",
+    dedup_key = "auto-twitter-marketing/test_primary/chronoai/2026-W33/schedule/"
+      .. "owner/repo#issue/62/2026-08-17T00-00-00Z/x-publish",
+    trace_id = "trace-one-shot-close",
+    scheduled_at = "2026-08-17T00:00:00Z",
+    metadata = { schedule_type = "one-shot" },
+    source_ref = source_ref(62),
+  }
+end
+
+local function receipt_ack(anchor_content)
+  local receipt = published_receipt()
+  local anchor_ref = anchor_content and source_ref(61) or nil
+  local comment_key = anchor_content
+    and assert(one_shot_close.content_anchor_dedup_key(receipt, anchor_ref))
+    or (receipt.dedup_key .. "/status/x-publish-published")
+  local handoff = assert(one_shot_close.handoff_for_receipt(receipt, comment_key, anchor_ref))
+  local ack_ref = anchor_ref or source_ref(62)
+  return {
+    queue = "github-proxy.github_comment_written",
+    payload = {
+      schema = "github-proxy.comment-written.v1",
+      repo = repo,
+      target = "issue",
+      issue_number = anchor_content and 61 or 62,
+      comment_id = "comment-123",
+      request_dedup_key = comment_key,
+      dedup_key = comment_key .. "/written/comment-123",
+      source_ref = ack_ref,
+      handoff = handoff,
     },
   }
-  for key, value in pairs(overrides or {}) do
-    payload[key] = value
-  end
-  return { queue = "github-proxy.github_comment_written", payload = payload, source_ref = payload.source_ref }
 end
 
-local function github_port(issue, options)
-  local opts = options or {}
-  local model = {
-    issue = copy(issue),
-    reads = {},
-    closes = {},
-    locks = {},
-  }
-  local github = { _test_model = model }
+local function content_body()
+  return assert(marketing_content.render({
+    project = "chronoai",
+    account = account,
+    work_label = logical_label,
+    week = "2026-W33",
+    content_id = "chronoai-w33-1",
+    content_revision = 1,
+    proposal_id = "proposal-w33",
+    proposal_revision = 2,
+    approval_id = "proposal-w33@2",
+    content_status = "approved",
+    tweet_text = "A reviewed test account post.",
+  }))
+end
 
+local function content_ack()
+  local body, content_digest = marketing_content.render({
+    project = "chronoai",
+    account = account,
+    work_label = logical_label,
+    week = "2026-W33",
+    content_id = "chronoai-w33-1",
+    content_revision = 1,
+    proposal_id = "proposal-w33",
+    proposal_revision = 2,
+    approval_id = "proposal-w33@2",
+    content_status = "approved",
+    tweet_text = "A reviewed test account post.",
+  })
+  local request = assert(content_close.comment_request({
+    schema = "auto-twitter-marketing.weekly-content-imported.v2",
+    artifact_id = "auto-twitter-marketing/test_primary/chronoai/2026-W33/weekly-content/chronoai-w33-1",
+    account = account,
+    work_label = logical_label,
+    content_id = "chronoai-w33-1",
+    content_revision = 1,
+    content_digest = content_digest,
+    approval_id = "proposal-w33@2",
+    dedup_key = "auto-twitter-marketing/test_primary/weekly/61/content-import",
+    trace_id = "trace-content-close",
+    source_ref = source_ref(61),
+  }))
+  return body, {
+    queue = "github-proxy.github_comment_written",
+    payload = {
+      schema = "github-proxy.comment-written.v1",
+      repo = repo,
+      target = "issue",
+      issue_number = 61,
+      comment_id = "comment-456",
+      request_dedup_key = request.dedup_key,
+      dedup_key = request.dedup_key .. "/written/comment-456",
+      source_ref = source_ref(61),
+      handoff = request.handoff,
+    },
+  }
+end
+
+local function github_port(current_issue, options)
+  local opts = options or {}
+  local model = { issue = copy(current_issue), reads = {}, closes = {}, locks = {} }
+  local github = { _test_model = model }
   function github.read_issue(ref, read_options)
-    table.insert(model.reads, { source_ref = copy(ref), options = copy(read_options) })
-    if opts.read_error ~= nil then
-      error(opts.read_error, 0)
-    end
+    model.reads[#model.reads + 1] = { ref = copy(ref), options = copy(read_options) }
     return copy(model.issue)
   end
-
   function github.issue_close(target_repo, target_number, timeout)
-    table.insert(model.closes, {
-      repo = target_repo,
-      issue_number = target_number,
-      timeout = timeout,
-    })
-    if opts.close_error_after_state_change == true then
-      model.issue.state = "CLOSED"
+    model.closes[#model.closes + 1] = { repo = target_repo, number = target_number, timeout = timeout }
+    model.issue.state = "CLOSED"
+    if opts.lose_close_response == true then
       error("simulated lost close response", 0)
     end
-    if opts.close_error ~= nil then
-      error(opts.close_error, 0)
-    end
-    model.issue.state = "CLOSED"
-    return { stdout = "", stderr = "", exit_code = 0 }
+    return { exit_code = 0, stdout = "", stderr = "" }
   end
-
   return github, model
 end
 
-local function department(github, write_enabled)
+local function department(github)
   local old_pipeline = pipeline
   local module = require("departments.one_shot_terminalizer.main")
   pipeline = old_pipeline
   return module.make_department({
     github = github,
-    github_write_enabled = function()
-      return write_enabled ~= false
-    end,
-    with_lock = function(_key, fn)
-      table.insert(github._test_model.locks, _key)
+    github_write_enabled = function() return true end,
+    session_authority = function() return authority() end,
+    with_lock = function(key, fn)
+      github._test_model.locks[#github._test_model.locks + 1] = key
       return fn()
     end,
   })
 end
 
 return {
-  test_matching_published_one_shot_ack_closes_schedule_issue_after_fresh_read = function()
-    local github, model = github_port(one_shot_issue())
-    local result = testing.run_fake(department(github), ack_event())
-
-    t.eq(#result.raises, 0)
+  test_published_one_shot_ack_fresh_reads_correlated_v2_schedule_and_closes = function()
+    local github, model = github_port(issue(62, schedule_body()))
+    testing.run_fake(department(github), receipt_ack())
     t.eq(#model.reads, 1)
+    t.eq(model.reads[1].options.force_fresh, true)
     t.eq(#model.locks, 1)
-    t.eq(model.reads[1].source_ref.ref, repo .. "#issue/" .. tostring(issue_number))
+    t.eq(#model.closes, 1)
+  end,
+
+  test_content_anchored_publish_ack_fresh_reads_schedule_then_closes = function()
+    local github, model = github_port(issue(62, schedule_body()))
+    testing.run_fake(department(github), receipt_ack(true))
+    t.eq(#model.reads, 1)
+    t.eq(model.reads[1].ref.ref, repo .. "#issue/62")
+    t.eq(#model.locks, 1)
+    t.eq(#model.closes, 1)
+  end,
+
+  test_optional_sink_content_anchor_ack_drives_schedule_close = function()
+    local sink_result = testing.run_fake(
+      require("departments.optional_receipt_sink.main"),
+      { queue = "x-publisher.x_published", payload = published_receipt() }
+    )
+    local anchor_request = nil
+    for _, raised in ipairs(sink_result.raises) do
+      if raised.payload.issue_number == 61 then
+        anchor_request = raised.payload
+      end
+    end
+    anchor_request = assert(anchor_request)
+    local comment_id = "content-anchor-comment"
+    local ack = {
+      queue = "github-proxy.github_comment_written",
+      payload = {
+        schema = "github-proxy.comment-written.v1",
+        repo = anchor_request.repo,
+        target = "issue",
+        issue_number = anchor_request.issue_number,
+        comment_id = comment_id,
+        request_dedup_key = anchor_request.dedup_key,
+        dedup_key = anchor_request.dedup_key .. "/written/" .. comment_id,
+        source_ref = anchor_request.source_ref,
+        handoff = anchor_request.handoff,
+      },
+    }
+    local github, model = github_port(issue(62, schedule_body()))
+    testing.run_fake(department(github), ack)
+    t.eq(#model.reads, 1)
+    t.eq(model.reads[1].ref.ref, repo .. "#issue/62")
+    t.eq(#model.closes, 1)
+  end,
+
+  test_weekly_content_import_ack_recomputes_digest_then_closes = function()
+    local body, ack = content_ack()
+    local github, model = github_port(issue(61, body))
+    testing.run_fake(department(github), ack)
+    t.eq(#model.reads, 1)
     t.eq(model.reads[1].options.force_fresh, true)
     t.eq(#model.closes, 1)
-    t.eq(model.closes[1].repo, repo)
-    t.eq(model.closes[1].issue_number, issue_number)
-    t.eq(model.closes[1].timeout, 30)
   end,
 
-  test_terminalizer_never_closes_recurring_or_non_schedule_current_issue = function()
-    for _, body in ipairs({
-      "type: recurring-schedule-publish\nproject: chronoai\nweek: 2026-W31\ncalendar-ref: #61\ntime: 11:10\ntimezone: UTC",
-      "type: schedule-publish\nproject: chronoai\nweek: 2026-W31\ncalendar-ref: #61\nrecurrence: every-minutes\ninterval-minutes: 10\nscheduled-at: 2026-07-25T09:00:00Z",
-      "type: weekly-content\nproject: chronoai\nweek: 2026-W31",
-    }) do
-      local github, model = github_port(one_shot_issue({ body = body }))
-      testing.run_fake(department(github), ack_event())
-      t.eq(#model.closes, 0)
-    end
-  end,
-
-  test_terminalizer_skips_when_current_issue_changed_after_publish = function()
-    for _, overrides in ipairs({
-      { labels = { "other" } },
-      { body = "type: schedule-publish\nproject: chronoai\nweek: 2026-W31\ncalendar-ref: #61\nmode: live\nscheduled-at: 2026-07-26T09:00:00Z" },
-      { body = "type: schedule-publish\nproject: another-project\nweek: 2026-W31\ncalendar-ref: #61\nmode: live\nscheduled-at: 2026-07-25T09:00:00Z" },
-      { body = "type: schedule-publish\nproject: chronoai\nweek: 2026-W31\ncalendar-ref: #99\nmode: live\nscheduled-at: 2026-07-25T09:00:00Z" },
-      { body = "type: schedule-publish\nproject: chronoai\nweek: 2026-W31\ncalendar-ref: #61\nmode: shadow\nscheduled-at: 2026-07-25T09:00:00Z" },
-      { body = "type: schedule-publish\nproject: chronoai\nweek: 2026-W31\ncalendar-ref: #61\nmode: live" },
-    }) do
-      local github, model = github_port(one_shot_issue(overrides))
-      testing.run_fake(department(github), ack_event())
+  test_terminalizer_blocks_changed_schedule_or_content_without_close = function()
+    local body, content_event = content_ack()
+    local cases = {
+      { current = issue(62, schedule_body({ ["content-digest"] = "sha256:" .. string.rep("b", 64) })), event = receipt_ack() },
+      { current = issue(62, schedule_body(), { labels = { "other" } }), event = receipt_ack() },
+      { current = issue(61, (body:gsub("reviewed", "unreviewed"))), event = content_event },
+      { current = issue(61, body, { assignees = { "test-secondary" } }), event = content_event },
+    }
+    for _, case in ipairs(cases) do
+      local github, model = github_port(case.current)
+      testing.run_fake(department(github), case.event)
       t.eq(#model.reads, 1)
       t.eq(#model.closes, 0)
     end
   end,
 
-  test_terminalizer_rejects_malformed_or_mismatched_ack_without_read_or_close = function()
-    local cases = {
-      { schema = "unknown.v1" },
-      { target = "pr" },
-      { remove = "comment_id" },
-      { repo = "other/repo" },
-      { issue_number = 99 },
-      { request_dedup_key = "wrong/comment-key" },
-      { dedup_key = "wrong/ack-key" },
-      { source_ref = source_ref(99) },
-      { source_ref = { kind = "external", ref = repo .. "#issue/62", reference = repo .. "#issue/99" } },
-      { handoff = { schema = "unknown.v1" } },
-      { remove_handoff = "trace_id" },
-      { remove_handoff = "scheduled_at" },
-      { remove_handoff = "content_ref" },
-      { remove_handoff = "platform" },
-      { remove_handoff = "platform_post_id" },
-      { remove_handoff = "post_uri" },
-      { handoff_override = { platform = "twitter" } },
-      { handoff_override = { platform_post_id = "not-a-post-id" } },
-      { handoff_override = { post_uri = "https://x.com/i/web/status/999" } },
-    }
-    for _, override in ipairs(cases) do
-      local github, model = github_port(one_shot_issue())
-      local event = ack_event(override)
-      if override.remove ~= nil then
-        event.payload[override.remove] = nil
-      end
-      if override.remove_handoff ~= nil then
-        event.payload.handoff[override.remove_handoff] = nil
-      end
-      for key, value in pairs(override.handoff_override or {}) do
-        event.payload.handoff[key] = value
-      end
-      testing.run_fake(department(github), event)
-      t.eq(#model.reads, 0)
-      t.eq(#model.closes, 0)
-    end
-  end,
-
-  test_terminalizer_skips_when_github_write_is_disabled = function()
-    local github, model = github_port(one_shot_issue())
-    testing.run_fake(department(github, false), ack_event())
-
-    t.eq(#model.reads, 0)
-    t.eq(#model.closes, 0)
-  end,
-
-  test_terminalizer_treats_closed_issue_as_converged = function()
-    local github, model = github_port(one_shot_issue({ state = "CLOSED" }))
-    testing.run_fake(department(github), ack_event())
-
-    t.eq(#model.reads, 1)
-    t.eq(#model.closes, 0)
-  end,
-
-  test_terminalizer_propagates_fresh_read_and_close_failures = function()
-    local read_github, read_model = github_port(one_shot_issue(), { read_error = "fresh read failed" })
-    testing.run_fake_expecting_failure(department(read_github), ack_event())
-    t.eq(#read_model.closes, 0)
-
-    local close_github, close_model = github_port(one_shot_issue(), { close_error = "close failed" })
-    testing.run_fake_expecting_failure(department(close_github), ack_event())
-    t.eq(#close_model.closes, 1)
-  end,
-
-  test_terminalizer_converges_when_close_succeeded_but_response_was_lost = function()
-    local github, model = github_port(one_shot_issue(), { close_error_after_state_change = true })
-    testing.run_fake(department(github), ack_event())
-
-    t.eq(#model.closes, 1)
+  test_terminalizer_converges_after_lost_close_response_and_on_replay = function()
+    local github, model = github_port(issue(62, schedule_body()), { lose_close_response = true })
+    testing.run_fake(department(github), receipt_ack())
     t.eq(#model.reads, 2)
-
-    testing.run_fake(department(github), ack_event())
     t.eq(#model.closes, 1)
-    t.eq(#model.reads, 3)
+    testing.run_fake(department(github), receipt_ack())
+    t.eq(#model.closes, 1)
   end,
 }

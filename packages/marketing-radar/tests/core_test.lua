@@ -1,319 +1,269 @@
 local core = require("core")
 local t = fkst.test
 
-local function source_ref(issue_number)
-  local ref = "owner/repo#issue/" .. tostring(issue_number or 42)
+local function session()
   return {
-    kind = "external",
-    ref = ref,
-    reference = ref,
+    effective_work_label = "host-test-primary",
+    logical_work_label = "auto-x-test-primary",
+    creator = "test-operator",
+    account = "test_primary",
   }
 end
 
-local function issue(overrides)
-  local payload = {
+local function source_ref(number)
+  local ref = "owner/repo#issue/" .. tostring(number)
+  return { kind = "external", ref = ref, reference = ref }
+end
+
+local function signal(number, action, target_ref)
+  local lines = {
+    "contract: marketing-radar.radar-signal.v2",
+    "type: radar-signal",
+    "project: chronoai",
+    "account: test_primary",
+    "work-label: auto-x-test-primary",
+    "week: 2026-W33",
+    "action: " .. tostring(action or "add"),
+  }
+  if target_ref ~= nil then
+    lines[#lines + 1] = "target-ref: " .. target_ref
+  end
+  lines[#lines + 1] = "topic: FKST automation"
+  lines[#lines + 1] = "source-url: https://github.example/owner/repo/issues/" .. tostring(number)
+  lines[#lines + 1] = "insight: Generate a reviewed update from cited evidence."
+  local body = table.concat(lines, "\n")
+  return assert(core.classify_issue({
     schema = "github-proxy.v1",
     type = "issue",
     repo = "owner/repo",
-    number = 42,
-    title = "Marketing radar",
-    url = "https://github.example/owner/repo/issues/42",
-    state = "OPEN",
-    labels = { "auto-twitter-marketing" },
-    updated_at = "2026-07-28T09:00:00Z",
-    source_ref = source_ref(42),
-    dedup_key = "owner/repo#issue#42@2026-07-28T09:00:00Z",
-  }
-  for key, value in pairs(overrides or {}) do
-    payload[key] = value
+    number = number,
+    labels = { "host-test-primary" },
+    assignees = { "test-operator" },
+    body = body,
+    source_ref = source_ref(number),
+  }, { session = session() }))
+end
+
+local function draft(signals, tweet_text, revision)
+  local evidence = {}
+  for _, item in ipairs(signals) do
+    evidence[#evidence + 1] = item.source_ref.ref
   end
-  return payload
+  return {
+    action = signals[1].action,
+    target_ref = signals[1].target_ref,
+    evidence_refs = evidence,
+    tweet_text = tweet_text,
+    revision = revision,
+  }
 end
 
 return {
-  test_parse_control_fields_accepts_radar_issue_contract = function()
-    local fields = core.parse_control_fields([[
-type: radar-run
-project: chronoai
-week: 2026-W31
-strategy-ref: #24
-topic: FKST hosted automation
-source-url: https://github.com/OWNER/CONTENT_REPO/issues/24
-insight: Local hosted can import issues and schedule X posts.
-assignee: github-username
-output: weekly-content
-time: 11:10
-timezone: Asia/Shanghai
-mode: shadow
-]])
-
-    t.eq(fields.type, "radar-run")
-    t.eq(fields.project, "chronoai")
-    t.eq(fields.week, "2026-W31")
-    t.eq(fields["strategy-ref"], "#24")
-    t.eq(fields.topic, "FKST hosted automation")
-    t.eq(fields["source-url"], "https://github.com/OWNER/CONTENT_REPO/issues/24")
-    t.eq(fields.assignee, "github-username")
-  end,
-
-  test_public_helpers_and_control_fields_filter_unsafe_values = function()
-    local fields = core.parse_control_fields("project: chronoai\ntoken: secret\nraw_response: secret\ninsight: " .. string.rep("x", 513))
-    local empty_fields = core.parse_control_fields("")
-
-    t.eq(core.work_label(), "auto-twitter-marketing")
-    t.eq(#core.saga_conformance_errors(), 0)
-    t.eq(core.has_work_label(nil), false)
-    t.is_nil(empty_fields.project)
-    t.eq(fields.project, "chronoai")
+  test_control_parser_limits_fields_to_the_v2_allowlist = function()
+    local fields, why = core.parse_control_fields(table.concat({
+      "type: radar-signal",
+      "project: chronoai",
+      "account: test_primary",
+      "action: add",
+      "```yaml",
+      "action: replan",
+      "```",
+      "token: must-not-pass",
+      "raw-response: must-not-pass",
+    }, "\n"))
+    t.is_nil(why)
+    t.eq(fields.type, "radar-signal")
+    t.eq(fields.action, "add")
     t.is_nil(fields.token)
     t.is_nil(fields["raw-response"])
-    t.is_nil(fields.insight)
+
+    local _, duplicate_why = core.parse_control_fields("type: radar-signal\naction: add\naction: replan")
+    t.eq(duplicate_why, "duplicate-control-field:action")
   end,
 
-  test_classify_radar_config_is_pointer_only = function()
-    local classified = core.classify_issue(issue(), {
-      issue_body = [[
-type: radar-config
-project: chronoai
-account: example_user
-cadence: daily
-timezone: Asia/Shanghai
-]],
-    })
-
-    t.eq(classified.kind, "radar-config")
-    t.eq(classified.project, "chronoai")
-    t.eq(classified.account, "example_user")
-    t.eq(classified.source_ref.ref, "owner/repo#issue/42")
-    t.eq(classified.trace_id, "github:marketing-radar:owner/repo#issue/42")
-    t.is_nil(classified.token)
-    t.is_nil(classified.secret)
+  test_group_rejects_mixed_actions_and_targets = function()
+    local signals = { signal(11, "add"), signal(12, "revise", "#8") }
+    local proposal, why = core.build_proposal(signals, session(), draft(signals, "A reviewed update."))
+    t.is_nil(proposal)
+    t.eq(why, "mixed-signal-actions")
+    t.is_true(core.proposal_group_key(signals[1]) ~= core.proposal_group_key(signals[2]))
+    t.is_true(core.proposal_group_key(signal(13, "revise", "#8"))
+      ~= core.proposal_group_key(signal(14, "revise", "#9")))
   end,
 
-  test_classify_uses_source_ref_reference_and_repo_number_fallback = function()
-    local from_reference = core.classify_issue(issue({
-      source_ref = {
-        kind = "external",
-        reference = "owner/repo#issue/44",
-        token = "not exported",
-      },
-    }), {
-      issue_body = "type: radar-config\nproject: chronoai\n",
-    })
-    local repo_number_payload = issue()
-    repo_number_payload.source_ref = nil
-    local from_repo_number = core.classify_issue(repo_number_payload, {
-      issue_body = "type: radar-config\nproject: chronoai\n",
-    })
-    local imported = core.radar_config_imported(from_reference)
-
-    t.eq(from_reference.source_ref.ref, "owner/repo#issue/44")
-    t.eq(from_reference.source_ref.reference, "owner/repo#issue/44")
-    t.is_nil(imported.source_ref.token)
-    t.eq(from_repo_number.source_ref.ref, "owner/repo#issue/42")
+  test_action_strategies_bound_supersession_scope = function()
+    local add = assert(core.action_strategy("add"))
+    local revise = assert(core.action_strategy("revise", "#8"))
+    local replan = assert(core.action_strategy("replan"))
+    t.eq(add.change_scope, "append")
+    t.eq(add.supersede_mode, "none")
+    t.eq(revise.change_scope, "target-only")
+    t.eq(revise.supersede_mode, "target-unpublished")
+    t.eq(replan.change_scope, "week-unpublished")
+    t.eq(replan.supersede_mode, "all-unpublished")
   end,
 
-  test_classify_sanitizes_ids_and_truncates_fenced_tweet_text = function()
-    local classified = core.classify_issue(issue(), {
-      issue_body = "type: radar-run\nproject: ///!!!\nweek: 2026-W31\ntweet-text:\n```\n" .. string.rep("x", 1300) .. "\n```\n",
-    })
-
-    t.eq(classified.project, "unknown")
-    t.eq(#classified.tweet_text, 1200)
-  end,
-
-  test_classify_radar_signal_requires_label_and_project = function()
-    local classified = core.classify_issue(issue(), {
-      issue_body = [[
-type: radar-signal
-project: chronoai
-week: 2026-W31
-topic: FKST hosted automation
-insight: GitHub issue inputs can drive publishing.
-]],
-    })
-    t.eq(classified.kind, "radar-signal")
-    t.eq(classified.project, "chronoai")
-
-    local missing_label = core.classify_issue(issue({ labels = { "other" } }), {
-      issue_body = "type: radar-signal\nproject: chronoai\n",
-    })
-    t.is_nil(missing_label)
-  end,
-
-  test_classify_rejects_invalid_issue_contracts = function()
-    local _, why
-
-    _, why = core.classify_issue("bad")
-    t.eq(why, "invalid payload")
-    _, why = core.classify_issue(issue({ schema = "other.v1" }))
-    t.eq(why, "unsupported schema")
-    _, why = core.classify_issue(issue({ type = "pull_request" }))
-    t.eq(why, "not issue")
-    _, why = core.classify_issue(issue(), { issue_body = "project: chronoai\n" })
-    t.eq(why, "missing type")
-    _, why = core.classify_issue(issue(), { issue_body = "type: radar-run\n" })
-    t.eq(why, "missing project")
-    _, why = core.classify_issue({
-      schema = "github-proxy.v1",
-      type = "issue",
-      labels = { "auto-twitter-marketing" },
-      number = 42,
-    }, {
-      issue_body = "type: radar-config\nproject: chronoai\n",
-    })
-    t.eq(why, "missing source_ref")
-    _, why = core.classify_issue(issue(), { issue_body = "type: radar-run\nproject: chronoai\n" })
-    t.eq(why, "missing week")
-    _, why = core.classify_issue(issue(), {
-      issue_body = "type: radar-run\nproject: chronoai\nweek: 2026-W31\ncalendar-ref: #25\nrecurrence: weekly\n",
-    })
-    t.eq(why, "unsupported recurrence")
-    _, why = core.classify_issue(issue(), {
-      issue_body = "type: radar-run\nproject: chronoai\nweek: 2026-W31\ncalendar-ref: #25\nrecurrence: daily\n",
-    })
-    t.eq(why, "missing recurring schedule fields")
-  end,
-
-  test_radar_run_parses_tweet_text_variants_and_sanitizes_assignee = function()
-    local inline = core.classify_issue(issue(), {
-      issue_body = "type: radar-run\nproject: chronoai\nweek: 2026-W31\ntweet-text: Inline radar post\nassignee: bad login!\n",
-    })
-    local quoted = core.classify_issue(issue(), {
-      issue_body = "type: radar-run\nproject: chronoai\nweek: 2026-W31\ntweet-text: |\nRadar post from next line\n",
-    })
-    local unterminated = core.classify_issue(issue(), {
-      issue_body = "type: radar-run\nproject: chronoai\nweek: 2026-W31\ntweet-text:\n```\nUnterminated radar post\n",
-    })
-    local long_field = core.classify_issue(issue({
-      controls = {
-        type = "radar-signal",
-        project = "chronoai",
-        insight = string.rep("x", 600),
-      },
-    }))
-
-    t.eq(inline.tweet_text, "Inline radar post")
-    t.is_nil(inline.assignee)
-    t.eq(quoted.tweet_text, "Radar post from next line")
-    t.eq(unterminated.tweet_text, "Unterminated radar post")
-    t.is_nil(long_field.insight)
-  end,
-
-  test_radar_run_builds_weekly_content_issue_request = function()
-    local classified = core.classify_issue(issue(), {
-      issue_body = [[
-type: radar-run
-project: chronoai
-week: 2026-W31
-strategy-ref: #24
-topic: FKST hosted automation
-source-url: https://github.com/OWNER/CONTENT_REPO/issues/24
-insight: Local hosted can import strategy and weekly content issues.
-tweet-text:
-```
-Radar generated test post for FKST auto-twitter.
-```
-assignee: github-username
-]],
-    })
-    local request = core.weekly_content_issue_request(classified)
-
-    t.eq(request.schema, "github-proxy.issue-create.v1")
-    t.eq(request.repo, "owner/repo")
-    t.eq(request.labels[1], "auto-twitter-marketing")
-    t.eq(request.assignees[1], "github-username")
-    t.is_true(request.body:find("type: weekly-content", 1, true) ~= nil)
-    t.is_true(request.body:find("strategy-ref: #24", 1, true) ~= nil)
-    t.is_true(request.body:find("Radar generated test post for FKST auto-twitter.", 1, true) ~= nil)
-    t.is_true(request.dedup_key:find("/weekly-content", 1, true) ~= nil)
-    t.eq(request.source_ref.ref, "owner/repo#issue/42")
-  end,
-
-  test_weekly_content_request_uses_fallback_brief_ref_and_default_tweet_text = function()
-    local topic_item = core.classify_issue(issue(), {
-      issue_body = [[
-type: radar-run
-project: chronoai
-week: 2026-W31
-topic: FKST hosted automation
-]],
-    })
-    local default_item = core.classify_issue(issue(), {
-      issue_body = [[
-type: radar-run
-project: chronoai
-week: 2026-W31
-]],
-    })
-    local insight_item = core.classify_issue(issue(), {
-      issue_body = [[
-type: radar-run
-project: chronoai
-week: 2026-W31
-insight: Insight fallback post.
-]],
-    })
-    topic_item.issue_number = nil
-    local topic_request = core.weekly_content_issue_request(topic_item)
-    local default_request = core.weekly_content_issue_request(default_item)
-    local insight_request = core.weekly_content_issue_request(insight_item)
-
-    t.is_true(topic_request.body:find("radar-brief-ref: owner/repo#issue/42", 1, true) ~= nil)
-    t.is_true(topic_request.body:find("Radar brief: FKST hosted automation", 1, true) ~= nil)
-    t.is_true(default_request.body:find("Radar generated weekly content for chronoai 2026-W31.", 1, true) ~= nil)
-    t.is_true(insight_request.body:find("Insight fallback post.", 1, true) ~= nil)
-    t.eq(#topic_request.assignees, 0)
-  end,
-
-  test_issue_request_builders_truncate_large_generated_bodies_and_keys = function()
-    local item = {
-      project = string.rep("p", 200),
-      week = "2026-W31",
-      calendar_ref = "#25",
-      mode = "shadow",
-      recurrence = "daily",
-      time = "11:10",
-      timezone = "UTC",
-      repo = "owner/repo",
-      issue_number = 42,
-      source_ref = source_ref(42),
+  test_signal_author_must_be_session_creator_collaborator_or_globally_authorized = function()
+    local body = signal(11).source_ref and table.concat({
+      "contract: marketing-radar.radar-signal.v2", "type: radar-signal", "project: chronoai",
+      "account: test_primary", "work-label: auto-x-test-primary", "week: 2026-W33",
+      "action: add", "topic: FKST automation",
+    }, "\n")
+    local payload = {
+      schema = "github-proxy.v1", type = "issue", repo = "owner/repo", number = 11,
+      labels = { "host-test-primary" }, assignees = { "test-operator" },
+      body = body, source_ref = source_ref(11),
     }
-    local weekly_request = core.weekly_content_issue_request({
-      project = string.rep("p", 12000),
-      week = "2026-W31",
-      repo = "owner/repo",
-      source_ref = source_ref(42),
-    })
-    local schedule_request = core.schedule_issue_request(item)
-
-    t.is_true(#weekly_request.body > 11000)
-    t.is_true(weekly_request.body:find("truncated by marketing-radar issue body guard", 1, true) ~= nil)
-    t.is_true(schedule_request.dedup_key:find("marketing%-radar/") ~= nil)
-    t.is_true(#schedule_request.dedup_key < 420)
+    local authorized = assert(core.classify_issue(payload, {
+      session = session(), issue_author_login = "test-collaborator",
+      authorized_signal_authors = { "test-operator", "test-collaborator" },
+    }))
+    local blocked = assert(core.classify_issue(payload, {
+      session = session(), issue_author_login = "untrusted-author",
+      authorized_signal_authors = { "test-operator", "test-collaborator" },
+    }))
+    t.eq(authorized.status, "awaiting-review")
+    t.eq(authorized.signal_authorized, true)
+    t.eq(blocked.status, "needs-triage")
+    t.eq(blocked.triage_reason, "unauthorized-signal-author")
   end,
 
-  test_radar_run_builds_schedule_issue_request_when_calendar_ref_is_known = function()
-    local classified = core.classify_issue(issue(), {
-      issue_body = [[
-type: radar-run
-project: chronoai
-week: 2026-W31
-calendar-ref: #25
-mode: live
-recurrence: daily
-time: 11:10
-timezone: Asia/Shanghai
-assignee: github-username
-]],
-    })
-    local request = core.schedule_issue_request(classified)
+  test_proposal_round_trip_rejects_tampered_tweet_text = function()
+    local signals = { signal(11) }
+    local proposal = assert(core.build_proposal(signals, session(), draft(signals, "A reviewed update.")))
+    local body = core.render_proposal(proposal)
+    local parsed = assert(core.parse_proposal(body))
+    t.eq(parsed.content_digest, proposal.content_digest)
+    local tampered, why = core.parse_proposal(body:gsub("A reviewed update", "An unapproved replacement"))
+    t.is_nil(tampered)
+    t.eq(why, "proposal-content-digest-mismatch")
+  end,
 
-    t.eq(request.schema, "github-proxy.issue-create.v1")
-    t.is_true(request.body:find("type: schedule-publish", 1, true) ~= nil)
-    t.is_true(request.body:find("calendar-ref: #25", 1, true) ~= nil)
-    t.is_true(request.body:find("mode: live", 1, true) ~= nil)
-    t.is_true(request.body:find("time: 11:10", 1, true) ~= nil)
-    t.eq(request.assignees[1], "github-username")
+  test_request_changes_and_reject_require_a_reason = function()
+    local signals = { signal(11) }
+    local proposal = assert(core.build_proposal(signals, session(), draft(signals, "A reviewed update.")))
+    local body = core.render_proposal(proposal)
+    local issue = {
+      body = body,
+      author_login = "fkst-test-bot",
+      comments = {
+        { id = 1, author_login = "test-operator", body = "/marketing request-changes "
+          .. proposal.proposal_id .. "@" .. proposal.revision },
+      },
+    }
+    local decision, why = core.review_decision(issue, {
+      bot_login = "fkst-test-bot",
+      authorized_reviewers = { "test-operator" },
+    })
+    t.is_nil(decision)
+    t.eq(why, "review-reason-required")
+    issue.comments[1].body = issue.comments[1].body .. " Include the release link."
+    decision = assert(core.review_decision(issue, {
+      bot_login = "fkst-test-bot",
+      authorized_reviewers = { "test-operator" },
+    }))
+    t.eq(decision.command, "request-changes")
+    t.eq(decision.reason, "Include the release link.")
+
+    issue.comments = {
+      { id = 2, author_login = "test-operator", body = "/marketing approve "
+        .. proposal.proposal_id .. "@" .. proposal.revision },
+      { id = 3, author_login = "test-operator", body = "/marketing request-changes "
+        .. proposal.proposal_id .. "@" .. proposal.revision .. " Too late." },
+    }
+    decision = assert(core.review_decision(issue, {
+      bot_login = "app/fkst-test-bot",
+      authorized_reviewers = { "test-operator" },
+    }))
+    t.eq(decision.command, "approve")
+    t.eq(decision.comment_id, 2)
+
+    issue.comments = {
+      { id = 4, author_login = "test-operator", body = "/marketing reject "
+        .. proposal.proposal_id .. "@" .. proposal.revision .. " " .. string.rep("x", 513) },
+    }
+    decision, why = core.review_decision(issue, {
+      bot_login = "fkst-test-bot[bot]",
+      authorized_reviewers = { "test-operator" },
+    })
+    t.is_nil(decision)
+    t.eq(why, "invalid-review-reason")
+  end,
+
+  test_old_revision_approval_is_stale_after_request_changes_revision = function()
+    local signals = { signal(11) }
+    local first = assert(core.build_proposal(
+      signals, session(), draft(signals, "The first reviewed update.", 1)))
+    local second = assert(core.build_proposal(
+      signals, session(), draft(signals, "The requested replacement update.", 2), {
+        proposal_id = first.proposal_id,
+        content_id = first.content_id,
+        content_revision = 2,
+      }))
+    local issue = {
+      body = assert(core.render_proposal(first)),
+      author_login = "fkst-test-bot",
+      comments = {
+        { id = 1, author_login = "fkst-test-bot", body = assert(core.render_proposal(second)) },
+        { id = 2, author_login = "test-operator", body = "/marketing approve "
+          .. first.proposal_id .. "@1" },
+      },
+    }
+    local decision, why = core.review_decision(issue, {
+      bot_login = "fkst-test-bot",
+      authorized_reviewers = { "test-operator" },
+    })
+    t.is_nil(decision)
+    t.eq(why, "stale-proposal-revision")
+  end,
+
+  test_same_revision_with_different_signal_set_is_conflicting_even_when_content_matches = function()
+    local first_signals = { signal(11) }
+    local union_signals = { signal(11), signal(12) }
+    local first = assert(core.build_proposal(
+      first_signals, session(), draft(first_signals, "The same reviewed update.", 1)))
+    local union = assert(core.build_proposal(
+      union_signals, session(), draft(union_signals, "The same reviewed update.", 1), {
+        proposal_id = first.proposal_id,
+        content_id = first.content_id,
+        content_revision = first.content_revision,
+      }))
+    t.eq(first.content_digest, union.content_digest)
+    t.is_true(first.signal_set_digest ~= union.signal_set_digest)
+
+    local latest, why = core.latest_proposal({
+      body = assert(core.render_proposal(first)),
+      author_login = "fkst-test-bot",
+      comments = {
+        { id = 1, author_login = "fkst-test-bot", body = assert(core.render_proposal(union)) },
+      },
+    }, "fkst-test-bot")
+
+    t.is_nil(latest)
+    t.eq(why, "conflicting-bot-proposal-revision")
+  end,
+
+  test_comment_ack_must_match_terminal_handoff_exactly = function()
+    local item = signal(11)
+    local handoff = core.close_handoff(item, "radar-signal")
+    local request = core.status_comment(item, "approved", handoff)
+    t.is_true(request.body:find("publish_attempted: false", 1, true) ~= nil)
+    local payload = {
+      schema = "github-proxy.comment-written.v1",
+      target = "issue",
+      repo = "owner/repo",
+      issue_number = 11,
+      comment_id = "91",
+      request_dedup_key = request.dedup_key,
+      dedup_key = request.dedup_key .. "/written/91",
+      source_ref = source_ref(11),
+      handoff = request.handoff,
+    }
+    local context = assert(core.close_ack_context(payload))
+    t.eq(context.business_digest, item.signal_digest)
+    payload.request_dedup_key = "mismatch"
+    local invalid, why = core.close_ack_context(payload)
+    t.is_nil(invalid)
+    t.eq(why, "invalid-close-correlation")
   end,
 }

@@ -4,7 +4,7 @@ on:
   push:
     branches: [dev, "chore/**", "feat/**", "fix/**"]
   pull_request:
-    branches: [dev]
+    branches: [main, dev]
   workflow_dispatch:
     inputs:
       substrate_ref:
@@ -67,4 +67,6 @@ jobs:
           BIN: ${{ github.workspace }}/fkst-substrate/target/debug/fkst-framework
         run: |
           test -x "$BIN"
+          scripts/run.sh check
           scripts/run.sh test
+          scripts/run.sh test-composed

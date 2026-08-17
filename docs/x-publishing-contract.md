@@ -81,14 +81,16 @@ tweet: Contract verification message
 
 ## NyxID 安全边界 / NyxID Security Boundary
 
-Contract、fixtures、manifest 和文档都不保存账号或 credential。Live write authority 只来自
-运行 FKST session 的用户 Environment Profile；`x-publisher` 继续通过 NyxID CLI broker
-访问 X，并在 write gate、service 或 native capability 缺失时 fail closed。
+Contract、fixtures 与 manifest 不保存 credential，通用测试数据不绑定生产账号。隔离
+验收 Runbook 可以显式记录预期测试账号，但不得记录 raw token 或 credential。Live write
+authority 只来自运行 FKST session 的用户 Environment Profile；`x-publisher` 继续通过
+NyxID CLI broker 访问 X，并在 write gate、service 或 native capability 缺失时 fail closed。
 
-The contract, fixtures, manifest, and documentation store no account or credential. Live write
-authority comes only from the Environment Profile of the user running the FKST session;
-`x-publisher` continues to access X through the NyxID CLI broker and fails closed when the write
-gate, service, or native capability is missing.
+The contract, fixtures, and manifest store no credentials, and generic fixtures are not bound to a
+production account. An isolated acceptance runbook may name the expected test account, but it must
+never contain a raw token or credential. Live write authority comes only from the Environment
+Profile of the user running the FKST session; `x-publisher` continues to access X through the NyxID
+CLI broker and fails closed when the write gate, service, or native capability is missing.
 
 Native Quote provider failure 不会自动降级为 Link Quote。Blocked receipt 只包含稳定
 error code、Trace ID 与安全 semantic metadata，不包含 raw command output。
@@ -112,10 +114,10 @@ a real X write.
 
 ## 稳定发布 / Stable Release
 
-Market PR 合入后，从合入后的 `main` commit 创建 `v0.2.2`。Manifest 与三个展开后的
+Market PR 合入后，从合入后的 `main` commit 创建 `v0.3.0`。Manifest 与三个展开后的
 business package descriptor 必须全部固定到该 tag；不要从 feature branch 创建 tag。
 
-After the market PR merges, create `v0.2.2` from the merged `main` commit. The manifest and all
+After the market PR merges, create `v0.3.0` from the merged `main` commit. The manifest and all
 three expanded business package descriptors must be pinned to that tag. Never create the tag from
 a feature branch.
 
@@ -124,7 +126,7 @@ a feature branch.
 Verify the tag from a clean checkout:
 
 ```bash
-git checkout v0.2.2
+git checkout v0.3.0
 python3 scripts/check_x_publishing_contract.py
 scripts/run.sh check
 scripts/run.sh test x-publisher

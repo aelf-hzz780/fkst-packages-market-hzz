@@ -1,10 +1,16 @@
 local strings = require("contract.strings")
+local session_route = require("contract.session_route")
+local sha256 = require("contract.sha256")
 local dedup_keys = require("x_publisher_dedup_key")
 
 local M = {}
 
 local PUBLISHED_RECEIPT_TITLE = "Auto Twitter marketing: X published"
 local RECEIPT_FIELDS = {
+  account = true,
+  approval_id = true,
+  authenticated_account = true,
+  content_digest = true,
   dedup_key = true,
   platform_post_id = true,
   post_id = true,
@@ -57,11 +63,16 @@ local function x_status_post_id(uri)
   return post_id
 end
 
-function M.trusted_published_receipt(comments, expected_dedup_key, is_authorized_author)
-  if type(comments) ~= "table" or not dedup_keys.is_canonical(expected_dedup_key)
+function M.trusted_published_receipt(comments, expected, is_authorized_author)
+  if type(comments) ~= "table" or type(expected) ~= "table"
+      or not dedup_keys.is_canonical(expected.dedup_key)
+      or not session_route.is_canonical_account(expected.account)
+      or not sha256.is_tagged(expected.content_digest)
+      or type(expected.approval_id) ~= "string" or expected.approval_id == ""
       or type(is_authorized_author) ~= "function" then
     return nil, "published receipt validation unavailable"
   end
+  local expected_dedup_key = expected.dedup_key
   local expected_marker = "<!-- fkst:github-proxy:comment:" .. expected_dedup_key
     .. "/status/x-publish-published -->"
   local evidence = nil
@@ -79,10 +90,14 @@ function M.trusted_published_receipt(comments, expected_dedup_key, is_authorized
       if relevant and (title == PUBLISHED_RECEIPT_TITLE
           or fields.status == "published" or marker_seen) then
         local post_id = x_status_post_id(fields.post_uri)
+        local authenticated = session_route.normalize_account(fields.authenticated_account)
         local ids_match = (fields.platform_post_id == nil or fields.platform_post_id == post_id)
           and (fields.post_id == nil or fields.post_id == post_id)
         local corrupt = duplicate or title ~= PUBLISHED_RECEIPT_TITLE or not marker_seen
           or fields.status ~= "published" or fields.dedup_key ~= expected_dedup_key
+          or fields.account ~= expected.account or authenticated ~= expected.account
+          or fields.content_digest ~= expected.content_digest
+          or fields.approval_id ~= expected.approval_id
           or post_id == nil or not ids_match
         if corrupt then
           return nil, "corrupt published receipt marker"
@@ -90,7 +105,11 @@ function M.trusted_published_receipt(comments, expected_dedup_key, is_authorized
         if evidence ~= nil and evidence.post_id ~= post_id then
           return nil, "conflicting published receipt markers"
         end
-        evidence = evidence or { post_id = post_id, post_uri = fields.post_uri }
+        evidence = evidence or {
+          post_id = post_id,
+          post_uri = fields.post_uri,
+          authenticated_account = authenticated,
+        }
       end
     end
   end

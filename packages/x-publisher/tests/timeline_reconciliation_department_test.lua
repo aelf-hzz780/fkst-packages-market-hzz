@@ -1,5 +1,6 @@
 local t = fkst.test
 local timeline = require("x_timeline_reconciliation")
+local v2 = require("tests.fixtures.v2_publish")
 
 local repo = "owner/repo"
 local account_id = "100000000000000001"
@@ -18,22 +19,33 @@ local function json_escape(value)
     :gsub("\r", "\\r")
 end
 
-local function issue_json(number, body)
+local function issue_json(number, body, options)
+  local opts = options or {}
+  local state = opts.state or "open"
+  local label = opts.label or v2.EFFECTIVE_LABEL
+  local assignee = opts.assignee or v2.CREATOR
   return string.format(
-    '{"number":%d,"title":"Issue %d","body":"%s","html_url":"https://github.example/%s/issues/%d","updated_at":"2026-08-15T00:00:00Z","state":"open","labels":[{"name":"auto-twitter-marketing"}],"assignees":[],"user":{"login":"fkst-test-bot"}}\n',
+    '{"number":%d,"title":"Issue %d","body":"%s","html_url":"https://github.example/%s/issues/%d","updated_at":"2026-08-15T00:00:00Z","state":"%s","labels":[{"name":"%s"}],"assignees":[{"login":"%s"}],"user":{"login":"%s"}}\n',
     number,
     number,
     json_escape(body),
     repo,
-    number
+    number,
+    state,
+    json_escape(label),
+    json_escape(assignee),
+    v2.BOT_LOGIN
   )
 end
 
 local function mock_environment()
   local values = {
     X_PUBLISH_WRITE = "1",
-    NYXID_X_SERVICE_SLUG = "api-twitter-2-media",
-    X_PUBLISH_EXPECTED_USERNAME = "example_user",
+    NYXID_X_SERVICE_SLUG = v2.SERVICE_SLUG,
+    X_PUBLISH_EXPECTED_USERNAME = v2.ACCOUNT,
+    FKST_SESSION_CREATOR = v2.CREATOR,
+    FKST_SESSION_WORK_LABEL = v2.EFFECTIVE_LABEL,
+    FKST_SESSION_WORK_LABEL_MAP_JSON = v2.WORK_LABEL_MAP_JSON,
   }
   for _, name in ipairs({
     "X_PUBLISH_WRITE",
@@ -45,6 +57,19 @@ local function mock_environment()
     "X_PUBLISH_NATIVE_QUOTE",
     "FKST_X_PUBLISH_NATIVE_QUOTE",
     "FKST_SESSION_PACKAGE_ENV_JSON",
+    "FKST_SESSION_CREATOR",
+    "FKST_SESSION_WORK_LABEL",
+    "FKST_SESSION_WORK_LABEL_MAP_JSON",
+  }) do
+    t.mock_command('printf %s "$' .. name .. '"', {
+      stdout = values[name] or "",
+      stderr = "",
+      exit_code = 0,
+    })
+  end
+  for _, name in ipairs({
+    "X_PUBLISH_EXPECTED_USERNAME",
+    "FKST_X_PUBLISH_EXPECTED_USERNAME",
   }) do
     t.mock_command('printf %s "$' .. name .. '"', {
       stdout = values[name] or "",
@@ -74,9 +99,9 @@ local function mock_environment()
   })
 end
 
-local function mock_github(tweet_text)
+local function mock_github(payload, content)
   t.mock_command("gh api repos/" .. repo .. "/issues/43", {
-    stdout = issue_json(43, "type: schedule-publish"),
+    stdout = issue_json(43, v2.schedule_body(payload)),
     stderr = "",
     exit_code = 0,
   })
@@ -86,7 +111,7 @@ local function mock_github(tweet_text)
     exit_code = 0,
   })
   t.mock_command("gh api repos/" .. repo .. "/issues/42", {
-    stdout = issue_json(42, "tweet: " .. tweet_text),
+    stdout = issue_json(42, content.body, { state = "closed" }),
     stderr = "",
     exit_code = 0,
   })
@@ -103,16 +128,16 @@ local function mock_account()
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command("nyxid proxy request api-twitter-2-media '/users/me?user.fields=id,name,username' -m GET", {
+  t.mock_command("nyxid proxy request " .. v2.SERVICE_SLUG .. " '/users/me?user.fields=id,name,username' -m GET", {
     stdout = '{"data":{"id":"' .. account_id
-      .. '","name":"Example User","username":"example_user"}}',
+      .. '","name":"Test Primary","username":"' .. v2.ACCOUNT .. '"}}',
     stderr = "",
     exit_code = 0,
   })
 end
 
 local function mock_timeline(path, response, exit_code)
-  t.mock_command("nyxid proxy request api-twitter-2-media '" .. path .. "' -m GET", {
+  t.mock_command("nyxid proxy request " .. v2.SERVICE_SLUG .. " '" .. path .. "' -m GET", {
     stdout = response or "",
     stderr = exit_code == 0 and "" or "timeline read failed",
     exit_code = exit_code,
@@ -133,28 +158,23 @@ local function count_calls(needle)
   return count
 end
 
-local function payload(suffix)
-  return {
-    artifact_id = "artifact-reconcile-" .. suffix,
-    source_ref = { kind = "external", ref = repo .. "#issue/43" },
-    content_ref = "#42",
-    platform = "x",
-    channel = "live",
-    dedup_key = "dedup-reconcile-" .. suffix,
-    trace_id = "trace-reconcile-" .. suffix,
+local function payload(suffix, content)
+  return v2.payload("reconcile-" .. suffix, content, {
     scheduled_at = scheduled_at,
     metadata = { schedule_type = "one-shot" },
-  }
+  })
 end
 
 local function run_publish(suffix, tweet_text)
   run_counter = run_counter + 1
+  local content = v2.content({ tweet_text = tweet_text })
+  local publish_payload = payload(suffix, content)
   mock_environment()
-  mock_github(tweet_text)
+  mock_github(publish_payload, content)
   mock_account()
   return t.run_department("departments/publish_x/main.lua", {
     queue = "x_publish_request",
-    payload = payload(suffix),
+    payload = publish_payload,
   }, {
     env = {
       FKST_RUNTIME_ROOT = "/tmp/fkst-marketing-test/x-reconcile/runtime-"
@@ -183,18 +203,19 @@ return {
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].payload.status, "published")
     t.eq(result.raises[1].payload.platform_post_id, post_id)
-    t.eq(result.raises[1].payload.account_username, "example_user")
+    t.eq(result.raises[1].payload.account, v2.ACCOUNT)
+    t.eq(result.raises[1].payload.authenticated_account, v2.ACCOUNT)
     t.eq(result.raises[1].payload.scheduled_at, scheduled_at)
     t.eq(result.raises[1].payload.metadata.schedule_type, "one-shot")
     t.eq(count_calls("/users/" .. account_id .. "/tweets"), 1)
-    t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 0)
+    t.eq(count_calls("nyxid proxy request " .. v2.SERVICE_SLUG .. " /tweets -m POST"), 0)
   end,
 
   test_empty_timeline_continues_to_single_provider_post = function()
     local text = "not published yet"
     local post_id = "2088000000000000002"
     mock_timeline(first_path, '{"meta":{"result_count":0}}', 0)
-    t.mock_command("nyxid proxy request api-twitter-2-media /tweets -m POST", {
+    t.mock_command("nyxid proxy request " .. v2.SERVICE_SLUG .. " /tweets -m POST", {
       stdout = '{"data":{"id":"' .. post_id .. '"}}',
       stderr = "",
       exit_code = 0,
@@ -205,7 +226,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(result.raises[1].payload.status, "published")
     t.eq(result.raises[1].payload.platform_post_id, post_id)
-    t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 1)
+    t.eq(count_calls("nyxid proxy request " .. v2.SERVICE_SLUG .. " /tweets -m POST"), 1)
   end,
 
   test_ambiguous_timeline_matches_fail_closed = function()
@@ -220,7 +241,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(result.raises[1].payload.status, "blocked")
     t.eq(result.raises[1].payload.blocked_reason, "ambiguous X timeline publish match")
-    t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 0)
+    t.eq(count_calls("nyxid proxy request " .. v2.SERVICE_SLUG .. " /tweets -m POST"), 0)
   end,
 
   test_timeline_read_failure_fails_closed = function()
@@ -231,7 +252,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(result.raises[1].payload.status, "blocked")
     t.eq(result.raises[1].payload.blocked_reason, "nyxid timeline reconciliation failed")
-    t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 0)
+    t.eq(count_calls("nyxid proxy request " .. v2.SERVICE_SLUG .. " /tweets -m POST"), 0)
   end,
 
   test_problem_json_with_zero_exit_fails_closed = function()
@@ -242,7 +263,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(result.raises[1].payload.status, "blocked")
     t.eq(result.raises[1].payload.blocked_reason, "invalid X timeline reconciliation response")
-    t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 0)
+    t.eq(count_calls("nyxid proxy request " .. v2.SERVICE_SLUG .. " /tweets -m POST"), 0)
   end,
 
   test_reconciliation_scans_all_pages_before_recovering = function()
@@ -259,7 +280,7 @@ return {
     t.eq(result.raises[1].payload.status, "published")
     t.eq(result.raises[1].payload.platform_post_id, post_id)
     t.eq(count_calls("/users/" .. account_id .. "/tweets"), 2)
-    t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 0)
+    t.eq(count_calls("nyxid proxy request " .. v2.SERVICE_SLUG .. " /tweets -m POST"), 0)
   end,
 
   test_reconciliation_fails_closed_when_five_pages_are_not_terminal = function()
@@ -277,6 +298,6 @@ return {
     t.eq(result.raises[1].payload.status, "blocked")
     t.eq(result.raises[1].payload.blocked_reason, "incomplete X timeline reconciliation")
     t.eq(count_calls("/users/" .. account_id .. "/tweets"), timeline.max_timeline_pages())
-    t.eq(count_calls("nyxid proxy request api-twitter-2-media /tweets -m POST"), 0)
+    t.eq(count_calls("nyxid proxy request " .. v2.SERVICE_SLUG .. " /tweets -m POST"), 0)
   end,
 }

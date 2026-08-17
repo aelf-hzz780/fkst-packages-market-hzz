@@ -1,11 +1,25 @@
 local core = require("core")
 
 return {
+  PROPOSAL_CONTRACT = core.PROPOSAL_CONTRACT,
+  approved_weekly_content_issue_request = core.approved_weekly_content_issue_request,
+  build_proposal = core.build_proposal,
+  canonical_issue_source_ref = core.canonical_issue_source_ref,
   classify_issue = core.classify_issue,
-  radar_brief_created = core.radar_brief_created,
+  close_handoff = core.close_handoff,
+  latest_proposal = core.latest_proposal,
+  normalized_login = core.normalized_login,
+  parse_control_fields = core.parse_control_fields,
+  parse_proposal = core.parse_proposal,
+  proposal_group_key = core.proposal_group_key,
+  proposal_revision_comment_request = core.proposal_revision_comment_request,
   radar_config_imported = core.radar_config_imported,
   radar_signal_imported = core.radar_signal_imported,
-  schedule_issue_request = core.schedule_issue_request,
+  resolve_session_authority = core.resolve_session_authority,
+  resolve_session_route = core.resolve_session_route,
+  review_decision = core.review_decision,
+  runtime_segment = core.runtime_segment,
+  signal_set_identity = core.signal_set_identity,
   status_comment = core.status_comment,
-  weekly_content_issue_request = core.weekly_content_issue_request,
+  weekly_plan_change_issue_request = core.weekly_plan_change_issue_request,
 }

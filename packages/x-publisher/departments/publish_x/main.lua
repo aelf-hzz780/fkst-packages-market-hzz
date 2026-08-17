@@ -1,8 +1,11 @@
 -- x-publisher/publish_x - the X release seam. Shadow mode emits a preview receipt. Live mode
 -- fails closed unless host env explicitly enables writes and supplies a NyxID X service slug.
 local publish_caps = require("publish_x_caps")
+local marketing_content = require("contract.marketing_content")
+local marketing_schedule = require("contract.marketing_schedule")
 local ports_lib = require("forge.ports")
 local content_filter = require("forge.github.content_filter")
+local session_route = require("contract.session_route")
 local saga = require("workflow.saga")
 local env = require("workflow.env")
 local strings = require("contract.strings")
@@ -21,6 +24,9 @@ local VALUE_ENV = {
   FKST_DEVLOOP_MANAGED_BOT_LOGINS = true,
   FKST_GITHUB_AUTHORIZED_LOGINS = true,
   FKST_GITHUB_BOT_LOGIN = true,
+  FKST_SESSION_CREATOR = true,
+  FKST_SESSION_WORK_LABEL = true,
+  FKST_SESSION_WORK_LABEL_MAP_JSON = true,
   FKST_NYXID_X_SERVICE_SLUG = true,
   FKST_X_PUBLISH_NATIVE_QUOTE = true,
   FKST_X_PUBLISH_EXPECTED_USERNAME = true,
@@ -93,12 +99,65 @@ local function native_quote_enabled()
   return strings.trim(package_env.get("FKST_X_PUBLISH_NATIVE_QUOTE") or "") == "1"
 end
 
-local function live_options()
+local function expected_account_config()
+  local primary_raw = strings.trim(read_env("X_PUBLISH_EXPECTED_USERNAME") or "")
+  local fallback_raw = strings.trim(read_env("FKST_X_PUBLISH_EXPECTED_USERNAME") or "")
+  local primary = primary_raw ~= "" and session_route.normalize_account(primary_raw) or nil
+  local fallback = fallback_raw ~= "" and session_route.normalize_account(fallback_raw) or nil
+  if (primary_raw ~= "" and primary == nil)
+      or (fallback_raw ~= "" and fallback == nil) then
+    return nil, "missing or invalid expected account"
+  end
+  if primary ~= nil and fallback ~= nil and primary ~= fallback then
+    return nil, "conflicting expected account"
+  end
+  local expected = primary or fallback
+  if expected == nil then
+    return nil, "missing or invalid expected account"
+  end
+  return expected, nil
+end
+
+local function session_context()
+  local expected_account, expected_why = expected_account_config()
+  if expected_account == nil then
+    return nil, expected_why
+  end
+  local effective_label = first_non_empty_env({ "FKST_SESSION_WORK_LABEL" })
+  local route, route_why = session_route.resolve(
+    effective_label,
+    first_non_empty_env({ "FKST_SESSION_WORK_LABEL_MAP_JSON" })
+  )
+  if route == nil then
+    return nil, route_why
+  end
+  local creator = session_route.single_assignee({
+    first_non_empty_env({ "FKST_SESSION_CREATOR" }),
+  })
+  if creator == nil then
+    return nil, "missing or invalid session creator"
+  end
+  route.account = expected_account
+  route.creator = creator
+  return route, nil
+end
+
+local function request_matches_session(payload, context)
+  if payload.account ~= context.account then
+    return false, "request account mismatch"
+  end
+  if payload.work_label ~= context.logical_label then
+    return false, "request work label mismatch"
+  end
+  return true, nil
+end
+
+local function live_options(expected_account)
   local write_gate = first_non_empty_env({ "X_PUBLISH_WRITE", "FKST_X_PUBLISH_WRITE" })
   return {
     live_write_enabled = write_gate == "1",
     nyxid_x_service = first_non_empty_env({ "NYXID_X_SERVICE_SLUG", "FKST_NYXID_X_SERVICE_SLUG" }),
-    expected_username = first_non_empty_env({ "X_PUBLISH_EXPECTED_USERNAME", "FKST_X_PUBLISH_EXPECTED_USERNAME" }),
+    expected_username = expected_account,
     nyxid_access_token_present = strings.trim(read_env_presence("NYXID_ACCESS_TOKEN") or "") == "1",
   }
 end
@@ -121,10 +180,13 @@ local function live_environment_ready(options)
   return true, nil
 end
 
-local function block(payload, reason, intent)
+local function block(payload, reason, intent, authenticated_account, publish_attempted)
   log.warn("x-publisher dept=publish_x tag=BLOCKED reason=" .. tostring(reason)
     .. " artifact_id=" .. tostring(payload.artifact_id))
-  raise("x_published", publish_caps.blocked_receipt(payload, reason, intent))
+  raise("x_published", publish_caps.blocked_receipt(payload, reason, intent, {
+    authenticated_account = authenticated_account,
+    publish_attempted = publish_attempted,
+  }))
 end
 
 local function skip_duplicate(payload)
@@ -154,61 +216,152 @@ local function preflight_account(payload, options, required)
   if account == nil then
     return nil, "nyxid account preflight failed"
   end
-  if options.expected_username ~= "" and account.username ~= options.expected_username then
-    return nil, "unexpected account"
+  local authenticated_account = session_route.normalize_account(account.username)
+  if authenticated_account == nil then
+    return nil, "nyxid account preflight failed"
+  end
+  account.username = authenticated_account
+  if options.expected_username ~= "" and authenticated_account ~= options.expected_username then
+    return account, "unexpected account"
   end
   log.info("x-publisher dept=publish_x tag=ACCOUNT_OK artifact_id=" .. tostring(payload.artifact_id)
     .. " username=" .. tostring(account.username))
   return account, nil
 end
 
-local function resolve_publish_intent(github, payload)
-  local content_ref, ref_why = publish_caps.content_source_ref(payload)
-  if content_ref == nil then
-    return nil, ref_why
-  end
+local function issue_is_routed(issue, context)
+  return session_route.has_label(issue and issue.labels, context.effective_label)
+    and session_route.single_assignee(issue and issue.assignees) == context.creator
+end
+
+local function read_fresh_issue(github, source_ref, consumer)
   if github == nil or type(github.read_issue) ~= "function" then
-    return nil, "github content resolver unavailable"
+    return nil, "github resolver unavailable"
   end
   local ok, issue = pcall(function()
-    return github.read_issue(content_ref, {
-      consumer = "x-publisher",
+    return github.read_issue(source_ref, {
+      consumer = consumer,
       force_fresh = true,
     })
   end)
   if not ok or type(issue) ~= "table" then
-    return nil, "github content read failed"
+    return nil, "github issue read failed"
   end
-  return publish_caps.extract_publish_intent(issue.body, payload)
+  return issue, nil
 end
 
-local function resolve_prior_publish(github, payload)
-  if github == nil or type(github.read_issue) ~= "function"
-      or type(github.is_authorized_author) ~= "function" then
+local function resolve_schedule(github, payload, context)
+  local issue, read_why = read_fresh_issue(github, payload.source_ref, "x-publisher-schedule-guard")
+  if issue == nil then
+    return nil, nil, read_why
+  end
+  if tostring(issue.state or ""):upper() ~= "OPEN" then
+    return nil, nil, "schedule issue is not open"
+  end
+  if not issue_is_routed(issue, context) then
+    return nil, nil, "schedule route mismatch"
+  end
+  local schedule, schedule_why = marketing_schedule.parse(issue.body)
+  if schedule == nil then
+    return nil, nil, schedule_why
+  end
+  if schedule.account ~= payload.account or schedule.work_label ~= payload.work_label
+      or schedule.content_ref ~= payload.content_ref
+      or schedule.content_digest ~= payload.content_digest
+      or schedule.approval_id ~= payload.approval_id
+      or schedule.mode ~= payload.channel then
+    return nil, nil, "schedule request correlation mismatch"
+  end
+  if schedule.schedule_digest ~= payload.schedule_digest then
+    return nil, nil, "schedule digest mismatch"
+  end
+  if schedule.type == "schedule-publish" and schedule.scheduled_at ~= payload.scheduled_at then
+    return nil, nil, "schedule occurrence mismatch"
+  end
+  return issue, schedule, nil
+end
+
+local function bot_comment_authorized(github, login)
+  if github.is_authorized_author(login) ~= true then
+    return false
+  end
+  local receipt_whitelist = content_filter.policy_whitelist(
+    receipt_author_options.trusted_author_policy
+  )
+  return content_filter.is_authorized(login, receipt_whitelist)
+end
+
+local function content_is_superseded(github, issue, digest)
+  local marker = '<!-- fkst:auto-twitter:content-superseded:v2 content_digest="'
+    .. tostring(digest) .. '" -->'
+  for _, comment in ipairs(issue.comments or {}) do
+    if type(comment) == "table"
+        and bot_comment_authorized(github, comment.author_login)
+        and tostring(comment.body or ""):find(marker, 1, true) ~= nil then
+      return true
+    end
+  end
+  return false
+end
+
+local function resolve_publish_intent(github, payload, context)
+  local content_ref, ref_why = publish_caps.content_source_ref(payload)
+  if content_ref == nil then
+    return nil, nil, ref_why
+  end
+  local issue, read_why = read_fresh_issue(github, content_ref, "x-publisher-content-guard")
+  if issue == nil then
+    return nil, nil, read_why
+  end
+  if tostring(issue.state or ""):upper() ~= "CLOSED" then
+    return nil, nil, "content issue is not immutable"
+  end
+  if not issue_is_routed(issue, context) then
+    return nil, nil, "content route mismatch"
+  end
+  local trusted_authors = content_filter.policy_whitelist(
+    receipt_author_options.trusted_author_policy
+  )
+  if not content_filter.is_authorized(issue.author_login, trusted_authors) then
+    return nil, nil, "content author mismatch"
+  end
+  local content, content_why = marketing_content.parse(issue.body)
+  if content == nil then
+    return nil, nil, content_why
+  end
+  if content.account ~= payload.account or content.work_label ~= payload.work_label
+      or content.content_digest ~= payload.content_digest
+      or content.approval_id ~= payload.approval_id then
+    return nil, nil, "content request correlation mismatch"
+  end
+  if content_is_superseded(github, issue, content.content_digest) then
+    return nil, nil, "content revision superseded"
+  end
+  local intent, intent_why = publish_caps.extract_publish_intent(issue.body, payload)
+  if intent == nil then
+    return nil, nil, intent_why
+  end
+  return intent, content, nil, issue
+end
+
+local function resolve_prior_publish(github, payload, schedule_issue, content_issue)
+  if github == nil or type(github.is_authorized_author) ~= "function" then
     return nil, "github publish receipt resolver unavailable"
   end
-  local ok, issue = pcall(function()
-    return github.read_issue(payload.source_ref, {
-      consumer = "x-publisher-publish-guard",
-      force_fresh = true,
-    })
-  end)
-  if not ok or type(issue) ~= "table" or type(issue.comments) ~= "table" then
+  if type(schedule_issue) ~= "table" or type(schedule_issue.comments) ~= "table"
+      or type(content_issue) ~= "table" or type(content_issue.comments) ~= "table" then
     return nil, "github publish receipt read failed"
   end
-  return publish_caps.trusted_published_receipt(
-    issue.comments,
-    payload.dedup_key,
-    function(login)
-      if github.is_authorized_author(login) ~= true then
-        return false
-      end
-      local receipt_whitelist = content_filter.policy_whitelist(
-        receipt_author_options.trusted_author_policy
-      )
-      return content_filter.is_authorized(login, receipt_whitelist)
+  local authorized = function(login)
+    return bot_comment_authorized(github, login)
+  end
+  for _, comments in ipairs({ schedule_issue.comments, content_issue.comments }) do
+    local prior, why = publish_caps.trusted_published_receipt(comments, payload, authorized)
+    if why ~= nil or prior ~= nil then
+      return prior, why
     end
-  )
+  end
+  return nil, nil
 end
 
 local function publish_tweet(payload, options, username, intent)
@@ -308,7 +461,28 @@ local function make_department(ports)
       return
     end
 
-    local options = live_options()
+    local context, context_why = session_context()
+    if context == nil then
+      block(payload, context_why)
+      return
+    end
+    local session_ok, session_why = request_matches_session(payload, context)
+    if not session_ok then
+      block(payload, session_why)
+      return
+    end
+    local schedule_issue, _schedule, schedule_why = resolve_schedule(github, payload, context)
+    if schedule_issue == nil then
+      block(payload, schedule_why)
+      return
+    end
+    local intent, _content, intent_why, content_issue = resolve_publish_intent(github, payload, context)
+    if intent == nil then
+      block(payload, intent_why)
+      return
+    end
+
+    local options = live_options(context.account)
     local live_ok, live_why = publish_caps.live_gate(payload, options)
     if not live_ok then
       if tostring(payload.channel or ""):lower() == "live" then
@@ -328,13 +502,18 @@ local function make_department(ports)
       return
     end
 
-    local prior_publish, prior_why = resolve_prior_publish(github, payload)
+    local prior_publish, prior_why = resolve_prior_publish(
+      github, payload, schedule_issue, content_issue)
     if prior_why ~= nil then
       block(payload, prior_why)
       return
     end
     if prior_publish ~= nil then
-      local receipt = publish_caps.live_receipt(payload, { id = prior_publish.post_id })
+      local receipt = publish_caps.live_receipt(payload, {
+        id = prior_publish.post_id,
+        username = prior_publish.authenticated_account,
+        intent = intent,
+      })
       log.info("x-publisher dept=publish_x tag=REPLAY_PUBLISHED artifact_id="
         .. tostring(payload.artifact_id) .. " post_uri=" .. tostring(receipt.post_uri))
       raise("x_published", receipt)
@@ -347,20 +526,14 @@ local function make_department(ports)
       return
     end
 
-    local intent, intent_why = resolve_publish_intent(github, payload)
-    if intent == nil then
-      block(payload, intent_why)
-      return
-    end
-
     local window, window_why = publish_caps.reconciliation_window(payload, now())
     if window_why ~= nil then
       block(payload, window_why, intent)
       return
     end
-    local account, account_why = preflight_account(payload, options, window ~= nil)
+    local account, account_why = preflight_account(payload, options, true)
     if account_why ~= nil then
-      block(payload, account_why, intent)
+      block(payload, account_why, intent, account and account.username or nil)
       return
     end
     local reconciled_post_id, reconcile_why = reconcile_timeline_publish(
@@ -400,7 +573,7 @@ local function make_department(ports)
         intent
       )
       if receipt == nil then
-        block(payload, publish_why, intent)
+        block(payload, publish_why, intent, account and account.username or nil, true)
         return
       end
       log.info("x-publisher dept=publish_x tag=PUBLISHED artifact_id=" .. tostring(payload.artifact_id)
