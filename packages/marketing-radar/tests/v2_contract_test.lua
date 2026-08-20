@@ -91,6 +91,20 @@ local function draft(signals, tweet_text, revision)
   }
 end
 
+local function materialized_issue_body(request)
+  return request.body .. "\n\n<!-- fkst:github-proxy:issue-create:"
+    .. request.dedup_key .. " -->"
+end
+
+local function review_command(command, proposal, reason, revision)
+  local body = "/marketing " .. command .. " " .. proposal.proposal_id .. "@"
+    .. tostring(revision ~= nil and revision or proposal.revision) .. " " .. proposal.proposal_digest
+  if reason ~= nil and reason ~= "" then
+    body = body .. " " .. reason
+  end
+  return body
+end
+
 return {
   test_session_authority_resolves_effective_and_reverse_mapped_logical_label = function()
     local authority = core.resolve_session_authority({
@@ -289,10 +303,10 @@ return {
     local proposal = core.build_proposal({ one }, session(), draft({ one }, "A reviewed FKST weekly update."))
     local review = core.weekly_plan_change_issue_request(proposal, session())
     local current = {
-      body = review.body,
+      body = materialized_issue_body(review),
       author_login = "fkst-test-bot",
       comments = {
-        { id = 1, author_login = "outsider", body = "/marketing approve " .. proposal.proposal_id .. "@" .. proposal.revision },
+        { id = 1, author_login = "outsider", body = review_command("approve", proposal) },
       },
     }
 
@@ -304,7 +318,7 @@ return {
     t.eq(why, "unauthorized-review-command")
 
     current.comments[1].author_login = "test-operator"
-    current.comments[1].body = "/marketing approve " .. proposal.proposal_id .. "@stale"
+    current.comments[1].body = review_command("approve", proposal, nil, "stale")
     decision, why = core.review_decision(current, {
       bot_login = "fkst-test-bot",
       authorized_reviewers = { "test-operator" },
@@ -312,7 +326,7 @@ return {
     t.is_nil(decision)
     t.eq(why, "stale-proposal-revision")
 
-    current.comments[1].body = "/marketing approve " .. proposal.proposal_id .. "@" .. proposal.revision
+    current.comments[1].body = review_command("approve", proposal)
     decision = core.review_decision(current, {
       bot_login = "fkst-test-bot",
       authorized_reviewers = { "test-operator" },

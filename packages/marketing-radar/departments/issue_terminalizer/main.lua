@@ -93,19 +93,31 @@ local function make_department(handles)
     return with_lock(key, fn)
   end
 
-  local function fresh_issue(context)
+  local function fresh_issue(source_ref, consumer)
     if type(github) ~= "table" or type(github.read_issue) ~= "function" then
       error("marketing-radar: terminal GitHub read port unavailable", 0)
     end
-    return github.read_issue(context.source_ref, {
+    return github.read_issue(source_ref, {
       force_fresh = true,
-      consumer = "marketing-radar-v2-terminalizer",
+      consumer = consumer,
     })
   end
 
+  local function current_state(context)
+    local current = fresh_issue(
+      context.source_ref, "marketing-radar-v2-terminalizer-target")
+    local review = nil
+    if context.kind == "radar-signal" then
+      review = fresh_issue(
+        context.review_source_ref, "marketing-radar-v2-terminalizer-review")
+    end
+    return current, review
+  end
+
   local function reconcile(context)
-    local current = fresh_issue(context)
-    local decision, why = core.current_close_decision(current, context, review_options())
+    local current, review = current_state(context)
+    local decision, why = core.current_close_decision(
+      current, context, review_options(), review)
     if decision == "converged" then
       log.info("marketing-radar dept=issue_terminalizer tag=CONVERGED reason=" .. tostring(why))
       return
@@ -119,9 +131,10 @@ local function make_department(handles)
       log.info("marketing-radar dept=issue_terminalizer tag=CLOSED trace_id=" .. tostring(context.trace_id))
       return
     end
-    local reread_ok, reread = pcall(fresh_issue, context)
+    local reread_ok, reread, review_reread = pcall(current_state, context)
     if reread_ok then
-      local after = core.current_close_decision(reread, context, review_options())
+      local after = core.current_close_decision(
+        reread, context, review_options(), review_reread)
       if after == "converged" then
         log.info("marketing-radar dept=issue_terminalizer tag=CONVERGED reason=close-response-lost")
         return

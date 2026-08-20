@@ -3,13 +3,14 @@ local v2 = require("tests.fixtures.v2_publish")
 
 local repo = "owner/repo"
 local run_counter = 0
+local process_token = tostring({}):gsub("[^%w]", "")
 local prepare_github_live_read
 local fixture_by_dedup_key = {}
 
 local function unique_root(label)
   run_counter = run_counter + 1
   return "/tmp/fkst-marketing-test/x-publisher/" .. tostring(label)
-    .. "-" .. tostring(now()) .. "-" .. tostring(run_counter)
+    .. "-" .. process_token .. "-" .. tostring(now()) .. "-" .. tostring(run_counter)
 end
 
 local function event(payload)

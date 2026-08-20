@@ -2,15 +2,19 @@ name: ci
 
 on:
   push:
-    branches: [dev, "chore/**", "feat/**", "fix/**"]
+    branches: [dev, "chore/**", "feat/**", "fix/**", "docs/**", "refactor/**", "test/**"]
+    tags: ["v*"]
   pull_request:
     branches: [main, dev]
   workflow_dispatch:
     inputs:
       substrate_ref:
-        description: "fkst-substrate ref to build fkst-framework from"
+        description: "Optional alternate fkst-substrate ref for the separate diagnostic job"
         default: ""
         required: false
+
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -25,27 +29,26 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Resolve fkst-substrate ref
+      - name: Resolve tracked fkst-substrate SHA
         id: substrate_ref
         shell: bash
         run: |
           set -euo pipefail
-          ref="${{ github.event.inputs.substrate_ref }}"
-          if [ -z "$ref" ]; then
-            ref="$(sed -n '1{s/[[:space:]]//g;p;q}' .fkst/substrate-ref 2>/dev/null || true)"
-          fi
-          if [ -z "$ref" ]; then
-            ref="dev"
+          ref="$(sed -n '1p' .fkst/substrate-ref 2>/dev/null || true)"
+          lines="$(awk 'END { print NR }' .fkst/substrate-ref 2>/dev/null || true)"
+          if [ "$lines" != "1" ] || [[ ! "$ref" =~ ^[0-9a-f]{40}$ ]]; then
+            echo ".fkst/substrate-ref must contain exactly one lowercase 40-character SHA" >&2
+            exit 2
           fi
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
-          echo "fkst-substrate ref: $ref"
+          echo "tracked fkst-substrate SHA: $ref"
 
       - name: Checkout fkst-substrate
         uses: actions/checkout@v4
         with:
           repository: ChronoAIProject/fkst-substrate
           ref: ${{ steps.substrate_ref.outputs.ref }}
-          path: fkst-substrate
+          path: .fkst/run/fkst-substrate
 
       - name: Install stable Rust
         run: |
@@ -56,15 +59,70 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: fkst-substrate
+          workspaces: .fkst/run/fkst-substrate
 
       - name: Build fkst-framework
-        working-directory: fkst-substrate
+        working-directory: .fkst/run/fkst-substrate
         run: cargo build -p fkst-framework
 
-      - name: Run marketing package tests
+      - name: Run release formal gate
         env:
-          BIN: ${{ github.workspace }}/fkst-substrate/target/debug/fkst-framework
+          BIN: ${{ github.workspace }}/.fkst/run/fkst-substrate/target/debug/fkst-framework
+          FKST_FRAMEWORK_SOURCE_ROOT: ${{ github.workspace }}/.fkst/run/fkst-substrate
+        run: |
+          test -x "$BIN"
+          scripts/run.sh formal-gate
+
+  diagnostic:
+    name: framework diagnostic
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.substrate_ref != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout marketing packages
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout alternate fkst-substrate ref
+        uses: actions/checkout@v4
+        with:
+          repository: ChronoAIProject/fkst-substrate
+          ref: ${{ inputs.substrate_ref }}
+          path: .fkst/run/fkst-substrate
+
+      - name: Resolve alternate framework SHA
+        id: framework_override
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="$(git -C .fkst/run/fkst-substrate rev-parse HEAD)"
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "alternate framework did not resolve to a full SHA" >&2
+            exit 2
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "diagnostic fkst-substrate SHA: $sha"
+
+      - name: Install stable Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .fkst/run/fkst-substrate
+
+      - name: Build alternate fkst-framework
+        working-directory: .fkst/run/fkst-substrate
+        run: cargo build -p fkst-framework
+
+      - name: Run diagnostic marketing package tests
+        env:
+          BIN: ${{ github.workspace }}/.fkst/run/fkst-substrate/target/debug/fkst-framework
+          FKST_FRAMEWORK_EXPECTED_SHA: ${{ steps.framework_override.outputs.sha }}
+          FKST_FRAMEWORK_SOURCE_ROOT: ${{ github.workspace }}/.fkst/run/fkst-substrate
         run: |
           test -x "$BIN"
           scripts/run.sh check

@@ -115,6 +115,34 @@ return {
     local invalid, invalid_why = marketing_content.parse(tampered)
     t.is_nil(invalid)
     t.eq(invalid_why, "content digest mismatch")
+
+    local fenced_text = table.concat({
+      "A reviewed post with literal Markdown.",
+      "```",
+      "operation: quote",
+      "quote-mode: native",
+      "account: another_account",
+      "```trailing text",
+    }, "\n")
+    local fenced_body, fenced_digest = marketing_content.render({
+      project = v2.PROJECT,
+      account = v2.ACCOUNT,
+      work_label = v2.LOGICAL_LABEL,
+      week = "2026-W33",
+      content_id = "test-primary-w33-fenced",
+      content_revision = 1,
+      proposal_id = "proposal-test-primary-w33-fenced",
+      proposal_revision = 1,
+      approval_id = "proposal-test-primary-w33-fenced@1",
+      content_status = "approved",
+      tweet_text = fenced_text,
+    })
+    local fenced_parsed = assert(marketing_content.parse(fenced_body))
+    local publish_intent = assert(core.extract_publish_intent(fenced_body))
+    t.eq(fenced_parsed.content_digest, fenced_digest)
+    t.eq(fenced_parsed.tweet_text, fenced_text)
+    t.eq(publish_intent.operation, "post")
+    t.eq(publish_intent.text, fenced_text)
   end,
 
   test_v2_content_requires_explicit_contract_identity = function()

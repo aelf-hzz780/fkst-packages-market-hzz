@@ -1,6 +1,7 @@
 -- x-publisher/core.lua - pure, side-effect-free publish contract helpers. Payloads carry only
 -- small control fields and a source_ref pointer; post content is re-fetched by the host seam.
 local M = {}
+local markdown_fields = require("contract.markdown_fields")
 local session_route = require("contract.session_route")
 local sha256 = require("contract.sha256")
 local strings = require("contract.strings")
@@ -517,22 +518,20 @@ local function normalize_tweet_text(text, payload, transformed_urls)
 end
 
 local function extract_tweet_text_value(body)
-  local text = tostring(body or "")
-  for _, marker in ipairs({ "tweet%-text", "tweet", "x%-post", "post" }) do
-    local fenced = text:match(marker .. "%s*:%s*```[^\n]*\n(.-)\n```")
-    if fenced ~= nil then
-      return fenced
-    end
-  end
-  for line in text:gmatch("[^\r\n]+") do
-    for _, marker in ipairs({ "tweet%-text", "tweet", "x%-post", "post" }) do
-      local inline = line:match("^%s*" .. marker .. "%s*:%s*(.-)%s*$")
-      if inline ~= nil and strings.trim(inline) ~= "" and inline:sub(1, 3) ~= "```" then
-        return inline
+  local found = nil
+  for _, field in ipairs({ "tweet-text", "tweet", "x-post", "post" }) do
+    local value, why = markdown_fields.fenced_field(body, field)
+    if value ~= nil then
+      if found ~= nil then
+        return nil, "duplicate tweet text"
       end
+      found = value
+    elseif why == "duplicate-fenced-field:" .. field
+        or why == "unterminated-markdown-fence" then
+      return nil, why
     end
   end
-  return nil, "missing tweet text"
+  return found, found ~= nil and nil or "missing tweet text"
 end
 
 function M.extract_tweet_text(body, payload)
@@ -552,12 +551,13 @@ local QUOTE_CONTROL_FIELDS = {
 local function content_control_fields(body)
   local fields = {}
   local seen = {}
-  local in_fence = false
-  local text = tostring(body or ""):gsub("\r\n", "\n"):gsub("\r", "\n") .. "\n"
-  for line in text:gmatch("(.-)\n") do
-    if line:match("^%s*```") then
-      in_fence = not in_fence
-    elseif not in_fence then
+  local tokens, token_why = markdown_fields.tokenize(tostring(body or ""))
+  if tokens == nil or token_why ~= nil then
+    return nil, token_why or "invalid content body"
+  end
+  for _, token in ipairs(tokens) do
+    if token.kind == "text" then
+      local line = token.line
       local key, value = line:match("^%s*([%w_-]+)%s*:%s*(.-)%s*$")
       local normalized = tostring(key or ""):lower():gsub("_", "-")
       if QUOTE_CONTROL_FIELDS[normalized] then

@@ -2,9 +2,7 @@ local core = require("core")
 local marketing_content = require("contract.marketing_content")
 local testing = require("testkit.testing")
 local t = fkst.test
-
 local repo = "owner/repo"
-
 local function session()
   return {
     effective_work_label = "host-test-primary",
@@ -13,12 +11,10 @@ local function session()
     account = "test_primary",
   }
 end
-
 local function source_ref(number)
   local ref = repo .. "#issue/" .. tostring(number)
   return { kind = "external", ref = ref, reference = ref }
 end
-
 local function signal_body(number, overrides)
   local fields = {
     contract = "marketing-radar.radar-signal.v2",
@@ -43,7 +39,6 @@ local function signal_body(number, overrides)
   end
   return table.concat(lines, "\n")
 end
-
 local function signal_issue(number, overrides)
   local issue = {
     number = number,
@@ -60,7 +55,6 @@ local function signal_issue(number, overrides)
   end
   return issue
 end
-
 local function row(issue)
   return {
     number = issue.number,
@@ -71,7 +65,6 @@ local function row(issue)
     author = { login = issue.author_login },
   }
 end
-
 local function rest_row(number, body, state)
   return {
     number = number,
@@ -82,7 +75,6 @@ local function rest_row(number, body, state)
     user = { login = "fkst-test-bot" },
   }
 end
-
 local function event(issue)
   return {
     queue = "github-proxy.github_issue_changed",
@@ -98,10 +90,9 @@ local function event(issue)
     source_ref = source_ref(issue.number),
   }
 end
-
 local function github_port(issues, catalog, all_catalog)
   local github = { reads = {} }
-  function github.read_issue(ref, _options)
+  function github.read_issue(ref, options)
     github.reads[#github.reads + 1] = ref.ref
     local number = tonumber(ref.ref:match("#issue/(%d+)$"))
     return issues[number]
@@ -132,6 +123,19 @@ local function github_port(issues, catalog, all_catalog)
     return matches
   end
   return github
+end
+local function materialized_issue_body(request)
+  return request.body .. "\n\n<!-- fkst:github-proxy:issue-create:"
+    .. request.dedup_key .. " -->"
+end
+
+local function review_command(command, proposal, reason, revision)
+  local body = "/marketing " .. command .. " " .. proposal.proposal_id .. "@"
+    .. tostring(revision ~= nil and revision or proposal.revision) .. " " .. proposal.proposal_digest
+  if reason ~= nil and reason ~= "" then
+    body = body .. " " .. reason
+  end
+  return body
 end
 
 local function department(github, overrides)
@@ -164,7 +168,6 @@ local function department(github, overrides)
     end,
   })
 end
-
 local function raises_for(result, queue)
   local values = {}
   for _, raised in ipairs(result.raises or {}) do
@@ -174,7 +177,6 @@ local function raises_for(result, queue)
   end
   return values
 end
-
 local function no_publish_raises(result)
   for _, raised in ipairs(result.raises or {}) do
     t.eq(tostring(raised.queue):find("x_publish", 1, true), nil)
@@ -199,7 +201,6 @@ return {
     t.eq(drafts, 0)
     t.eq(#result.raises, 0)
   end,
-
   test_three_same_week_signals_create_one_deterministic_grouped_proposal_request = function()
     local issues = {
       [116] = signal_issue(116),
@@ -220,7 +221,6 @@ return {
     t.eq(first_creates[1].assignees[1], "test-operator")
     no_publish_raises(first)
   end,
-
   test_staggered_signals_share_pending_group_create_dedup_before_materialization = function()
     local first_signal = signal_issue(116)
     local second_signal = signal_issue(117)
@@ -239,7 +239,6 @@ return {
     t.eq(first_create.dedup_key, staggered_create.dedup_key)
     t.is_true(first_create.body ~= staggered_create.body)
   end,
-
   test_materialized_first_wins_proposal_converges_to_union_revision = function()
     local first_signal = signal_issue(116)
     local second_signal = signal_issue(117)
@@ -251,7 +250,8 @@ return {
     local first_proposal = assert(core.parse_proposal(first_create.body))
     local review = {
       number = 700,
-      body = first_create.body,
+      body = first_create.body .. "\n\n<!-- fkst:github-proxy:issue-create:"
+        .. first_create.dedup_key .. " -->",
       state = "OPEN",
       labels = { "host-test-primary" },
       assignees = { "test-operator" },
@@ -277,7 +277,6 @@ return {
     t.eq(#union.signals, 2)
     t.is_true(union.signal_set_digest ~= first_proposal.signal_set_digest)
   end,
-
   test_trusted_body_action_conflict_enters_triage_without_proposal = function()
     local source = signal_issue(125, {
       body = signal_body(125) .. "\n\nOperator narrative: replan every unpublished item this week.",
@@ -297,7 +296,6 @@ return {
     t.is_true(comments[1].body:find("needs-triage: semantic-conflict", 1, true) ~= nil)
     no_publish_raises(result)
   end,
-
   test_w33_116_to_118_and_w34_124_create_exactly_two_shadow_proposals = function()
     local issues = {
       [116] = signal_issue(116),
@@ -318,7 +316,27 @@ return {
     no_publish_raises(w33)
     no_publish_raises(w34)
   end,
+  test_exhausted_overlength_correction_enters_visible_triage_without_proposal = function()
+    local source = signal_issue(124, { body = signal_body(124, { week = "2026-W34" }) })
+    local attempts = 0
+    local graph = department(github_port(
+      { [124] = source }, { row(source) }, { row(source) }
+    ), {
+      draft_generator = function()
+        attempts = attempts + 1
+        return nil, "draft-correction-exhausted:invalid-x-text:text too long"
+      end,
+    })
 
+    local result = testing.run_fake(graph, event(source))
+    t.eq(attempts, 1)
+    t.eq(#raises_for(result, "github-proxy.github_issue_create_request"), 0)
+    local comments = raises_for(result, "github-proxy.github_issue_comment_request")
+    t.eq(#comments, 1)
+    t.is_true(comments[1].body:find(
+      "needs-triage: draft-correction-exhausted:invalid-x-text:text too long", 1, true) ~= nil)
+    no_publish_raises(result)
+  end,
   test_closed_proposal_does_not_block_new_signal_set_from_creating_a_new_review = function()
     local old_signal = signal_issue(116)
     local new_signal = signal_issue(119)
@@ -328,13 +346,15 @@ return {
       )), event(old_signal))
     local old_create = raises_for(old_result, "github-proxy.github_issue_create_request")[1]
     local old_review = {
-      number = 700, body = old_create.body, state = "CLOSED",
+      number = 700, body = old_create.body .. "\n\n<!-- fkst:github-proxy:issue-create:"
+        .. old_create.dedup_key .. " -->", state = "CLOSED",
       labels = { "host-test-primary" }, assignees = { "test-operator" },
       author_login = "fkst-test-bot", source_ref = source_ref(700), comments = {},
     }
     local new_result = testing.run_fake(
       department(github_port(
-        { [119] = new_signal }, { row(new_signal) }, { row(new_signal), row(old_review) }
+        { [119] = new_signal, [700] = old_review },
+        { row(new_signal) }, { row(new_signal), row(old_review) }
       )), event(new_signal))
     local new_create = raises_for(new_result, "github-proxy.github_issue_create_request")[1]
     local old_proposal = assert(core.parse_proposal(old_create.body))
@@ -342,7 +362,6 @@ return {
     t.is_true(old_proposal.proposal_id ~= new_proposal.proposal_id)
     t.is_true(old_create.dedup_key ~= new_create.dedup_key)
   end,
-
   test_paginated_existing_review_makes_unchanged_replay_a_zero_ai_noop = function()
     local source = signal_issue(116)
     local classified = assert(core.classify_issue(event(source).payload, {
@@ -355,7 +374,7 @@ return {
     }))
     local review_request = core.weekly_plan_change_issue_request(proposal, session())
     local review = {
-      number = 700, body = review_request.body, state = "OPEN",
+      number = 700, body = materialized_issue_body(review_request), state = "OPEN",
       labels = { "host-test-primary" }, assignees = { "test-operator" },
       author_login = "app/fkst-test-bot", source_ref = source_ref(700), comments = {},
     }
@@ -378,7 +397,6 @@ return {
     t.eq(#raises_for(result, "github-proxy.github_issue_comment_request"), 1)
     no_publish_raises(result)
   end,
-
   test_triage_and_account_mismatch_never_create_proposal = function()
     local conflict = signal_issue(120, { body = signal_body(120, { ["target-ref"] = "#99" }) })
     local mismatch = signal_issue(121, { body = signal_body(121, { account = "test_secondary" }) })
@@ -396,7 +414,6 @@ return {
     no_publish_raises(conflict_result)
     no_publish_raises(mismatch_result)
   end,
-
   test_missing_profile_is_visible_only_when_the_issue_is_safely_routed = function()
     local source = signal_issue(125)
     local missing_account = function()
@@ -436,7 +453,6 @@ return {
     no_publish_raises(routed)
     no_publish_raises(unrouted)
   end,
-
   test_approval_waits_for_trusted_materialization_before_terminal_comments = function()
     local source = signal_issue(116)
     local classified = assert(core.classify_issue(event(source).payload, {
@@ -453,15 +469,14 @@ return {
     local request = core.weekly_plan_change_issue_request(proposal, session())
     local review = {
       number = 130,
-      body = request.body,
+      body = materialized_issue_body(request),
       state = "OPEN",
       labels = { "host-test-primary" },
       assignees = { "test-operator" },
       author_login = "fkst-test-bot",
       source_ref = source_ref(130),
       comments = {
-        { id = 91, author_login = "test-operator", body = "/marketing approve "
-          .. proposal.proposal_id .. "@" .. proposal.revision },
+        { id = 91, author_login = "test-operator", body = review_command("approve", proposal) },
       },
     }
     local first = testing.run_fake(department(github_port(
@@ -513,7 +528,6 @@ return {
     no_publish_raises(pending)
     no_publish_raises(replay)
   end,
-
   test_unauthorized_and_stale_review_commands_create_no_content = function()
     local source = signal_issue(116)
     local classified = assert(core.classify_issue(event(source).payload, {
@@ -532,15 +546,15 @@ return {
     }) do
       local review = {
         number = 131,
-        body = request.body,
+        body = materialized_issue_body(request),
         state = "OPEN",
         labels = { "host-test-primary" },
         assignees = { "test-operator" },
         author_login = "fkst-test-bot",
         source_ref = source_ref(131),
         comments = {
-          { id = 92, author_login = command.author, body = "/marketing approve "
-            .. proposal.proposal_id .. "@" .. command.revision },
+          { id = 92, author_login = command.author,
+            body = review_command("approve", proposal, nil, command.revision) },
         },
       }
       local result = testing.run_fake(department(github_port({ [131] = review }, { row(review) })), event(review))
@@ -548,7 +562,6 @@ return {
       no_publish_raises(result)
     end
   end,
-
   test_approve_fails_closed_when_signal_changed_or_same_group_signal_arrived = function()
     local original = signal_issue(116)
     local classified = assert(core.classify_issue(event(original).payload, {
@@ -562,11 +575,11 @@ return {
     local request = core.weekly_plan_change_issue_request(proposal, session())
     local function review_issue_for(number)
       return {
-        number = number, body = request.body, state = "OPEN",
+        number = number, body = materialized_issue_body(request), state = "OPEN",
         labels = { "host-test-primary" }, assignees = { "test-operator" },
         author_login = "fkst-test-bot", source_ref = source_ref(number),
-        comments = { { id = 801, author_login = "test-operator", body = "/marketing approve "
-          .. proposal.proposal_id .. "@" .. proposal.revision } },
+        comments = { { id = 801, author_login = "test-operator",
+          body = review_command("approve", proposal) } },
       }
     end
 
@@ -591,7 +604,6 @@ return {
     no_publish_raises(edited_result)
     no_publish_raises(added_result)
   end,
-
   test_request_changes_generates_next_revision_and_keeps_review_open = function()
     local source = signal_issue(116)
     local classified = assert(core.classify_issue(event(source).payload, {
@@ -606,15 +618,15 @@ return {
     local request = core.weekly_plan_change_issue_request(proposal, session())
     local review = {
       number = 135,
-      body = request.body,
+      body = materialized_issue_body(request),
       state = "OPEN",
       labels = { "host-test-primary" },
       assignees = { "test-operator" },
       author_login = "fkst-test-bot",
       source_ref = source_ref(135),
       comments = {
-        { id = 94, author_login = "test-operator", body = "/marketing request-changes "
-          .. proposal.proposal_id .. "@" .. proposal.revision .. " Add release evidence." },
+        { id = 94, author_login = "test-operator",
+          body = review_command("request-changes", proposal, "Add release evidence.") },
       },
     }
     local result = testing.run_fake(department(github_port(
@@ -633,7 +645,73 @@ return {
     t.is_nil(comments[2].handoff)
     no_publish_raises(result)
   end,
+  test_failed_request_changes_is_durable_until_a_new_command_takes_over = function()
+    local source = signal_issue(125)
+    local classified = assert(core.classify_issue(event(source).payload, {
+      session = session(), issue_body = source.body,
+      issue_labels = source.labels, issue_assignees = source.assignees,
+    }))
+    local proposal = assert(core.build_proposal({ classified }, session(), {
+      action = "add", evidence_refs = { classified.source_ref.ref },
+      tweet_text = "The initial reviewed draft.",
+    }))
+    local review = {
+      number = 126,
+      body = materialized_issue_body(core.weekly_plan_change_issue_request(proposal, session())),
+      state = "OPEN",
+      labels = { "host-test-primary" },
+      assignees = { "test-operator" },
+      author_login = "fkst-test-bot",
+      source_ref = source_ref(126),
+      comments = {
+        { id = 201, author_login = "test-operator",
+          body = review_command("request-changes", proposal, "Add all release evidence.") },
+      },
+    }
+    local issues = { [125] = source, [126] = review }
+    local catalog = { row(source), row(review) }
+    local failed = testing.run_fake(department(github_port(issues, catalog), {
+      draft_generator = function()
+        return nil, "draft-correction-exhausted:invalid-x-text:text too long"
+      end,
+    }), event(review))
+    local failure_comments = raises_for(failed, "github-proxy.github_issue_comment_request")
+    t.eq(#failure_comments, 1)
+    t.eq(failure_comments[1].issue_number, review.number)
+    t.is_true(failure_comments[1].body:find(
+      "fkst:marketing-radar:review-failure:v2", 1, true) ~= nil)
+    review.comments[#review.comments + 1] = {
+      id = 202,
+      author_login = "fkst-test-bot",
+      body = failure_comments[1].body .. "\n<!-- fkst:github-proxy:comment:"
+        .. failure_comments[1].dedup_key .. " -->",
+    }
 
+    local replay_drafts = 0
+    local replay = testing.run_fake(department(github_port(issues, catalog), {
+      draft_generator = function()
+        replay_drafts = replay_drafts + 1
+        return nil, "must-not-run"
+      end,
+    }), event(review))
+    t.eq(replay_drafts, 0)
+    t.eq(#raises_for(replay, "github-proxy.github_issue_comment_request"), 0)
+
+    review.comments[#review.comments + 1] = {
+      id = 203,
+      author_login = "test-operator",
+      body = review_command("request-changes", proposal, "Use a concise release link."),
+    }
+    local resumed = testing.run_fake(department(github_port(issues, catalog)), event(review))
+    local resumed_comments = raises_for(resumed, "github-proxy.github_issue_comment_request")
+    t.eq(#resumed_comments, 2)
+    local next_proposal = core.parse_proposal(resumed_comments[1].body)
+      or core.parse_proposal(resumed_comments[2].body)
+    t.eq(assert(next_proposal).revision, proposal.revision + 1)
+    no_publish_raises(failed)
+    no_publish_raises(replay)
+    no_publish_raises(resumed)
+  end,
   test_reject_emits_terminal_handoffs_for_review_and_all_signals_without_content = function()
     local source = signal_issue(136)
     local classified = assert(core.classify_issue(event(source).payload, {
@@ -646,11 +724,11 @@ return {
     }))
     local request = core.weekly_plan_change_issue_request(proposal, session())
     local review = {
-      number = 137, body = request.body, state = "OPEN",
+      number = 137, body = materialized_issue_body(request), state = "OPEN",
       labels = { "host-test-primary" }, assignees = { "test-operator" },
       author_login = "fkst-test-bot", source_ref = source_ref(137),
-      comments = { { id = 97, author_login = "test-operator", body = "/marketing reject "
-        .. proposal.proposal_id .. "@" .. proposal.revision .. " Evidence is insufficient." } },
+      comments = { { id = 97, author_login = "test-operator",
+        body = review_command("reject", proposal, "Evidence is insufficient.") } },
     }
     local result = testing.run_fake(department(github_port(
       { [136] = source, [137] = review }, { row(source), row(review) }, { row(source), row(review) }
@@ -668,7 +746,64 @@ return {
     t.is_true(kinds["radar-signal"])
     no_publish_raises(result)
   end,
-
+  test_reject_reloads_current_signal_set_before_terminal_handoffs = function()
+    local original, replacement = signal_issue(136), signal_issue(138)
+    local first = assert(core.classify_issue(event(original).payload, {
+      session = session(), issue_body = original.body,
+      issue_labels = original.labels, issue_assignees = original.assignees,
+    }))
+    local second = assert(core.classify_issue(event(replacement).payload, {
+      session = session(), issue_body = replacement.body,
+      issue_labels = replacement.labels, issue_assignees = replacement.assignees,
+    }))
+    local approved_identity = assert(core.build_proposal({ first }, session(), {
+      action = "add", evidence_refs = { first.source_ref.ref }, tweet_text = "The original draft.",
+    }))
+    local edited = assert(core.build_proposal({ second }, session(), {
+      action = "add", evidence_refs = { second.source_ref.ref }, tweet_text = "The original draft.",
+    }, {
+      proposal_id = approved_identity.proposal_id,
+      content_id = approved_identity.content_id,
+      content_revision = approved_identity.content_revision,
+    }))
+    local request = core.weekly_plan_change_issue_request(edited, session())
+    local review = {
+      number = 139, body = materialized_issue_body(request), state = "OPEN",
+      labels = { "host-test-primary" }, assignees = { "test-operator" },
+      author_login = "fkst-test-bot", source_ref = source_ref(139),
+      comments = { { id = 98, author_login = "test-operator",
+        body = review_command("reject", edited, "Evidence is insufficient.") } },
+    }
+    local result = testing.run_fake(department(github_port(
+      { [136] = original, [138] = replacement, [139] = review },
+      { row(original), row(replacement), row(review) }
+    )), event(review))
+    local comments = raises_for(result, "github-proxy.github_issue_comment_request")
+    t.eq(#comments, 1)
+    t.is_nil(comments[1].handoff)
+    t.is_true(comments[1].body:find("signal-set-changed-during-review", 1, true) ~= nil)
+    no_publish_raises(result)
+  end,
+  test_exhausted_create_cycle_enters_triage_without_request = function()
+    local source = signal_issue(180)
+    local classified = assert(core.classify_issue(event(source).payload, {
+      session = session(), issue_body = source.body,
+      issue_labels = source.labels, issue_assignees = source.assignees,
+    }))
+    local old = rest_row(181, table.concat({
+      "contract: marketing-radar.weekly-plan-change.v2", "type: weekly-plan-change",
+      "status: rejected", "<!-- fkst:github-proxy:issue-create:"
+        .. core.proposal_group_key(classified) .. "/create/cycle-2147483647 -->",
+    }, "\n"))
+    local result = testing.run_fake(department(github_port(
+      { [180] = source, [181] = old }, { row(source) }, { row(source), old }
+    )), event(source))
+    t.eq(#raises_for(result, "github-proxy.github_issue_create_request"), 0)
+    local comments = raises_for(result, "github-proxy.github_issue_comment_request")
+    t.eq(#comments, 1)
+    t.is_true(comments[1].body:find("proposal-cycle-exhausted", 1, true) ~= nil)
+    no_publish_raises(result)
+  end,
   test_replan_fails_closed_when_state_all_catalog_has_malformed_fields = function()
     local source = signal_issue(140, { body = signal_body(140, { action = "replan" }) })
     local classified = assert(core.classify_issue(event(source).payload, {
@@ -683,15 +818,14 @@ return {
     local request = core.weekly_plan_change_issue_request(proposal, session())
     local review = {
       number = 141,
-      body = request.body,
+      body = materialized_issue_body(request),
       state = "OPEN",
       labels = { "host-test-primary" },
       assignees = { "test-operator" },
       author_login = "fkst-test-bot",
       source_ref = source_ref(141),
       comments = {
-        { id = 95, author_login = "test-operator", body = "/marketing approve "
-          .. proposal.proposal_id .. "@" .. proposal.revision },
+        { id = 95, author_login = "test-operator", body = review_command("approve", proposal) },
       },
     }
     local content_request = core.approved_weekly_content_issue_request(proposal, session())
@@ -716,7 +850,6 @@ return {
     t.is_true(tostring(failure.failure.error):find(
       "issue catalog contains malformed issue fields", 1, true) ~= nil)
   end,
-
   test_revise_waits_for_durable_supersession_before_terminal_ack = function()
     local old_body = assert(marketing_content.render({
       project = "chronoai", account = "test_primary", work_label = "auto-x-test-primary",
@@ -743,11 +876,11 @@ return {
     }, { content_id = "content-old", content_revision = 2 }))
     local review_request = core.weekly_plan_change_issue_request(proposal, session())
     local review = {
-      number = 171, body = review_request.body, state = "OPEN",
+      number = 171, body = materialized_issue_body(review_request), state = "OPEN",
       labels = { "host-test-primary" }, assignees = { "test-operator" },
       author_login = "fkst-test-bot", source_ref = source_ref(171),
-      comments = { { id = 98, author_login = "test-operator", body = "/marketing approve "
-        .. proposal.proposal_id .. "@" .. proposal.revision } },
+      comments = { { id = 98, author_login = "test-operator",
+        body = review_command("approve", proposal) } },
     }
     local content_request = core.approved_weekly_content_issue_request(proposal, session())
     review.comments[#review.comments + 1] = {
@@ -796,7 +929,6 @@ return {
     no_publish_raises(pending)
     no_publish_raises(replay)
   end,
-
   test_published_revision_target_enters_triage_without_creating_content = function()
     local source = signal_issue(160, { body = signal_body(160, { action = "revise", ["target-ref"] = "#41" }) })
     local classified = assert(core.classify_issue(event(source).payload, {
@@ -811,12 +943,11 @@ return {
     }, { content_id = "content-old", content_revision = 2 }))
     local request = core.weekly_plan_change_issue_request(proposal, session())
     local review = {
-      number = 161, body = request.body, state = "OPEN",
+      number = 161, body = materialized_issue_body(request), state = "OPEN",
       labels = { "host-test-primary" }, assignees = { "test-operator" },
       author_login = "fkst-test-bot", source_ref = source_ref(161),
       comments = {
-        { id = 97, author_login = "test-operator", body = "/marketing approve "
-          .. proposal.proposal_id .. "@" .. proposal.revision },
+        { id = 97, author_login = "test-operator", body = review_command("approve", proposal) },
       },
     }
     local old_body, old_digest = marketing_content.render({

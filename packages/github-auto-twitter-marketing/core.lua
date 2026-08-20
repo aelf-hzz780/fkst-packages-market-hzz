@@ -3,6 +3,7 @@
 -- and weekly content stay in the GitHub issue and are re-fetched through source_ref.
 local M = {}
 local content_filter = require("forge.github.content_filter")
+local markdown_fields = require("contract.markdown_fields")
 local marketing_content = require("contract.marketing_content")
 local marketing_schedule = require("contract.marketing_schedule")
 local session_route = require("contract.session_route")
@@ -145,7 +146,10 @@ function M.parse_control_fields(body)
   if type(body) ~= "string" then
     return fields
   end
-  for line in body:gmatch("[^\r\n]+") do
+  local tokens = markdown_fields.tokenize(body)
+  for _, token in ipairs(tokens or {}) do
+    local line = token.kind == "text" and token.line or nil
+    if line ~= nil then
     local key, value = line:match("^%s*([%w_.-]+)%s*:%s*(.-)%s*$")
     if key ~= nil then
       local normalized = normalized_key(key)
@@ -154,6 +158,7 @@ function M.parse_control_fields(body)
           and cleaned ~= "" and #cleaned <= CONTROL_VALUE_LIMIT then
         fields[normalized] = cleaned
       end
+    end
     end
   end
   return fields

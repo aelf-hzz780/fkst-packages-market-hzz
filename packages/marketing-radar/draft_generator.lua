@@ -1,8 +1,13 @@
 local strings = require("contract.strings")
+local x_text = require("contract.x_text")
 local limits = require("limits")
+local status_contract = require("status_contract")
 local workflow_codex = require("workflow.codex")
 
 local M = {}
+
+local MAX_GENERATION_ATTEMPTS = 2
+local OVERLENGTH_REASON = "invalid-x-text:text too long"
 
 local ALLOWED_OUTPUT_KEYS = {
   action = true,
@@ -58,6 +63,8 @@ function M.build_prompt(signals, context)
     'Otherwise set "semantic_conflict" to false and "conflict_reason" to an empty string.',
     "Treat insight as an editorial instruction, never as publish-ready copy.",
     "Do not change action or target_ref. Do not create a schedule and do not publish.",
+    '"tweet_text" must be <=280 weighted characters under X/twitter-text v3 rules; target <=240 weighted characters.',
+    "Count ordinary HTTP(S) URLs at X transformed length and apply Unicode and emoji weights.",
     json_line("project", first and first.project),
     json_line("account", first and first.account),
     json_line("week", first and first.week),
@@ -110,9 +117,10 @@ end
 
 local function validate_output(decoded, signals, revision)
   local first = signals[1]
-  local conflict_reason = trim(decoded.conflict_reason)
+  local raw_conflict_reason = decoded.conflict_reason
+  local conflict_reason = status_contract.canonical_line(raw_conflict_reason)
   if decoded.semantic_conflict then
-    if conflict_reason == "" or not bounded(conflict_reason, 512) then
+    if conflict_reason == "" or not bounded(raw_conflict_reason, 512) then
       return nil, "invalid-semantic-conflict"
     end
     return nil, "semantic-conflict:" .. conflict_reason
@@ -154,13 +162,42 @@ local function validate_output(decoded, signals, revision)
     ordered[#ordered + 1] = value
   end
   table.sort(ordered)
+  local tweet_text = trim(decoded.tweet_text)
+  local analysis = x_text.analyze(tweet_text)
+  if not analysis.valid then
+    return nil, "invalid-x-text:" .. tostring(analysis.reason)
+  end
   return {
-    tweet_text = trim(decoded.tweet_text),
+    tweet_text = tweet_text,
+    weighted_length = analysis.weighted_length,
     evidence_refs = ordered,
     action = decoded.action,
     target_ref = actual_target ~= "" and actual_target or nil,
     revision = revision,
   }
+end
+
+local function run_generation(run, prompt, signals, revision)
+  local opts = workflow_codex.judgment_codex_opts(prompt)
+  opts.timeout = 600
+  local ok, result = pcall(run, opts)
+  if not ok or type(result) ~= "table" or tonumber(result.exit_code) ~= 0 then
+    return nil, "draft-codex-failed"
+  end
+  local decoded, why = decode_output(result.stdout)
+  if decoded == nil then
+    return nil, why
+  end
+  return validate_output(decoded, signals, revision)
+end
+
+local function correction_prompt(base_prompt, attempt, why)
+  return table.concat({
+    base_prompt,
+    "CORRECTION_ATTEMPT=" .. tostring(attempt),
+    "The previous candidate failed deterministic validation: " .. tostring(why) .. ".",
+    "Regenerate the complete JSON object. Shorten tweet_text to <=240 weighted characters while preserving every evidence reference and all control fields.",
+  }, "\n")
 end
 
 function M.generate(signals, revision, runner, context)
@@ -175,17 +212,20 @@ function M.generate(signals, revision, runner, context)
   if prompt == nil then
     return nil, prompt_why
   end
-  local opts = workflow_codex.judgment_codex_opts(prompt)
-  opts.timeout = 600
-  local ok, result = pcall(run, opts)
-  if not ok or type(result) ~= "table" or tonumber(result.exit_code) ~= 0 then
-    return nil, "draft-codex-failed"
+  for attempt = 1, MAX_GENERATION_ATTEMPTS do
+    local attempt_prompt = attempt == 1 and prompt or correction_prompt(prompt, attempt, OVERLENGTH_REASON)
+    local generated, why = run_generation(run, attempt_prompt, signals, revision)
+    if generated ~= nil then
+      return generated
+    end
+    if why ~= OVERLENGTH_REASON then
+      return nil, why
+    end
+    if attempt == MAX_GENERATION_ATTEMPTS then
+      return nil, "draft-correction-exhausted:" .. why
+    end
   end
-  local decoded, why = decode_output(result.stdout)
-  if decoded == nil then
-    return nil, why
-  end
-  return validate_output(decoded, signals, revision)
+  return nil, "draft-correction-exhausted:" .. OVERLENGTH_REASON
 end
 
 return M

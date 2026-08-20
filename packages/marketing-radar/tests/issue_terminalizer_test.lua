@@ -70,19 +70,28 @@ local function review_issue(command)
     labels = { "host-test-primary" },
     assignees = { "test-operator" },
     author_login = "app/fkst-test-bot",
-    body = request.body,
+    body = request.body .. "\n\n<!-- fkst:github-proxy:issue-create:"
+      .. request.dedup_key .. " -->",
     comments = {
       { id = 101, author_login = "test-operator", body = "/marketing "
         .. tostring(command or "approve") .. " " .. proposal.proposal_id .. "@"
-        .. proposal.revision .. (command == "reject" and " duplicate campaign" or "") },
+        .. proposal.revision .. " " .. proposal.proposal_digest
+        .. (command == "reject" and " duplicate campaign" or "") },
     },
   }
   return issue, proposal
 end
 
 local function ack_for(item, status)
+  local command = tostring(status or ""):find("^rejected") and "reject" or "approve"
+  local review = review_issue(command)
+  local decision = assert(core.review_decision(review, {
+    bot_login = "fkst-test-bot",
+    authorized_reviewers = { "test-operator" },
+  }))
+  decision.proposal.review_source_ref = review.source_ref
   local request = core.status_comment(
-    item, status or "approved", core.close_handoff(item, "radar-signal"))
+    item, status or "approved", core.close_handoff(item, "radar-signal", decision))
   return {
     queue = "github-proxy.github_comment_written",
     payload = {
@@ -96,7 +105,7 @@ local function ack_for(item, status)
       source_ref = item.source_ref,
       handoff = request.handoff,
     },
-  }
+  }, review
 end
 
 local function review_ack(issue, proposal, status)
@@ -123,12 +132,15 @@ local function review_ack(issue, proposal, status)
   }
 end
 
-local function github_port(issue, close_response_lost)
-  local model = { reads = 0, closes = 0, locks = 0, issue = issue }
+local function github_port(issue, close_response_lost, review)
+  local model = { reads = 0, closes = 0, locks = 0, issue = issue, review = review }
   local github = { _model = model }
-  function github.read_issue(_ref, options)
+  function github.read_issue(ref, options)
     model.reads = model.reads + 1
     t.eq(options.force_fresh, true)
+    if model.review ~= nil and ref.ref == model.review.source_ref.ref then
+      return model.review
+    end
     return model.issue
   end
   function github.issue_close(target_repo, number, timeout)
@@ -167,19 +179,63 @@ return {
   test_ack_fresh_reads_locks_and_closes_unchanged_signal = function()
     local issue = signal_issue()
     local item = classified(issue)
-    local github, model = github_port(issue)
-    testing.run_fake(department(github), ack_for(item))
-    t.eq(model.reads, 1)
+    local event, review = ack_for(item)
+    local github, model = github_port(issue, false, review)
+    testing.run_fake(department(github), event)
+    t.eq(model.reads, 2)
     t.eq(model.locks, 1)
     t.eq(model.closes, 1)
+  end,
+
+  test_signal_ack_revalidates_review_before_close = function()
+    local issue = signal_issue()
+    local item = classified(issue)
+    local event, review = ack_for(item)
+    review.comments = {}
+    local model = { reads = 0, closes = 0, locks = 0 }
+    local github = { _model = model }
+    function github.read_issue(ref, options)
+      model.reads = model.reads + 1
+      t.eq(options.force_fresh, true)
+      if ref.ref == issue.source_ref.ref then
+        return issue
+      end
+      if ref.ref == review.source_ref.ref then
+        return review
+      end
+      error("unexpected source ref: " .. tostring(ref.ref))
+    end
+    function github.issue_close()
+      model.closes = model.closes + 1
+      return { exit_code = 0, stdout = "", stderr = "" }
+    end
+
+    testing.run_fake(department(github), event)
+    t.eq(model.reads, 2)
+    t.eq(model.locks, 1)
+    t.eq(model.closes, 0)
+  end,
+
+  test_signal_ack_rejects_rerouted_review_before_close = function()
+    local issue = signal_issue()
+    local item = classified(issue)
+    local event, review = ack_for(item)
+    review.labels = { "other-session" }
+    local github, model = github_port(issue, false, review)
+
+    testing.run_fake(department(github), event)
+    t.eq(model.reads, 2)
+    t.eq(model.locks, 1)
+    t.eq(model.closes, 0)
   end,
 
   test_changed_signal_digest_and_disabled_write_never_close = function()
     local original = signal_issue()
     local item = classified(original)
     local changed = signal_issue("A different business instruction.")
-    local github, model = github_port(changed)
-    testing.run_fake(department(github), ack_for(item))
+    local event, review = ack_for(item)
+    local github, model = github_port(changed, false, review)
+    testing.run_fake(department(github), event)
     t.eq(model.closes, 0)
 
     local dry_github, dry_model = github_port(original)
@@ -191,10 +247,35 @@ return {
   test_lost_close_response_converges_after_fresh_reread = function()
     local issue = signal_issue()
     local item = classified(issue)
-    local github, model = github_port(issue, true)
-    testing.run_fake(department(github), ack_for(item))
+    local event, review = ack_for(item)
+    local github, model = github_port(issue, true, review)
+    testing.run_fake(department(github), event)
     t.eq(model.closes, 1)
-    t.eq(model.reads, 2)
+    t.eq(model.reads, 4)
+  end,
+
+  test_closed_signal_converges_only_after_route_and_digest_validation = function()
+    local original = signal_issue()
+    local item = classified(original)
+    local event, review = ack_for(item)
+    local context = assert(core.close_ack_context(event.payload))
+    original.state = "CLOSED"
+    local decision = core.current_close_decision(original, context, {
+      bot_login = "fkst-test-bot",
+      authorized_reviewers = { "test-operator" },
+    }, review)
+    t.eq(decision, "converged")
+
+    local changed = signal_issue("Changed after the terminal ACK.")
+    changed.state = "CLOSED"
+    local changed_decision = core.current_close_decision(changed, context, {})
+    t.eq(changed_decision, "skip")
+
+    local rerouted = signal_issue()
+    rerouted.state = "CLOSED"
+    rerouted.labels = { "other-session" }
+    local rerouted_decision = core.current_close_decision(rerouted, context, {})
+    t.eq(rerouted_decision, "skip")
   end,
 
   test_review_terminal_ack_revalidates_latest_decision_before_close = function()
@@ -204,19 +285,22 @@ return {
     t.eq(model.closes, 1)
 
     local changed, changed_proposal = review_issue()
+    local changed_revision = assert(core.build_proposal({ classified(signal_issue()) }, session(), {
+      action = "add",
+      evidence_refs = { source_ref(11).ref },
+      tweet_text = "A changed proposal revision.",
+      revision = 2,
+    }, {
+      proposal_id = changed_proposal.proposal_id,
+      content_id = changed_proposal.content_id,
+      content_revision = 2,
+    }))
     changed.comments[#changed.comments + 1] = {
       id = 103,
       author_login = "fkst-test-bot",
-      body = assert(core.render_proposal(assert(core.build_proposal({ classified(signal_issue()) }, session(), {
-        action = "add",
-        evidence_refs = { source_ref(11).ref },
-        tweet_text = "A changed proposal revision.",
-        revision = 2,
-      }, {
-        proposal_id = changed_proposal.proposal_id,
-        content_id = changed_proposal.content_id,
-        content_revision = 2,
-      })))),
+      body = assert(core.render_proposal(changed_revision))
+        .. "\n\n<!-- fkst:github-proxy:comment:" .. changed_revision.group_key
+        .. "/revision/2/" .. changed_revision.signal_set_digest .. " -->",
     }
     local stale_github, stale_model = github_port(changed)
     testing.run_fake(department(stale_github), review_ack(issue, proposal))
@@ -232,9 +316,10 @@ return {
     t.eq(review_model.closes, 1)
 
     local signal = signal_issue()
-    local signal_github, signal_model = github_port(signal)
-    testing.run_fake(department(signal_github), ack_for(classified(signal), "rejected"))
-    t.eq(signal_model.reads, 1)
+    local event, review = ack_for(classified(signal), "rejected")
+    local signal_github, signal_model = github_port(signal, false, review)
+    testing.run_fake(department(signal_github), event)
+    t.eq(signal_model.reads, 2)
     t.eq(signal_model.locks, 1)
     t.eq(signal_model.closes, 1)
   end,

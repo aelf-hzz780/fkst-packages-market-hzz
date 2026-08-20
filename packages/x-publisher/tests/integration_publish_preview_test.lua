@@ -10,6 +10,7 @@ local count_calls = integration.count_calls
 local live_payload = integration.live_payload
 local live_env = integration.live_env
 local run_publish = integration.run_publish
+local process_token = tostring({}):gsub("[^%w]", "")
 
 return {
   test_publish_request_raises_preview_receipt = function()
@@ -524,6 +525,8 @@ return {
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].payload.status, "blocked")
     t.eq(result.raises[1].payload.blocked_reason, "native quote capability disabled")
+    t.eq(result.raises[1].payload.authenticated_account, v2.ACCOUNT)
+    t.eq(result.raises[1].payload.publish_attempted, false)
     t.eq(result.raises[1].payload.quote_target_post_id, "1234567890123456789")
     t.eq(count_calls("nyxid proxy request test-x-service /tweets -m POST"), 0)
   end,
@@ -796,7 +799,7 @@ return {
   end,
 
   test_live_publish_duplicate_dedup_key_skips_second_post = function()
-    local suffix = tostring(now())
+    local suffix = process_token .. "-" .. tostring(now())
     local runtime_root = "/tmp/fkst-marketing-test/x-publisher/live-once-" .. suffix
     local durable_root = "/tmp/fkst-marketing-test/x-publisher/live-once-durable-" .. suffix
     local dedup_key = "dedup-live-once-" .. suffix

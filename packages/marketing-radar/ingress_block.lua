@@ -1,4 +1,5 @@
 local session_authority = require("session_authority")
+local status_contract = require("status_contract")
 local session_route = require("contract.session_route")
 local strings = require("contract.strings")
 
@@ -52,7 +53,7 @@ function M.comment(payload, issue, route_value, reason, declared_account)
     repo = repo,
     issue_number = issue_number,
     body = table.concat({
-      "Marketing radar v0.3.0: blocked/unrouted",
+      status_contract.prefix("blocked/unrouted"),
       "",
       "reason: " .. reason,
       "account: " .. account,

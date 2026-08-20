@@ -319,10 +319,7 @@ function M.current_issue_decision(issue, context, authority)
     return "skip", "invalid-current-issue"
   end
   local state = tostring(issue.state or ""):upper()
-  if state == "CLOSED" then
-    return "converged", "already-closed"
-  end
-  if state ~= "OPEN" then
+  if state ~= "OPEN" and state ~= "CLOSED" then
     return "skip", "current-issue-not-open"
   end
 
@@ -380,7 +377,8 @@ function M.current_issue_decision(issue, context, authority)
   if current_dedup_key ~= context.receipt_dedup_key then
     return "skip", "current-publish-correlation-mismatch"
   end
-  return "close", nil
+  return state == "CLOSED" and "converged" or "close",
+    state == "CLOSED" and "already-closed" or nil
 end
 
 function M.lock_key(context)

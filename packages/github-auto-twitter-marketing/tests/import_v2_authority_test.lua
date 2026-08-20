@@ -103,7 +103,7 @@ local function event(body, overrides)
   return value
 end
 
-local function department(schedule, content)
+local function department(schedule, content, overrides)
   local old_pipeline = pipeline
   local module = require("departments.import_issue.main")
   pipeline = old_pipeline
@@ -111,6 +111,10 @@ local function department(schedule, content)
   function github.read_issue(ref, options)
     github.reads[#github.reads + 1] = { ref = ref.ref, options = options }
     if ref.ref == source_ref(125).ref then
+      if overrides ~= nil and overrides.cached_schedule ~= nil
+          and options.force_fresh ~= true then
+        return overrides.cached_schedule
+      end
       return schedule
     end
     if ref.ref == source_ref(124).ref then
@@ -156,6 +160,28 @@ local function raised(result, queue)
 end
 
 return {
+  test_stale_event_fresh_reads_rerouted_schedule_before_any_side_effect = function()
+    local body, digest = approved_content()
+    local stale_schedule = issue(125, schedule_body(digest))
+    local current_schedule = issue(125, stale_schedule.body, {
+      labels = { "another-session" },
+      assignees = { "another-owner" },
+    })
+    local content = issue(124, body, { state = "CLOSED", author_login = bot_login })
+    local handler, github = department(current_schedule, content, {
+      cached_schedule = stale_schedule,
+    })
+
+    local result = testing.run_fake(handler, event(stale_schedule.body))
+
+    t.eq(#github.reads, 1)
+    t.eq(github.reads[1].ref, source_ref(125).ref)
+    t.eq(github.reads[1].options.force_fresh, true)
+    t.is_nil(github.reads[1].options.updated_at)
+    t.eq(#raised(result, "github-proxy.github_issue_comment_request"), 0)
+    t.eq(#raised(result, "x-publisher.x_publish_request"), 0)
+  end,
+
   test_due_schedule_fresh_reads_matching_approved_content_before_v2_publish_request = function()
     local body, digest = approved_content()
     local schedule = issue(125, schedule_body(digest))

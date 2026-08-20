@@ -1,18 +1,28 @@
-# Contributing to fkst-packages-market-zz
+# Contributing to fkst-packages-market-hzz
 
 This repository contains business-owned FKST packages for the Auto Twitter marketing workflow. It is not the official generic FKST package repository.
 
 ## Development setup
 
-1. Build or obtain a local `fkst-framework` binary from `fkst-substrate`.
+1. Build `fkst-framework` from the exact full SHA recorded in `.fkst/substrate-ref`.
 2. Copy `.fkst/env.example` to `.fkst/env`.
 3. Set `BIN=/path/to/fkst-substrate/target/debug/fkst-framework`.
-4. Run `scripts/run.sh test` from the repository root before submitting changes.
+4. Run `scripts/run.sh verify-framework`, then `scripts/run.sh test` from the repository root.
+
+The runner probes the binary's embedded source SHA and `EVENT=code_provenance` engine version. It
+rejects a stale `BIN`, `PATH`, sibling build, or any binary compiled from a dirty checkout. Every run
+also requires a source checkout with matching `HEAD` and a clean worktree; standard Cargo target
+layouts are discovered automatically. For a custom target directory, set
+`FKST_FRAMEWORK_SOURCE_ROOT` explicitly. To intentionally test another revision, set
+`FKST_FRAMEWORK_EXPECTED_SHA` to that revision's full 40-character SHA; branch names and short SHAs
+are not accepted. Formal CI never accepts this override; manual alternates run as a separate
+`framework diagnostic` job.
 
 Useful commands:
 
 ```sh
 scripts/run.sh check
+scripts/run.sh verify-framework
 scripts/run.sh test
 scripts/run.sh test x-publisher
 scripts/run.sh test-composed
@@ -23,8 +33,9 @@ scripts/run.sh run x-publisher publish_x '{"payload":{}}'
 
 ## Branch and PR workflow
 
-- Use `dev` as the integration branch.
-- Do not commit directly to `dev`; open a PR into `dev`.
+- Use `main` as the integration branch.
+- Do not commit directly to `main`; open a PR into `main`.
+- CI still accepts PRs targeting legacy `dev` branches for compatibility; new work must target `main`.
 - Use branch names of the form `<type>/<kebab-topic>`, where `<type>` is one of `feat`, `fix`, `docs`, `chore`, `refactor`, or `test`.
 - Keep each commit to one coherent logical change.
 - Use English-only commit messages, PR titles, and PR bodies.
@@ -57,7 +68,10 @@ Do not copy official generic packages such as `github-proxy` into this repositor
 
 Source files such as `.lua`, `.sh`, `.py`, and `.rs` use English for comments, docstrings, log messages, error text, template strings, and identifiers.
 
-Outward artifacts such as documentation, issues, PRs, comments, commit messages, and change notes are English-only in this public repository.
+Outward artifacts such as issues, PRs, comments, commit messages, and change notes are English-only
+in this public repository. Approved repository documentation (including README files), operational
+runbooks, and contract documents may be bilingual; keep the English section authoritative and
+preserve the Chinese translation alongside it.
 
 ## Design rules
 

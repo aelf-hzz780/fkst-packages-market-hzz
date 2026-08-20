@@ -300,6 +300,42 @@ return {
     end
   end,
 
+  test_closed_issues_converge_only_after_current_identity_validation = function()
+    local schedule_context = assert(one_shot_close.ack_context(receipt_ack().payload))
+    local closed_schedule = issue(62, schedule_body(), { state = "CLOSED" })
+    local schedule_decision = one_shot_close.current_issue_decision(
+      closed_schedule, schedule_context, authority())
+    t.eq(schedule_decision, "converged")
+
+    closed_schedule.body = schedule_body({
+      ["content-digest"] = "sha256:" .. string.rep("b", 64),
+    })
+    local changed_schedule = one_shot_close.current_issue_decision(
+      closed_schedule, schedule_context, authority())
+    t.eq(changed_schedule, "skip")
+    closed_schedule.body = schedule_body()
+    closed_schedule.labels = { "other-session" }
+    local rerouted_schedule = one_shot_close.current_issue_decision(
+      closed_schedule, schedule_context, authority())
+    t.eq(rerouted_schedule, "skip")
+
+    local body, content_event = content_ack()
+    local content_context = assert(content_close.ack_context(content_event.payload))
+    local closed_content = issue(61, body, { state = "CLOSED" })
+    local content_decision = content_close.current_issue_decision(
+      closed_content, content_context, authority())
+    t.eq(content_decision, "converged")
+    closed_content.body = body:gsub("reviewed", "unreviewed")
+    local changed_content = content_close.current_issue_decision(
+      closed_content, content_context, authority())
+    t.eq(changed_content, "skip")
+    closed_content.body = body
+    closed_content.assignees = { "other-owner" }
+    local rerouted_content = content_close.current_issue_decision(
+      closed_content, content_context, authority())
+    t.eq(rerouted_content, "skip")
+  end,
+
   test_terminalizer_converges_after_lost_close_response_and_on_replay = function()
     local github, model = github_port(issue(62, schedule_body()), { lose_close_response = true })
     testing.run_fake(department(github), receipt_ack())

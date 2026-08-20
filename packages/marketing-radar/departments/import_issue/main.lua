@@ -1,13 +1,16 @@
 local caps = require("import_issue_caps")
 local draft_port = require("draft_generator")
+local durable_triage = require("durable_triage")
 local ingress_block = require("ingress_block")
 local materialization = require("materialization")
 local issue_catalog = require("issue_catalog")
+local proposal_reviews = require("proposal_review_catalog")
 local env = require("workflow.env")
 local ports_lib = require("forge.ports")
 local saga = require("workflow.saga")
 local strings = require("contract.strings")
 local supersession = require("supersession")
+local terminal_recovery = require("terminal_recovery")
 
 local spec = {
   consumes = { "github-proxy.github_issue_changed", "github-proxy.github_issue_observed" },
@@ -172,101 +175,18 @@ local function signal_group(rows, repo, current, session, signal_authors)
   return signals
 end
 
-local function review_issue(github, repo, row)
-  return github.read_issue(issue_source_ref(repo, row.number), {
-    force_fresh = true,
-    consumer = "marketing-radar-v2-review",
-  })
+local function matching_review(
+    github, rows, repo, identity, session, options, trigger_signal, terminal_history_only)
+  return proposal_reviews.matching_review(
+    github, rows, repo, identity, session, options, trigger_signal,
+    terminal_history_only, classify)
 end
 
-local function matching_review(github, rows, repo, identity, session, options)
-  local active = {}
-  local terminal_same_set = nil
-  for _, row in ipairs(rows) do
-    local parsed = caps.parse_proposal(row.body)
-    if parsed ~= nil and parsed.group_key == identity.group_key then
-      local issue = review_issue(github, repo, row)
-      if type(issue) == "table" and tostring(issue.state or ""):upper() == "OPEN" then
-        local payload = row_payload(repo, row)
-        local classified = classify(payload, issue, session, {})
-        local latest = classified and classified.status ~= "needs-triage"
-          and caps.latest_proposal(issue, options.bot_login) or nil
-        if latest ~= nil and latest.group_key == identity.group_key then
-          local decision = caps.review_decision(issue, options)
-          local terminal = decision ~= nil
-            and (decision.command == "approve" or decision.command == "reject")
-          local candidate = { row = row, issue = issue, latest = latest, decision = decision }
-          if terminal then
-            if latest.signal_set_digest == identity.signal_set_digest then
-              terminal_same_set = candidate
-            end
-          else
-            active[#active + 1] = candidate
-          end
-        end
-      end
-    end
-  end
-  if #active > 1 then
-    return nil, "ambiguous-active-review"
-  end
-  return active[1] or terminal_same_set, nil
-end
-
-local function next_proposal_cycle(rows, group_key, bot_login)
-  local expected_bot = caps.normalized_login(bot_login)
-  if expected_bot == nil then
-    return nil, "missing-bot-login"
-  end
-  local seen = {}
-  local count = 0
-  for _, row in ipairs(rows or {}) do
-    local number = tonumber(row.number)
-    local proposal = caps.parse_proposal(row.body)
-    if number ~= nil and not seen[number] and proposal ~= nil
-        and proposal.group_key == group_key
-        and caps.normalized_login(row_author(row)) == expected_bot then
-      seen[number] = true
-      count = count + 1
-    end
-  end
-  return count + 1, nil
-end
-
-local function terminal_item(signal, session)
-  return {
-    kind = "radar-signal",
-    account = session.account,
-    source_ref = signal.source_ref,
-    repo = signal.source_ref.ref:match("^([^#]+)#"),
-    issue_number = tonumber(signal.source_ref.ref:match("#issue/(%d+)$")),
-    signal_digest = signal.signal_digest,
-    dedup_key = "marketing-radar/v2/terminal/" .. caps.runtime_segment(signal.source_ref.ref, 180)
-      .. "/" .. caps.runtime_segment(signal.signal_digest, 80),
-    session_work_label = session.effective_work_label,
-    logical_work_label = session.logical_work_label,
-    session_creator = session.creator,
-    trace_id = "github:marketing-radar:" .. signal.source_ref.ref,
-  }
-end
-
-local function terminal_review_item(item, decision, session)
-  return {
-    kind = "weekly-plan-change",
-    account = session.account,
-    source_ref = item.source_ref,
-    repo = item.repo,
-    issue_number = item.issue_number,
-    content_digest = decision.proposal.content_digest,
-    proposal_id = decision.proposal.proposal_id,
-    proposal_revision = decision.proposal.revision,
-    group_key = decision.proposal.group_key,
-    session_work_label = session.effective_work_label,
-    logical_work_label = session.logical_work_label,
-    session_creator = session.creator,
-    trace_id = item.trace_id,
-  }
-end
+local next_proposal_cycle = proposal_reviews.next_cycle
+local terminal_item = terminal_recovery.signal_item
+local terminal_review_item = terminal_recovery.review_item
+local terminal_status = terminal_recovery.status
+local trusted_terminal_status = terminal_recovery.trusted_status
 
 local function raise_terminal_comments(item, decision, session, status)
   local review_terminal = terminal_review_item(item, decision, session)
@@ -283,6 +203,32 @@ local function raise_terminal_comments(item, decision, session, status)
       caps.close_handoff(signal_terminal, "radar-signal", decision)
     ))
   end
+end
+
+local function draft_failure_needs_triage(why)
+  return durable_triage.failure_reason(why)
+end
+
+local function raise_signal_triage(signal, identity, reason)
+  local item, why = durable_triage.status_item(signal, identity)
+  if item == nil then
+    error("marketing-radar: durable triage identity failed: " .. tostring(why), 0)
+  end
+  raise("github-proxy.github_issue_comment_request", caps.status_comment(
+    item, "needs-triage: " .. tostring(reason)))
+end
+
+local function raise_signal_set_triage(identity, reason)
+  local anchor, why = durable_triage.anchor(identity)
+  if anchor == nil then
+    error("marketing-radar: durable triage anchor failed: " .. tostring(why), 0)
+  end
+  for _, signal in ipairs(identity.signals or {}) do
+    if signal.source_ref.ref ~= anchor.source_ref.ref then
+      raise_signal_triage(signal, identity, reason)
+    end
+  end
+  raise_signal_triage(anchor, identity, reason)
 end
 
 local function make_department(handles)
@@ -428,6 +374,72 @@ local function make_department(handles)
     return values, nil
   end
 
+  -- The catalog is an eventually-consistent discovery surface. Before any
+  -- proposal lineage, AI draft, or create request is derived, re-read every
+  -- member of the discovered set and use those classified values as the
+  -- authoritative input. A single anchor check is insufficient when a
+  -- sibling was edited, closed, or rerouted after catalog discovery.
+  local function fresh_signal_set(identity, session)
+    local issues = {}
+    local signals = {}
+    local authors = signal_author_logins(session)
+    for _, expected in ipairs(identity.signals or {}) do
+      local ref = expected.source_ref.ref
+      local issue = github.read_issue(expected.source_ref, {
+        force_fresh = true,
+        consumer = "marketing-radar-v2-durable-triage-set",
+      })
+      if type(issue) ~= "table" or tostring(issue.state or ""):upper() ~= "OPEN" then
+        return nil, "signal-not-open"
+      end
+      local payload = {
+        schema = "github-proxy.v1",
+        type = "issue",
+        repo = ref:match("^([^#]+)#"),
+        number = tonumber(ref:match("#issue/(%d+)$")),
+        source_ref = expected.source_ref,
+      }
+      local current, why = classify(payload, issue, session, authors)
+      if current == nil or current.kind ~= "radar-signal" or current.status ~= "awaiting-review"
+          or current.signal_digest ~= expected.signal_digest
+          or caps.proposal_group_key(current) ~= identity.group_key then
+        local mismatch = why or current and current.triage_reason
+        if mismatch == nil and current ~= nil then
+          if current.kind ~= "radar-signal" then
+            mismatch = "signal-kind-changed"
+          elseif current.status ~= "awaiting-review" then
+            mismatch = "signal-not-awaiting-review"
+          elseif current.signal_digest ~= expected.signal_digest then
+            mismatch = "signal-digest-mismatch"
+          elseif caps.proposal_group_key(current) ~= identity.group_key then
+            mismatch = "signal-group-mismatch"
+          end
+        end
+        return nil, "signal-set-changed:" .. tostring(mismatch or "invalid-signal")
+      end
+      -- Keep the fresh authority visible to downstream adapters as well as in
+      -- trusted_body_context, so lineage/draft callers cannot accidentally
+      -- fall back to the stale catalog row.
+      current.raw_body = issue.body
+      current.raw_author_login = issue.author_login
+      issues[ref] = issue
+      signals[#signals + 1] = current
+    end
+    local fresh_identity, identity_why = caps.signal_set_identity(signals, session)
+    if fresh_identity == nil then
+      return nil, "signal-set-changed:" .. tostring(identity_why)
+    end
+    if fresh_identity.group_key ~= identity.group_key
+        or fresh_identity.signal_set_digest ~= identity.signal_set_digest then
+      return nil, "signal-set-changed:digest-or-group-mismatch"
+    end
+    return {
+      identity = fresh_identity,
+      signals = fresh_identity.signals,
+      issues = issues,
+    }, nil
+  end
+
   local function handle_signal(item, current_issue, session)
     raise("radar_signal_imported", caps.radar_signal_imported(item))
     if item.status == "needs-triage" then
@@ -435,6 +447,7 @@ local function make_department(handles)
         item, "needs-triage: " .. tostring(item.triage_reason)))
       return
     end
+    local options = review_options()
     local rows = catalog_rows(github, item.repo, "open")
     item.raw_body = current_issue.body
     item.raw_author_login = current_issue.author_login
@@ -445,18 +458,111 @@ local function make_department(handles)
         item, "needs-triage: " .. tostring(identity_why)))
       return
     end
-    local options = review_options()
-    local existing, existing_why = matching_review(github, rows, item.repo, identity, session, options)
+    local existing, existing_why = matching_review(
+      github, rows, item.repo, identity, session, options, item, false)
     if existing_why ~= nil then
       raise("github-proxy.github_issue_comment_request", caps.status_comment(
         item, "needs-triage: " .. tostring(existing_why)))
+      return
+    end
+    local all_rows
+    if existing == nil then
+      all_rows = catalog_rows(github, item.repo, "all")
+      existing, existing_why = matching_review(
+        github, all_rows, item.repo, identity, session, options, item, true)
+      if existing_why ~= nil then
+        raise("github-proxy.github_issue_comment_request", caps.status_comment(
+          item, "needs-triage: " .. tostring(existing_why)))
+        return
+      end
+    end
+    if existing ~= nil and existing.terminal then
+      local status = trusted_terminal_status(existing, item.repo, session, options.bot_login)
+      if status == nil then
+        raise("github-proxy.github_issue_comment_request", caps.status_comment(
+          item, "needs-triage: terminal-review-status-missing"))
+        return
+      end
+      local recoverable, recoverable_why = terminal_recovery.recoverable_signals(
+        github, existing.decision.proposal, session, signal_author_logins(session), classify)
+      if recoverable == nil then
+        raise("github-proxy.github_issue_comment_request", caps.status_comment(
+          item, "needs-triage: " .. tostring(recoverable_why)))
+        return
+      end
+      if not existing.closed then
+        local review_terminal = terminal_review_item({
+          source_ref = existing.decision.proposal.review_source_ref,
+          repo = item.repo,
+          issue_number = tonumber(existing.row.number),
+          trace_id = "github:marketing-radar:"
+            .. existing.decision.proposal.review_source_ref.ref,
+        }, existing.decision, session)
+        raise("github-proxy.github_issue_comment_request", caps.status_comment(
+          review_terminal,
+          status,
+          caps.close_handoff(review_terminal, "weekly-plan-change", existing.decision)
+        ))
+      end
+      for _, signal in ipairs(recoverable) do
+        local signal_terminal = terminal_item(signal, session)
+        raise("github-proxy.github_issue_comment_request", caps.status_comment(
+          signal_terminal,
+          status,
+          caps.close_handoff(signal_terminal, "radar-signal", existing.decision)
+        ))
+      end
+      if not proposal_reviews.proposal_contains_signal(existing.decision.proposal, item) then
+        raise("github-proxy.github_issue_comment_request", caps.status_comment(
+          item, "awaiting-prior-terminal-handoff"))
+      end
       return
     end
     if existing ~= nil and existing.latest.signal_set_digest == identity.signal_set_digest then
       raise("github-proxy.github_issue_comment_request", caps.status_comment(item, "awaiting-review"))
       return
     end
-    local revision = existing and (existing.latest.revision + 1) or 1
+    local fresh_set, fresh_set_why = fresh_signal_set(identity, session)
+    if fresh_set == nil then
+      log.info("marketing-radar dept=import_issue tag=SKIP reason=signal-set-changed-during-durable-check:"
+        .. tostring(fresh_set_why))
+      return
+    end
+    -- From this point onward all proposal inputs are the fresh classified set.
+    identity = fresh_set.identity
+    signals = fresh_set.signals
+    local anchor, anchor_why = durable_triage.anchor(identity)
+    if anchor == nil then
+      error("marketing-radar: durable triage anchor failed: " .. tostring(anchor_why), 0)
+    end
+    local anchor_issue = fresh_set.issues[anchor.source_ref.ref]
+    local persisted_failure, persisted_why = durable_triage.persisted_failure(
+      anchor_issue, identity, options.bot_login)
+    if persisted_why ~= nil then
+      error("marketing-radar: durable triage lookup failed: " .. tostring(persisted_why), 0)
+    end
+    if persisted_failure ~= nil then
+      for _, signal in ipairs(identity.signals) do
+        if not durable_triage.has_failure(
+            fresh_set.issues[signal.source_ref.ref], signal, identity,
+            persisted_failure, options.bot_login) then
+          raise_signal_triage(signal, identity, persisted_failure)
+        end
+      end
+      log.info("marketing-radar dept=import_issue tag=SKIP reason=durable-triage-"
+        .. persisted_failure)
+      return
+    end
+    local revision = 1
+    if existing ~= nil then
+      local revision_why
+      revision, revision_why = caps.next_proposal_revision(existing.latest.revision)
+      if revision == nil then
+        raise("github-proxy.github_issue_comment_request", caps.status_comment(
+          item, "needs-triage: " .. tostring(revision_why)))
+        return
+      end
+    end
     local lineage, lineage_why = proposal_lineage(signals, identity, session, existing, revision)
     if lineage == nil then
       raise("github-proxy.github_issue_comment_request", caps.status_comment(
@@ -465,9 +571,9 @@ local function make_department(handles)
     end
     local generated, draft_why = draft_generator(signals, revision)
     if generated == nil then
-      if tostring(draft_why):find("^semantic%-conflict:") then
-        raise("github-proxy.github_issue_comment_request", caps.status_comment(
-          item, "needs-triage: " .. tostring(draft_why)))
+      local durable_failure = draft_failure_needs_triage(draft_why)
+      if durable_failure ~= nil then
+        raise_signal_set_triage(identity, durable_failure)
         return
       end
       error("marketing-radar: read-only draft generation failed: " .. tostring(draft_why), 0)
@@ -482,8 +588,9 @@ local function make_department(handles)
       error("marketing-radar: proposal generation failed: " .. tostring(proposal_why), 0)
     end
     if existing == nil then
-      local all_rows = catalog_rows(github, item.repo, "all")
-      local cycle, cycle_why = next_proposal_cycle(all_rows, identity.group_key, options.bot_login)
+      all_rows = all_rows or catalog_rows(github, item.repo, "all")
+      local cycle, cycle_why = next_proposal_cycle(
+        all_rows, identity.group_key, options.bot_login)
       if cycle == nil then
         raise("github-proxy.github_issue_comment_request", caps.status_comment(
           item, "needs-triage: " .. tostring(cycle_why)))
@@ -514,14 +621,25 @@ local function make_department(handles)
           item, "needs-triage: " .. tostring(reload_why)))
         return
       end
-      local revision = decision.proposal.revision + 1
+      local revision, revision_why = caps.next_proposal_revision(decision.proposal.revision)
+      if revision == nil then
+        raise("github-proxy.github_issue_comment_request", caps.status_comment(
+          item, "needs-triage: " .. tostring(revision_why)))
+        return
+      end
       local next_draft, draft_why = draft_generator(signals, revision, {
         change_request = decision.reason,
       })
       if next_draft == nil then
-        if tostring(draft_why):find("^semantic%-conflict:") then
+        local durable_failure = draft_failure_needs_triage(draft_why)
+        if durable_failure ~= nil then
+          local failure_status, failure_why = caps.review_failure_status(decision, durable_failure)
+          if failure_status == nil then
+            error("marketing-radar: review failure correlation failed: "
+              .. tostring(failure_why), 0)
+          end
           raise("github-proxy.github_issue_comment_request", caps.status_comment(
-            item, "needs-triage: " .. tostring(draft_why)))
+            item, failure_status))
           return
         end
         error("marketing-radar: requested revision generation failed: " .. tostring(draft_why), 0)
@@ -639,10 +757,18 @@ local function make_department(handles)
           item, "awaiting-supersession: prior content markers requested"))
         return
       end
-      raise_terminal_comments(item, decision, session, "approved; immutable weekly-content requested")
+      raise_terminal_comments(item, decision, session, terminal_status(decision))
       return
     end
-    raise_terminal_comments(item, decision, session, "rejected: " .. tostring(decision.reason))
+    local rejected_signals, signals_why = current_proposal_signals(
+      decision.proposal, session, item.repo)
+    if rejected_signals == nil then
+      raise("github-proxy.github_issue_comment_request", caps.status_comment(
+        item, "needs-triage: " .. tostring(signals_why)))
+      return
+    end
+    decision.proposal.signals = rejected_signals
+    raise_terminal_comments(item, decision, session, terminal_status(decision))
   end
 
   local function act(event)
@@ -661,7 +787,7 @@ local function make_department(handles)
         .. tostring(session_why))
       return
     end
-    local ok, current_or_error = pcall(fetched_issue, github, payload, false)
+    local ok, current_or_error = pcall(fetched_issue, github, payload, true)
     if not ok then
       error("marketing-radar: current issue read failed: " .. tostring(current_or_error), 0)
     end

@@ -162,6 +162,10 @@ return {
       max_steps = 30,
     }))
     graph.assert_covers(trace, covers)
+    t.is_true(graph.find_delivery(trace, {
+      queue = "github-proxy.github_issue_changed",
+      consumer = "github-auto-twitter-marketing.optional_pr_event_sink",
+    }) == nil)
     local request = graph.require_raise(trace, "x-publisher.x_publish_request")
     t.eq(request.payload.schema, "x-publisher.publish-request.v2")
     t.eq(request.payload.account, account)

@@ -9,7 +9,8 @@ local scheduled_at = os.date("!%Y-%m-%dT%H:%M:%SZ", suite_now - 3600)
 local timeline_created_at = os.date("!%Y-%m-%dT%H:%M:%S.000Z", suite_now - 1800)
 local first_path = assert(timeline.timeline_path(account_id, scheduled_at))
 local run_counter = 0
-local suite_id = tostring(now())
+local process_token = tostring({}):gsub("[^%w]", "")
+local suite_id = process_token .. "-" .. tostring(now())
 
 local function json_escape(value)
   return tostring(value or "")
@@ -241,6 +242,8 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(result.raises[1].payload.status, "blocked")
     t.eq(result.raises[1].payload.blocked_reason, "ambiguous X timeline publish match")
+    t.eq(result.raises[1].payload.authenticated_account, v2.ACCOUNT)
+    t.eq(result.raises[1].payload.publish_attempted, false)
     t.eq(count_calls("nyxid proxy request " .. v2.SERVICE_SLUG .. " /tweets -m POST"), 0)
   end,
 

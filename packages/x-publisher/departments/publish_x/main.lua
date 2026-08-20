@@ -544,7 +544,7 @@ local function make_department(ports)
       window
     )
     if reconcile_why ~= nil then
-      block(payload, reconcile_why, intent)
+      block(payload, reconcile_why, intent, account and account.username or nil)
       return
     end
     if reconciled_post_id ~= nil then
@@ -561,7 +561,7 @@ local function make_department(ports)
     end
     if intent.operation == "quote" and intent.quote_post.mode == "native"
         and not native_quote_enabled() then
-      block(payload, "native quote capability disabled", intent)
+      block(payload, "native quote capability disabled", intent, account and account.username or nil)
       return
     end
 

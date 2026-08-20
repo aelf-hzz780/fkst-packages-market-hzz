@@ -137,6 +137,7 @@ end
 
 local departments = conformance.loaded_departments({
   load_department(),
+  load_sink_department("optional_pr_event_sink"),
   load_sink_department("optional_receipt_sink"),
   load_terminalizer_department(),
   load_sink_department("strategy_import_sink"),
@@ -153,6 +154,20 @@ local function contains(values, needle)
 end
 
 local function payload_for_queue(_path, queue)
+  if queue == "github-proxy.github_pr_changed" then
+    local reference = "owner/repo#pr/42"
+    return {
+      schema = "github-proxy.v1",
+      type = "pr",
+      repo = "owner/repo",
+      number = 42,
+      title = "Unrelated pull request",
+      state = "OPEN",
+      updated_at = "2026-08-17T09:00:00Z",
+      source_ref = { kind = "external", ref = reference },
+      dedup_key = "owner/repo#pr#42@2026-08-17T09:00:00Z",
+    }
+  end
   if queue == "github-proxy.github_comment_written" then
     return {
       schema = "github-proxy.comment-written.v1",

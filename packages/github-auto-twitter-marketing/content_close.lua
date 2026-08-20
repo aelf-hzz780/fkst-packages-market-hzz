@@ -164,10 +164,7 @@ function M.current_issue_decision(issue, context, authority)
     return "skip", "invalid-current-content"
   end
   local state = tostring(issue.state or ""):upper()
-  if state == "CLOSED" then
-    return "converged", "already-closed"
-  end
-  if state ~= "OPEN" then
+  if state ~= "OPEN" and state ~= "CLOSED" then
     return "skip", "current-content-not-open"
   end
   local repo, issue_number, ref = source_target(issue.source_ref)
@@ -194,7 +191,8 @@ function M.current_issue_decision(issue, context, authority)
       or content.approval_id ~= context.approval_id then
     return "skip", "current-content-correlation-mismatch"
   end
-  return "close", nil
+  return state == "CLOSED" and "converged" or "close",
+    state == "CLOSED" and "already-closed" or nil
 end
 
 function M.lock_key(context)

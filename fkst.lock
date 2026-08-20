@@ -4,8 +4,8 @@ git = "https://github.com/ChronoAIProject/fkst-hosted.git"
 libraries = []
 
 [external_source.intent]
-rev = "28563dd34e5eb4d4a481bd0e630d41378d49b3f6"
+rev = "6fe5f82f76f6b2c02058488587f5f6281c203cf3"
 
 [external_source.resolved]
-rev = "28563dd34e5eb4d4a481bd0e630d41378d49b3f6"
-tree_sha256 = "sha256-172f81eee0ad991c07ab779c448bb11311bc35aa44275b61cb586ff0a00a1aa9"
+rev = "6fe5f82f76f6b2c02058488587f5f6281c203cf3"
+tree_sha256 = "sha256-7cc28b7058c0155b459304f68129e9c778de57a3ed3ae87e017794c55eef5fe6"

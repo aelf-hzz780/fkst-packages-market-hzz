@@ -1,7 +1,12 @@
 -- Pure v2 contracts for account-scoped marketing radar review workflows.
 local marketing_content = require("contract.marketing_content")
 local action_strategies = require("action_strategies")
+local control_fields = require("control_fields")
+local issue_close_contract = require("issue_close_contract")
 local limits = require("limits")
+local proposal_identity = require("proposal_identity")
+local proposal_provenance = require("proposal_provenance")
+local review_commands = require("review_commands")
 local session_route = require("contract.session_route")
 local session_authority = require("session_authority")
 local sha256 = require("contract.sha256")
@@ -11,38 +16,13 @@ local x_text = require("contract.x_text")
 
 local M = {}
 
-local CONTROL_VALUE_LIMIT = 512
 local ISSUE_BODY_LIMIT = 11000
 local SIGNAL_SET_LIMIT = 20
+local MAX_PROPOSAL_REVISION = proposal_identity.MAX_REVISION
 local CONFIG_CONTRACT = "marketing-radar.radar-config.v2"
-local PROPOSAL_CONTRACT = "marketing-radar.weekly-plan-change.v2"
+local PROPOSAL_CONTRACT = control_fields.PROPOSAL_CONTRACT
 local SIGNAL_CONTRACT = "marketing-radar.radar-signal.v2"
 local SIGNAL_SCHEMA = "marketing-radar.signal-imported.v2"
-local TERMINAL_HANDOFF_SCHEMA = "marketing-radar.issue-close.v2"
-
-local ALLOWED_FIELDS = {
-  account = true,
-  action = true,
-  contract = true,
-  ["content-digest"] = true,
-  ["content-id"] = true,
-  ["content-revision"] = true,
-  ["content-status"] = true,
-  ["change-scope"] = true,
-  insight = true,
-  project = true,
-  ["proposal-id"] = true,
-  ["proposal-revision"] = true,
-  ["signal-set-digest"] = true,
-  ["source-url"] = true,
-  status = true,
-  ["supersede-mode"] = true,
-  ["target-ref"] = true,
-  topic = true,
-  type = true,
-  week = true,
-  ["work-label"] = true,
-}
 
 local function trim(value)
   return strings.trim(value or "")
@@ -52,16 +32,7 @@ local function normalized_key(value) return trim(value):lower():gsub("_", "-") e
 
 local normalized_login = session_authority.normalize_login
 
-local function runtime_segment(value, limit)
-  local raw = tostring(value or "")
-  local safe = strings.runtime_safe_segment(raw)
-  local max_len = tonumber(limit) or 120
-  if #safe <= max_len then
-    return safe
-  end
-  local suffix = "_" .. strings.decimal_checksum(raw)
-  return safe:sub(1, math.max(1, max_len - #suffix)) .. suffix
-end
+local runtime_segment = proposal_identity.runtime_segment
 
 local function line_iter(body)
   local text = tostring(body or "")
@@ -78,40 +49,6 @@ local function line_iter(body)
     position = next_position + 1
     return line
   end
-end
-
-local function fenced_field(body, field)
-  local target = normalized_key(field)
-  local waiting = false
-  local collecting = false
-  local lines = {}
-  for line in line_iter(body) do
-    if collecting then
-      if line:match("^%s*```") then
-        return trim(table.concat(lines, "\n"))
-      end
-      lines[#lines + 1] = line
-    elseif waiting then
-      if line:match("^%s*```") then
-        collecting = true
-      elseif trim(line) ~= "" then
-        return trim(line)
-      end
-    else
-      local key, value = line:match("^%s*([%w_.-]+)%s*:%s*(.-)%s*$")
-      if key ~= nil and normalized_key(key) == target then
-        local inline = trim(value)
-        if inline ~= "" and inline ~= "|" and inline ~= ">" then
-          return inline
-        end
-        waiting = true
-      end
-    end
-  end
-  if collecting then
-    return trim(table.concat(lines, "\n"))
-  end
-  return nil
 end
 
 local function canonical_body(body)
@@ -133,12 +70,15 @@ local function tagged_digest(value)
   return "sha256:" .. sha256.hex(tostring(value or ""))
 end
 
+local signal_lineage_digest = proposal_identity.signal_set_digest
+
 local function copy_source_ref(source_ref)
   if type(source_ref) ~= "table" then
     return nil
   end
   local ref = trim(source_ref.ref or source_ref.reference)
-  if source_ref.kind ~= "external" or ref == "" or ref:match("^[^#]+#issue/%d+$") == nil then
+  if source_ref.kind ~= "external" or ref == "" or #ref > 240
+      or ref:match("^[^#]+#issue/%d+$") == nil then
     return nil
   end
   if source_ref.ref ~= nil and source_ref.reference ~= nil and source_ref.ref ~= source_ref.reference then
@@ -178,37 +118,34 @@ function M.resolve_session_route(values)
   return session_authority.resolve_route(values)
 end
 
-function M.parse_control_fields(body)
-  local fields = {}
-  if type(body) ~= "string" then
-    return fields, "invalid-control-body"
+M.parse_control_fields = control_fields.parse
+
+function M.proposal_catalog_group(body)
+  local fields, fields_why, intent, complete_identity = M.parse_control_fields(body)
+  if not intent then
+    return nil, false, fields_why or "not-weekly-plan-change-v2"
   end
-  if #body > 32000 then
-    return fields, "control-body-too-large"
+  if fields_why ~= nil then
+    return nil, true, fields_why
   end
-  local in_fence = false
-  for line in line_iter(body) do
-    if line:match("^%s*```") then
-      in_fence = not in_fence
-    elseif not in_fence then
-      local key, value = line:match("^%s*([%w_.-]+)%s*:%s*(.-)%s*$")
-      local normalized = normalized_key(key)
-      local cleaned = trim(value)
-      if ALLOWED_FIELDS[normalized] and cleaned ~= "" then
-        if fields[normalized] ~= nil then
-          return fields, "duplicate-control-field:" .. normalized
-        end
-        if #cleaned > CONTROL_VALUE_LIMIT then
-          return fields, "control-field-too-large:" .. normalized
-        end
-        fields[normalized] = cleaned
-      end
-    end
+  if not complete_identity then
+    return nil, true, "incomplete-proposal-identity"
   end
-  if in_fence then
-    return fields, "unterminated-control-fence"
+  local project = strings.sanitize_key(trim(fields.project):lower(), 180)
+  local account = session_route.normalize_account(fields.account)
+  local action = normalized_key(fields.action)
+  if trim(fields.project) == "" or project == "" or account == nil
+      or trim(fields.week) == "" or action == "" then
+    return nil, true, "incomplete-proposal-group"
   end
-  return fields, nil
+  return M.proposal_group_key({
+    project = project,
+    account = account,
+    week = fields.week,
+    topic = fields.topic,
+    action = action,
+    target_ref = fields["target-ref"],
+  }), true, nil
 end
 
 function M.saga_conformance_errors()
@@ -264,7 +201,7 @@ function M.classify_issue(payload, options)
     insight = fields.insight,
     source_url = fields["source-url"],
     proposal_id = fields["proposal-id"],
-    proposal_revision = tonumber(fields["proposal-revision"]),
+    proposal_revision = proposal_identity.revision(fields["proposal-revision"]),
     content_digest = fields["content-digest"],
     signal_set_digest = fields["signal-set-digest"],
     status = fields.status,
@@ -342,8 +279,8 @@ function M.classify_issue(payload, options)
       "source_url", "insight", "source_ref", "body",
     }))
     local identity = table.concat({
-      "marketing-radar", runtime_segment(item.project), runtime_segment(item.account),
-      runtime_segment(item.week), runtime_segment(source_ref.ref, 180), runtime_segment(item.signal_digest, 80),
+      "marketing-radar", runtime_segment(item.project, 80), runtime_segment(item.account),
+      runtime_segment(item.week), runtime_segment(source_ref.ref, 160), runtime_segment(item.signal_digest, 80),
     }, "/")
     item.artifact_id = identity .. "/signal"
     item.dedup_key = identity .. "/import"
@@ -359,14 +296,7 @@ function M.classify_issue(payload, options)
   return item
 end
 
-function M.proposal_group_key(signal)
-  return table.concat({
-    "marketing-radar", runtime_segment(signal.project), runtime_segment(signal.account),
-    runtime_segment(signal.week), runtime_segment(signal.topic or "general"),
-    runtime_segment(signal.action or "unknown"), runtime_segment(signal.target_ref or "none", 180),
-    "weekly-plan-change",
-  }, "/")
-end
+M.proposal_group_key = proposal_identity.group_key
 
 local function normalized_signal_set(input_signals, session)
   local by_source = {}
@@ -403,7 +333,6 @@ local function normalized_signal_set(input_signals, session)
   end)
   local first = signals[1]
   local group_key = M.proposal_group_key(first)
-  local digests = {}
   for _, signal in ipairs(signals) do
     if signal.project ~= first.project or signal.account ~= first.account or signal.week ~= first.week
         or trim(signal.topic) ~= trim(first.topic) then
@@ -418,14 +347,12 @@ local function normalized_signal_set(input_signals, session)
     if signal.account ~= session.account then
       return nil, "account-session-mismatch"
     end
-    digests[#digests + 1] = signal.signal_digest
   end
   return {
     signals = signals,
     first = first,
-    digests = digests,
     group_key = group_key,
-    signal_set_digest = tagged_digest(table.concat(digests, "\n")),
+    signal_set_digest = signal_lineage_digest(signals),
   }, nil
 end
 
@@ -507,8 +434,9 @@ function M.build_proposal(input_signals, session_value, draft, lineage)
   if not analysis.valid then
     return nil, "invalid-x-text:" .. tostring(analysis.reason)
   end
-  local revision = tonumber(draft and draft.revision) or 1
-  if revision < 1 or revision % 1 ~= 0 then
+  local revision = draft and draft.revision ~= nil
+    and proposal_identity.revision(draft.revision) or 1
+  if revision == nil then
     return nil, "invalid-proposal-revision"
   end
   local lineage_values = lineage or {}
@@ -517,7 +445,10 @@ function M.build_proposal(input_signals, session_value, draft, lineage)
     proposal_id = identity.proposal_id
   end
   local content_id = trim(lineage_values.content_id)
-  local content_revision = tonumber(lineage_values.content_revision)
+  local content_revision = proposal_identity.revision(lineage_values.content_revision)
+  if lineage_values.content_revision ~= nil and content_revision == nil then
+    return nil, "invalid-content-lineage"
+  end
   if first.action == "revise" and (content_id == "" or content_revision == nil) then
     return nil, "revision-lineage-required"
   end
@@ -528,11 +459,14 @@ function M.build_proposal(input_signals, session_value, draft, lineage)
     content_revision = revision
   end
   if #proposal_id > 180 or #content_id > 180 or content_revision < 1
-      or content_revision % 1 ~= 0 then
+      or content_revision > MAX_PROPOSAL_REVISION
+      or content_revision % 1 ~= 0
+      or (first.action ~= "revise" and content_revision ~= revision) then
     return nil, "invalid-content-lineage"
   end
   local proposal = {
     contract = PROPOSAL_CONTRACT,
+    status = "awaiting-review",
     project = first.project,
     account = first.account,
     work_label = session.logical_work_label,
@@ -557,6 +491,10 @@ function M.build_proposal(input_signals, session_value, draft, lineage)
   proposal.content_digest = marketing_content.digest(proposal_content_record(proposal))
   if proposal.content_digest == nil then
     return nil, "content-contract-rejected"
+  end
+  proposal.proposal_digest = proposal_identity.proposal_digest(proposal)
+  if proposal.proposal_digest == nil then
+    return nil, "proposal-contract-rejected"
   end
   local rendered = M.render_proposal(proposal)
   if rendered == nil or #rendered > ISSUE_BODY_LIMIT then
@@ -583,8 +521,9 @@ function M.render_proposal(proposal)
   append(lines, "content-id", proposal.content_id)
   append(lines, "content-revision", proposal.content_revision)
   append(lines, "signal-set-digest", proposal.signal_set_digest)
+  append(lines, "proposal-digest", proposal.proposal_digest)
   append(lines, "content-digest", proposal.content_digest)
-  append(lines, "status", "awaiting-review")
+  append(lines, "status", proposal.status)
   for _, signal in ipairs(proposal.signals or {}) do
     lines[#lines + 1] = "signal: " .. signal.source_ref.ref .. " " .. signal.signal_digest
   end
@@ -593,9 +532,7 @@ function M.render_proposal(proposal)
   end
   lines[#lines + 1] = ""
   lines[#lines + 1] = "tweet-text:"
-  lines[#lines + 1] = "```"
-  lines[#lines + 1] = proposal.tweet_text
-  lines[#lines + 1] = "```"
+  lines[#lines + 1] = control_fields.render_fenced(proposal.tweet_text)
   local body = table.concat(lines, "\n")
   if #body > ISSUE_BODY_LIMIT then
     return nil, "proposal-body-too-large"
@@ -611,8 +548,13 @@ function M.parse_proposal(body)
   if fields.contract ~= PROPOSAL_CONTRACT or normalized_key(fields.type) ~= "weekly-plan-change" then
     return nil, "not-weekly-plan-change-v2"
   end
+  local tweet_text, tweet_why = control_fields.fenced_field(body, "tweet-text")
+  if tweet_text == nil then
+    return nil, tweet_why
+  end
   local proposal = {
     contract = fields.contract,
+    status = normalized_key(fields.status),
     project = fields.project,
     account = session_route.normalize_account(fields.account),
     work_label = fields["work-label"],
@@ -623,25 +565,40 @@ function M.parse_proposal(body)
     change_scope = fields["change-scope"],
     supersede_mode = fields["supersede-mode"],
     proposal_id = fields["proposal-id"],
-    revision = tonumber(fields["proposal-revision"]),
+    revision = proposal_identity.revision(fields["proposal-revision"]),
     content_id = fields["content-id"],
-    content_revision = tonumber(fields["content-revision"]),
+    content_revision = proposal_identity.revision(fields["content-revision"]),
     signal_set_digest = fields["signal-set-digest"],
+    proposal_digest = fields["proposal-digest"],
     content_digest = fields["content-digest"],
-    tweet_text = fenced_field(body, "tweet-text"),
+    tweet_text = tweet_text,
     signals = {},
     evidence_refs = {},
   }
-  for line in line_iter(body) do
+  local unfenced_lines, lines_why = control_fields.unfenced_lines(body)
+  if unfenced_lines == nil then
+    return nil, lines_why
+  end
+  local signal_refs = {}
+  for _, line in ipairs(unfenced_lines) do
     local ref, digest = line:match("^%s*signal:%s*([^%s]+)%s+(sha256:[0-9a-f]+)%s*$")
-    if ref ~= nil and digest ~= nil then
+    if line:match("^%s*signal:") then
+      local canonical_ref = copy_source_ref({ kind = "external", ref = ref, reference = ref })
+      if canonical_ref == nil or not sha256.is_tagged(digest) or signal_refs[ref]
+          or #proposal.signals >= SIGNAL_SET_LIMIT then
+        return nil, "invalid-proposal-signal-lineage"
+      end
+      signal_refs[ref] = true
       proposal.signals[#proposal.signals + 1] = {
-        source_ref = { kind = "external", ref = ref, reference = ref },
+        source_ref = canonical_ref,
         signal_digest = digest,
       }
     end
     local evidence = line:match("^%s*evidence:%s*([^%s]+)%s*$")
-    if evidence ~= nil then
+    if line:match("^%s*evidence:") then
+      if copy_source_ref({ kind = "external", ref = evidence, reference = evidence }) == nil then
+        return nil, "invalid-proposal-evidence-lineage"
+      end
       proposal.evidence_refs[#proposal.evidence_refs + 1] = evidence
     end
   end
@@ -665,21 +622,35 @@ function M.parse_proposal(body)
     end
   end
   if proposal.project == nil or proposal.account == nil or proposal.work_label == nil
+      or proposal.status ~= "awaiting-review"
       or proposal.week == nil or proposal.proposal_id == nil or proposal.revision == nil
+      or proposal.revision < 1 or proposal.revision > MAX_PROPOSAL_REVISION
+      or proposal.revision % 1 ~= 0
       or trim(proposal.content_id) == "" or proposal.content_revision == nil
-      or proposal.content_revision < 1 or proposal.content_revision % 1 ~= 0
+      or proposal.content_revision < 1
+      or proposal.content_revision > MAX_PROPOSAL_REVISION
+      or proposal.content_revision % 1 ~= 0
       or not sha256.is_tagged(proposal.signal_set_digest)
+      or not sha256.is_tagged(proposal.proposal_digest)
       or not sha256.is_tagged(proposal.content_digest) or #proposal.signals == 0
       or #proposal.evidence_refs == 0 or duplicate_evidence or evidence_count ~= #proposal.signals
       or not all_signals_cited or not analysis.valid
       or strategy == nil or strategy.change_scope ~= proposal.change_scope
-      or strategy.supersede_mode ~= proposal.supersede_mode then
+      or strategy.supersede_mode ~= proposal.supersede_mode
+      or (proposal.action ~= "revise" and proposal.content_revision ~= proposal.revision) then
     return nil, "invalid-proposal-contract"
+  end
+  if signal_lineage_digest(proposal.signals) ~= proposal.signal_set_digest then
+    return nil, "proposal-signal-set-digest-mismatch"
   end
   proposal.group_key = M.proposal_group_key(proposal)
   local expected = marketing_content.digest(proposal_content_record(proposal))
   if expected ~= proposal.content_digest then
     return nil, "proposal-content-digest-mismatch"
+  end
+  local proposal_digest = proposal_identity.proposal_digest(proposal)
+  if proposal_digest ~= proposal.proposal_digest then
+    return nil, "proposal-digest-mismatch"
   end
   return proposal
 end
@@ -688,39 +659,109 @@ function M.latest_proposal(issue, bot_login)
   if type(issue) ~= "table" then
     return nil, "invalid-review-issue"
   end
-  local latest = nil
-  local latest_canonical = nil
-  local conflict = false
-  local function consider(body, author_login)
-    if not login_matches(author_login, bot_login) then
-      return
-    end
-    local parsed = M.parse_proposal(body)
-    if parsed ~= nil then
-      local canonical = M.render_proposal(parsed)
-      if latest ~= nil and parsed.revision == latest.revision
-          and canonical ~= latest_canonical then
-        conflict = true
-        return
-      end
-      if latest == nil or parsed.revision > latest.revision then
-        latest = parsed
-        latest_canonical = canonical
-      end
-    end
+  if not login_matches(issue.author_login, bot_login) then
+    return nil, "review-author-mismatch"
   end
-  consider(issue.body, issue.author_login)
+
+  local root, root_why = M.parse_proposal(issue.body)
+  if root == nil then
+    return nil, "malformed-bot-proposal-root:" .. tostring(root_why)
+  end
+  local root_marker, root_marker_why = proposal_provenance.issue_create(issue.body)
+  if root_marker == nil then
+    return nil, "malformed-bot-proposal-root:" .. tostring(root_marker_why)
+  end
+  if root_marker.group_key ~= root.group_key then
+    return nil, "conflicting-bot-proposal-root-provenance"
+  end
+  if root.revision ~= 1 then
+    return nil, "invalid-bot-proposal-root-revision"
+  end
+
+  local revisions = {}
+  local canonicals = {}
+  local highest = 0
+  local revision_count = 0
+  local function add_revision(proposal)
+    local canonical, canonical_why = M.render_proposal(proposal)
+    if canonical == nil then
+      return nil, canonical_why
+    end
+    local previous = canonicals[proposal.revision]
+    if previous ~= nil and previous ~= canonical then
+      return nil, "conflicting-bot-proposal-revision"
+    end
+    if revisions[proposal.revision] == nil then
+      revisions[proposal.revision] = proposal
+      revision_count = revision_count + 1
+    end
+    canonicals[proposal.revision] = previous or canonical
+    highest = math.max(highest, proposal.revision)
+    return true, nil
+  end
+  local root_added, root_add_why = add_revision(root)
+  if root_added == nil then
+    return nil, "malformed-bot-proposal-root:" .. tostring(root_add_why)
+  end
+
   for _, comment in ipairs(issue.comments or {}) do
-    consider(comment.body, comment.author_login)
+    if login_matches(comment.author_login, bot_login) then
+      local parsed, parsed_why = M.parse_proposal(comment.body)
+      local marker, marker_why, marker_intent = proposal_provenance.revision_comment(comment.body)
+      local fields = M.parse_control_fields(comment.body)
+      local control_intent = fields.contract == PROPOSAL_CONTRACT
+        or normalized_key(fields.type) == "weekly-plan-change"
+      if parsed == nil and (control_intent or marker_intent) then
+        return nil, "malformed-bot-proposal-revision:"
+          .. tostring(marker_why or parsed_why)
+      end
+      if parsed ~= nil then
+        if marker == nil then
+          return nil, "malformed-bot-proposal-revision:"
+            .. tostring(marker_why or "proposal-revision-provenance-missing")
+        end
+        if marker.group_key ~= parsed.group_key
+            or marker.revision ~= parsed.revision
+            or marker.signal_set_digest ~= parsed.signal_set_digest then
+          return nil, "conflicting-bot-proposal-provenance"
+        end
+        local added, add_why = add_revision(parsed)
+        if added == nil then
+          if add_why == "conflicting-bot-proposal-revision" then
+            return nil, add_why
+          end
+          return nil, "malformed-bot-proposal-revision:" .. tostring(add_why)
+        end
+      end
+    end
   end
-  if conflict then
-    return nil, "conflicting-bot-proposal-revision"
+
+  if revision_count ~= highest then
+    return nil, "discontinuous-bot-proposal-revision"
   end
-  if latest == nil then
-    return nil, "missing-bot-proposal"
+  local fixed = {
+    "proposal_id", "group_key", "account", "project", "week", "topic", "action",
+    "target_ref", "work_label", "content_id",
+  }
+  for revision = 2, highest do
+    local proposal = revisions[revision]
+    for _, field in ipairs(fixed) do
+      if tostring(proposal[field] or "") ~= tostring(root[field] or "") then
+        return nil, "conflicting-bot-proposal-lineage"
+      end
+    end
+    if proposal.action == "revise" and proposal.content_revision ~= root.content_revision then
+      return nil, "conflicting-bot-proposal-lineage"
+    end
   end
-  return latest
+  return revisions[highest]
 end
+
+function M.review_failure_status(decision, failure_reason)
+  return review_commands.failure_status(decision, failure_reason)
+end
+
+M.next_proposal_revision = proposal_identity.next_revision
 
 function M.review_decision(issue, options)
   local opts = options or {}
@@ -728,53 +769,19 @@ function M.review_decision(issue, options)
   if proposal == nil then
     return nil, proposal_why
   end
-  local authorized = session_authority.login_set(opts.authorized_reviewers)
-  local saw_unauthorized = false
-  local saw_stale = false
-  for index = 1, #(issue.comments or {}) do
-    local comment = issue.comments[index]
-    local command, id, revision, reason = tostring(comment.body or ""):match(
-      "^%s*/marketing%s+([%w-]+)%s+([^@%s]+)@([^%s]+)%s*(.-)%s*$"
-    )
-    if command == "approve" or command == "request-changes" or command == "reject" then
-      local author = normalized_login(comment.author_login)
-      if id ~= proposal.proposal_id or tostring(revision) ~= tostring(proposal.revision) then
-        saw_stale = true
-      elseif author == nil or not authorized[author] then
-        saw_unauthorized = true
-      else
-        if command ~= "approve" and trim(reason) == "" then
-          return nil, "review-reason-required"
-        end
-        if #trim(reason) > CONTROL_VALUE_LIMIT
-            or trim(reason):find("[%z\1-\31\127]") ~= nil then
-          return nil, "invalid-review-reason"
-        end
-        return {
-          command = command,
-          reason = trim(reason) ~= "" and trim(reason) or nil,
-          reviewer = author,
-          comment_id = comment.id,
-          approval_id = proposal.proposal_id .. "@" .. tostring(proposal.revision),
-          proposal = proposal,
-        }
-      end
-    end
-  end
-  if saw_unauthorized then
-    return nil, "unauthorized-review-command"
-  end
-  if saw_stale then
-    return nil, "stale-proposal-revision"
-  end
-  return nil, "no-review-command"
+  local failure_dedup_root = type(issue.source_ref) == "table"
+    and type(issue.source_ref.ref) == "string" and issue.source_ref.ref ~= ""
+    and ("marketing-radar/" .. runtime_segment(issue.source_ref.ref, 180)) or nil
+  return review_commands.decision(issue, proposal, opts, failure_dedup_root)
 end
 
 function M.weekly_plan_change_issue_request(proposal, session_value, cycle_value)
   local session = assert(normalized_session(session_value))
-  local cycle = tonumber(cycle_value) or 1
-  assert(cycle >= 1 and cycle % 1 == 0, "marketing-radar: invalid proposal cycle")
+  local cycle = assert(proposal_identity.revision(cycle_value or 1),
+    "marketing-radar: invalid proposal cycle")
   local body = assert(M.render_proposal(proposal))
+  local dedup_key = assert(proposal_identity.dedup_key(
+    proposal.group_key, "/create/cycle-" .. tostring(cycle)))
   return {
     schema = "github-proxy.issue-create.v1",
     repo = proposal.source_ref.ref:match("^([^#]+)#"),
@@ -782,7 +789,7 @@ function M.weekly_plan_change_issue_request(proposal, session_value, cycle_value
     body = body,
     labels = { session.effective_work_label },
     assignees = { session.creator },
-    dedup_key = proposal.group_key .. "/create/cycle-" .. tostring(cycle),
+    dedup_key = dedup_key,
     source_ref = copy_source_ref(proposal.source_ref),
     parent_comment_target = {
       repo = proposal.source_ref.ref:match("^([^#]+)#"),
@@ -793,13 +800,15 @@ end
 
 function M.proposal_revision_comment_request(review_issue, proposal)
   local body = assert(M.render_proposal(proposal))
+  local dedup_key = assert(proposal_identity.dedup_key(
+    proposal.group_key, "/revision/" .. tostring(proposal.revision)
+      .. "/" .. proposal.signal_set_digest))
   return {
     schema = "github-proxy.v1",
     repo = review_issue.source_ref.ref:match("^([^#]+)#"),
     issue_number = source_number(review_issue.source_ref),
     body = body,
-    dedup_key = proposal.group_key .. "/revision/" .. tostring(proposal.revision)
-      .. "/" .. runtime_segment(proposal.signal_set_digest, 80),
+    dedup_key = dedup_key,
     source_ref = copy_source_ref(review_issue.source_ref),
   }
 end
@@ -810,6 +819,8 @@ function M.approved_weekly_content_issue_request(proposal, session_value)
   local body, digest = marketing_content.render(record)
   assert(body ~= nil and digest == proposal.content_digest, "marketing-radar: approved content digest drift")
   local source_ref = copy_source_ref(proposal.review_source_ref or proposal.source_ref)
+  local dedup_key = assert(proposal_identity.dedup_key(
+    proposal.group_key, "/approved-content/" .. runtime_segment(digest, 80)))
   return {
     schema = "github-proxy.issue-create.v1",
     repo = source_ref.ref:match("^([^#]+)#"),
@@ -817,7 +828,7 @@ function M.approved_weekly_content_issue_request(proposal, session_value)
     body = body,
     labels = { session.effective_work_label },
     assignees = { session.creator },
-    dedup_key = proposal.group_key .. "/approved-content/" .. runtime_segment(digest, 80),
+    dedup_key = dedup_key,
     source_ref = source_ref,
     parent_comment_target = {
       repo = source_ref.ref:match("^([^#]+)#"),
@@ -858,94 +869,16 @@ function M.radar_config_imported(item)
   }
 end
 
-function M.status_comment(item, status, handoff)
-  local dedup = item.dedup_key or item.group_key or ("marketing-radar/" .. runtime_segment(item.source_ref.ref, 180))
-  local request = {
-    schema = "github-proxy.v1",
-    repo = item.repo or item.source_ref.ref:match("^([^#]+)#"),
-    issue_number = item.issue_number or source_number(item.source_ref),
-    body = "Marketing radar v0.3.0: " .. tostring(status)
-      .. "\n\naccount: " .. tostring(item.account)
-      .. "\npublish_attempted: false"
-      .. "\ntrace-id: " .. tostring(item.trace_id or "n/a"),
-    dedup_key = dedup .. "/status/" .. runtime_segment(status, 100),
-    source_ref = copy_source_ref(item.source_ref),
-  }
-  if handoff ~= nil then
-    handoff.comment_dedup_key = request.dedup_key
-    request.handoff = handoff
-  end
-  return request
-end
+M.status_comment = issue_close_contract.status_comment
+M.close_handoff = issue_close_contract.close_handoff
+M.close_ack_context = issue_close_contract.close_ack_context
 
-function M.close_handoff(item, terminal_kind, decision)
-  local business_digest = item.signal_digest or item.content_digest
-  return {
-    schema = TERMINAL_HANDOFF_SCHEMA,
-    kind = terminal_kind,
-    account = item.account,
-    effective_work_label = item.session_work_label,
-    logical_work_label = item.logical_work_label,
-    session_creator = item.session_creator,
-    business_digest = business_digest,
-    proposal_id = decision and decision.proposal and decision.proposal.proposal_id or item.proposal_id,
-    proposal_revision = decision and decision.proposal and decision.proposal.revision or item.proposal_revision,
-    review_command = decision and decision.command or nil,
-    review_comment_id = decision and decision.comment_id or nil,
-    source_ref = copy_source_ref(item.source_ref),
-    trace_id = item.trace_id,
-  }
-end
-
-function M.close_ack_context(payload)
-  if type(payload) ~= "table" or payload.schema ~= "github-proxy.comment-written.v1"
-      or payload.target ~= "issue" or payload.comment_id == nil or type(payload.handoff) ~= "table" then
-    return nil, "invalid-comment-ack"
-  end
-  local handoff = payload.handoff
-  local source_ref = copy_source_ref(handoff.source_ref)
-  local payload_ref = copy_source_ref(payload.source_ref)
-  if handoff.schema ~= TERMINAL_HANDOFF_SCHEMA
-      or (handoff.kind ~= "radar-signal" and handoff.kind ~= "weekly-plan-change")
-      or source_ref == nil or payload_ref == nil or source_ref.ref ~= payload_ref.ref
-      or payload.request_dedup_key ~= handoff.comment_dedup_key
-      or payload.dedup_key ~= handoff.comment_dedup_key .. "/written/" .. tostring(payload.comment_id)
-      or tonumber(payload.issue_number) ~= source_number(source_ref)
-      or payload.repo ~= source_ref.ref:match("^([^#]+)#") then
-    return nil, "invalid-close-correlation"
-  end
-  local session, why = normalized_session({
-    effective_work_label = handoff.effective_work_label,
-    logical_work_label = handoff.logical_work_label,
-    creator = handoff.session_creator,
-    account = handoff.account,
-  })
-  if session == nil or not sha256.is_tagged(handoff.business_digest) then
-    return nil, why or "invalid-business-digest"
-  end
-  return {
-    kind = handoff.kind,
-    repo = payload.repo,
-    issue_number = tonumber(payload.issue_number),
-    source_ref = source_ref,
-    business_digest = handoff.business_digest,
-    proposal_id = handoff.proposal_id,
-    proposal_revision = tonumber(handoff.proposal_revision),
-    review_command = handoff.review_command,
-    review_comment_id = handoff.review_comment_id,
-    trace_id = handoff.trace_id,
-    session = session,
-  }
-end
-
-function M.current_close_decision(issue, context, review_options)
+function M.current_close_decision(issue, context, review_options, review_issue)
   if type(issue) ~= "table" then
     return "skip", "invalid-current-issue"
   end
-  if tostring(issue.state or ""):upper() == "CLOSED" then
-    return "converged", "already-closed"
-  end
-  if tostring(issue.state or ""):upper() ~= "OPEN" then
+  local state = tostring(issue.state or ""):upper()
+  if state ~= "OPEN" and state ~= "CLOSED" then
     return "skip", "current-issue-not-open"
   end
   local item, why = M.classify_issue({
@@ -963,34 +896,60 @@ function M.current_close_decision(issue, context, review_options)
     issue_labels = issue.labels,
     issue_assignees = issue.assignees,
   })
-  if item == nil or item.kind ~= context.kind then
+  if item == nil or item.kind ~= context.kind or item.status == "needs-triage" then
     return "skip", "current-issue-invalid:" .. tostring(why)
   end
   if context.kind == "radar-signal" then
-    return item.signal_digest == context.business_digest and "close" or "skip",
-      item.signal_digest == context.business_digest and nil or "signal-digest-changed"
+    if item.signal_digest ~= context.business_digest then
+      return "skip", "signal-digest-changed"
+    end
+    local review_state = type(review_issue) == "table"
+      and tostring(review_issue.state or ""):upper() or ""
+    local review_ref = context.review_source_ref
+    local review_item, review_why = M.classify_issue({
+      schema = "github-proxy.v1",
+      type = "issue",
+      repo = review_ref.ref:match("^([^#]+)#"),
+      number = source_number(review_ref),
+      labels = review_issue and review_issue.labels,
+      assignees = review_issue and review_issue.assignees,
+      body = review_issue and review_issue.body,
+      source_ref = review_ref,
+    }, {
+      session = context.session,
+      issue_body = review_issue and review_issue.body,
+      issue_labels = review_issue and review_issue.labels,
+      issue_assignees = review_issue and review_issue.assignees,
+    })
+    if (review_state ~= "OPEN" and review_state ~= "CLOSED")
+        or review_item == nil or review_item.kind ~= "weekly-plan-change"
+        or review_item.status == "needs-triage" then
+      return "skip", "review-issue-invalid:" .. tostring(review_why)
+    end
   end
-  local decision, decision_why = M.review_decision(issue, review_options)
+  local review_source = context.kind == "radar-signal" and review_issue or issue
+  local decision, decision_why = M.review_decision(review_source, review_options)
   if decision == nil or decision.command ~= context.review_command
       or tostring(decision.comment_id) ~= tostring(context.review_comment_id)
       or decision.proposal.proposal_id ~= context.proposal_id
       or decision.proposal.revision ~= context.proposal_revision
-      or decision.proposal.content_digest ~= context.business_digest then
+      or decision.proposal.proposal_digest ~= context.proposal_digest
+      or decision.proposal.content_digest ~= context.content_digest then
     return "skip", "review-decision-changed:" .. tostring(decision_why)
   end
-  return "close"
+  return state == "CLOSED" and "converged" or "close",
+    state == "CLOSED" and "already-closed" or nil
 end
 
-function M.close_lock_key(context)
-  return "marketing-radar/v2/close/" .. runtime_segment(context.source_ref.ref, 180)
-end
+M.close_lock_key = issue_close_contract.close_lock_key
 
 M.PROPOSAL_CONTRACT = PROPOSAL_CONTRACT
 M.SIGNAL_CONTRACT = SIGNAL_CONTRACT
-M.TERMINAL_HANDOFF_SCHEMA = TERMINAL_HANDOFF_SCHEMA
+M.TERMINAL_HANDOFF_SCHEMA = issue_close_contract.SCHEMA
 M.runtime_segment = runtime_segment
 M.normalized_login = normalized_login
 M.action_strategy = action_strategies.evaluate
 M.canonical_issue_source_ref = source_identity.canonical_issue_source_ref
+M.proposal_create_provenance = proposal_provenance.issue_create
 
 return M

@@ -114,28 +114,50 @@ a real X write.
 
 ## 稳定发布 / Stable Release
 
-Market PR 合入后，从合入后的 `main` commit 创建 `v0.3.0`。Manifest 与三个展开后的
-business package descriptor 必须全部固定到该 tag；不要从 feature branch 创建 tag。
+当前 `stable_hosted_release=blocked` 时，不得创建 `v0.3.0` descriptor，也不得启动 Stable Hosted
+Session。先完成 `v0.3.0-rc.3` Shadow 验收并冻结证据；只有 official dependency 提供 Hosted
+支持的 immutable ref，或单独评审批准 Host 方案后，才可继续 stable 发布。
 
-After the market PR merges, create `v0.3.0` from the merged `main` commit. The manifest and all
-three expanded business package descriptors must be pinned to that tag. Never create the tag from
-a feature branch.
+While `stable_hosted_release=blocked`, do not create the `v0.3.0` descriptor or start a Stable
+Hosted Session. First complete and freeze the `v0.3.0-rc.3` Shadow evidence; continue to a stable
+release only after the official dependency has an immutable Hosted-supported ref or a separately
+reviewed Host solution is approved.
 
-从全新 checkout 验证 tag：
+RC Shadow 的官方 adapter descriptor 固定为
+`ChronoAIProject/fkst-hosted@packages:packages/github-proxy`。该 `@packages` ref 只允许用于
+Shadow；它不是 stable immutable ref，不能绕过 `stable_hosted_release=blocked`。
 
-Verify the tag from a clean checkout:
+The official adapter descriptor for the RC Shadow is
+`ChronoAIProject/fkst-hosted@packages:packages/github-proxy`. The `@packages` ref is Shadow-only;
+it is not a stable immutable ref and cannot bypass `stable_hosted_release=blocked`.
+Do not start a Stable Hosted Session while stable_hosted_release=blocked.
+
+解除 blocker 后，先在 release PR 中把 Manifest 与三个展开后的 business package descriptor
+全部改为目标 ref `v0.3.0`，再合入 clean `main`。随后只在该合入 commit 上创建 `v0.3.0` tag；
+不要从 feature branch 创建 tag，也不要在 tag 之后再修改这些 refs。最后在全新、clean checkout
+执行严格门禁：
+
+After the blocker is resolved, first update the manifest and all three expanded business package
+descriptors to the target ref `v0.3.0` in the release PR and merge that change to a clean `main`.
+Create the `v0.3.0` tag only on that merge commit; never create the tag from a feature branch or edit
+those refs after tagging. Then run the strict gate from a fresh, clean checkout:
 
 ```bash
 git checkout v0.3.0
-python3 scripts/check_x_publishing_contract.py
-scripts/run.sh check
-scripts/run.sh test x-publisher
-scripts/run.sh test-composed
+scripts/run.sh formal-gate
 ```
 
-只有上述命令全部通过，才可声明 package release 完成。回滚时把 hosted manifest pin
-恢复到上一个已验证 stable tag，不修改用户 Environment Profile 或 NyxID authority。
+本地门禁在 clean checkout 中证明 `manifest ref == local Git tag == peeled tag commit == tested HEAD`，
+并通过 contract checker、全部 package/composed tests、source-size 与 official tree lock 检查。它没有
+GitHub Actions 的 `GITHUB_SHA` context，因此不会单独宣称远程 tag provenance 已完成。tag push 后，
+同一门禁在 GitHub tag CI 的 strict mode 再证明 `tested HEAD == GITHUB_SHA`；本地门禁和 tag CI 都通过
+后，才可声明 package release 完成。回滚时把 hosted manifest pin 恢复到上一个已验证 stable tag，
+不修改用户 Environment Profile 或 NyxID authority。
 
-Declare the package release complete only after every command passes. To roll back, restore the
-hosted manifest pin to the previous verified stable tag without changing the user's Environment
+The local gate proves `manifest ref == local Git tag == peeled tag commit == tested HEAD` from a clean
+checkout and passes the contract, package/composed, source-size, and official-tree-lock checks. It has no
+GitHub Actions `GITHUB_SHA` context, so it does not by itself attest remote tag provenance. After the tag
+is pushed, the same gate in GitHub tag CI strict mode additionally proves `tested HEAD == GITHUB_SHA`.
+Declare the package release complete only after both the local gate and tag CI pass. To roll back, restore
+the hosted manifest pin to the previous verified stable tag without changing the user's Environment
 Profile or NyxID authority.

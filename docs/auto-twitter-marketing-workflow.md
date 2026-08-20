@@ -18,26 +18,41 @@ release tag. The manifest intentionally declares no shared work label.
 Manifest 有意不声明共享 work label。
 
 The operator procedure for the RC Shadow is
-[`hzz780-v0.3.0-rc.2-acceptance.md`](hzz780-v0.3.0-rc.2-acceptance.md). It is the authoritative
+[`hzz780-v0.3.0-rc.3-acceptance.md`](hzz780-v0.3.0-rc.3-acceptance.md). It is the authoritative
 runbook for fixture isolation, account normalization, evidence capture, canary approval, and
 rollback.
 
 RC Shadow 的运营步骤见
-[`hzz780-v0.3.0-rc.2-acceptance.md`](hzz780-v0.3.0-rc.2-acceptance.md)。该 Runbook 是隔离
+[`hzz780-v0.3.0-rc.3-acceptance.md`](hzz780-v0.3.0-rc.3-acceptance.md)。该 Runbook 是隔离
 fixture、账号归一、证据留存、Canary 批准与回滚的权威操作说明。
 
 ```text
 ChronoAIProject/fkst-hosted@packages:packages/github-proxy
-aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.2:manifests/auto-twitter-marketing.json
+aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.3:manifests/auto-twitter-marketing.json
 ```
 
-The isolated acceptance Session pins `v0.3.0-rc.2`; after shadow acceptance, replace the descriptor
-above with `v0.3.0`. Stop the RC Session first, then let stable sequentially take over the same
-account-specific work label. They may not process the same Issues concurrently.
+Only the business manifest is immutable. Hosted currently cannot clone the official package from a
+raw SHA, and no official tag contains `packages/github-proxy`, so the RC uses the supported
+`@packages` branch with the SHA drift guard defined by the acceptance runbook. Local and CI composed
+tests still use the exact SHA recorded in `fkst.workspace.toml`.
 
-隔离验收 Session 固定使用 `v0.3.0-rc.2`；Shadow 验收通过后再把上述 descriptor 替换为
-`v0.3.0`。必须先停止 RC，再由 stable 顺序接管同一个账号专属 work label；二者不得并发处理
-同一批 Issue。
+Do not start a Stable Hosted Session while stable_hosted_release=blocked.
+
+只有 business manifest 是不可变引用。Hosted 当前不能从 raw SHA clone official package，且尚无
+official tag 包含 `packages/github-proxy`，因此 RC 使用受支持的 `@packages` branch，并执行验收
+Runbook 规定的 SHA drift guard；本地与 CI composed test 仍使用 `fkst.workspace.toml` 记录的
+完整 SHA。
+
+The isolated acceptance Session pins `v0.3.0-rc.3`. After shadow acceptance, freeze the evidence and
+stop that Session. Do not create the `v0.3.0` descriptor or a Stable Hosted Session until the official
+dependency has an immutable Hosted-supported ref, or a separately reviewed Host solution is
+approved. Once the blocker is resolved, tag the exact clean commit, rerun `scripts/run.sh
+formal-gate`, and only then plan a sequential work-label takeover.
+
+隔离验收 Session 固定使用 `v0.3.0-rc.3`。Shadow 验收通过后只冻结证据并停止该 Session。在
+official dependency 提供 Hosted 支持的 immutable ref，或单独评审批准 Host 方案前，不得创建
+`v0.3.0` descriptor 或 Stable Hosted Session。Blocker 解除后，必须对精确 clean commit 打 tag、
+重跑 `scripts/run.sh formal-gate`，之后才能规划顺序接管 work label。
 
 Each X account has one Hosted Session with a stable, account-specific `### Work Label`. The Host
 injects `FKST_SESSION_WORK_LABEL`, `FKST_SESSION_WORK_LABEL_MAP_JSON`, and
@@ -107,6 +122,23 @@ identity or deduplication.
 聚合。Topic canonicalization 由迁移或运营显式决定，不允许 AI 擅自归类。Signal digest 只使用
 canonical 业务字段与正文；`updated_at` 和 `session_id` 不进入 identity 或 dedup。
 
+When deterministic draft validation ends in `semantic-conflict` or exhausts its one bounded
+overlength correction, every Signal in that aggregate receives a trusted Signal-set-bound triage
+ACK. The marker binds the group, complete Signal-set digest, deterministic anchor, and target
+Signal. Only the anchor marker, written by the trusted bot through `github-proxy`, is durable
+authority; a sibling marker alone cannot freeze the group. Each replay rebuilds the current open
+catalog and fresh-reads the anchor before it can stop ahead of Codex. A missing sibling ACK is
+repaired without another AI call. Closing, rerouting, editing, or adding a Signal changes the group
+or set identity and releases the old marker.
+
+当 deterministic draft validation 返回 `semantic-conflict`，或唯一一次 bounded 超长纠正仍失败
+时，聚合内每条 Signal 都会收到可信且绑定完整 Signal set 的 triage ACK。Marker 同时绑定 group、
+完整 Signal-set digest、deterministic anchor 与目标 Signal。只有可信 bot 经 `github-proxy` 写入的
+anchor marker 才是 durable authority；仅有 sibling marker 不能冻结整组。每次 replay 都会先重建
+当前 open catalog 并 fresh-read anchor，再决定是否在 Codex 前停止；缺失的 sibling ACK 会在不
+重跑 AI 的情况下补齐。关闭、改路由、编辑或新增 Signal 会改变 group 或 set identity，从而使旧
+marker 失效。
+
 ## AI proposal and review / AI 提案与人工审核
 
 The draft adapter sends bounded, authorized Signal controls plus bounded trusted Signal body context
@@ -122,29 +154,67 @@ Draft adapter 会把经过授权且有长度上限的 Signal controls，以及�
 action/target 不得变化，`tweet_text` 必须通过 X weighted-length 校验。
 
 The package creates one `weekly-plan-change` Issue per active proposal group. Bot-authored proposal
-revisions carry a canonical Signal-set digest, Content digest, evidence refs, and immutable revision
-number. Only explicitly authorized reviewers may issue these commands:
+revisions carry a canonical Signal-set digest, Proposal digest, Content digest, evidence refs, and
+immutable revision number. Only explicitly authorized reviewers may issue these commands:
 
 Package 为每个 active proposal group 创建一个 `weekly-plan-change` Issue。由 Bot 发布的每个
-proposal revision 都携带 canonical Signal-set digest、Content digest、evidence refs 和不可变
-revision number。只有明确授权的 reviewer 可以执行：
+proposal revision 都携带 canonical Signal-set digest、Proposal digest、Content digest、evidence
+refs 和不可变 revision number。只有明确授权的 reviewer 可以执行：
 
 ```text
-/marketing approve <proposal-id>@<revision>
-/marketing request-changes <proposal-id>@<revision> <reason>
-/marketing reject <proposal-id>@<revision> <reason>
+/marketing approve <proposal-id>@<revision> <proposal-digest>
+/marketing request-changes <proposal-id>@<revision> <proposal-digest> <reason>
+/marketing reject <proposal-id>@<revision> <proposal-digest> <reason>
 ```
 
 `request-changes` invokes a new read-only draft and publishes `revision + 1`; commands for older
 revisions then fail closed. `approve` requests approved Content but does not close the proposal or
 Signals until `github-proxy` has written a trusted durable issue-created marker and the created
 Content passes a fresh identity/digest read. `reject` records the decision and terminates the
-proposal without creating Content.
+proposal without creating Content. Every command binds the exact Proposal digest shown on that
+revision. The digest covers action/target scope, group identity, Signal lineage, evidence, and the
+Content digest. Editing any of those fields cannot make an earlier approval apply, even if the
+proposal ID, numeric revision, and tweet text are preserved.
 
 `request-changes` 会重新调用 read-only draft 并发布 `revision + 1`，此后针对旧 revision 的命令
 全部 fail closed。`approve` 只请求创建 approved Content；只有 `github-proxy` 写入可信的 durable
 issue-created marker，且新 Content 通过 fresh identity/digest 校验后，proposal 与 Signals 才会
-终结。`reject` 只记录决策并终结 proposal，不创建 Content。
+终结。`reject` 只记录决策并终结 proposal，不创建 Content。每条命令必须绑定该 revision 显示的
+精确 Proposal digest；该 digest 覆盖 action/target scope、group identity、Signal lineage、
+evidence 与 Content digest。即便 proposal ID、数字 revision 和 tweet text 保持不变，编辑其中
+任一业务字段后，旧审批也不能继续生效。
+
+If bounded generation for `request-changes` fails, a trusted marker binds the failure to the exact
+proposal revision and review comment ID. Replays make zero AI calls. The first command remains the
+authority unless that exact failure marker releases it; an authorized reviewer can then add a new
+same-revision command to take over. Proposal text and untrusted comments cannot forge this state.
+Review decisions always use the fresh REST shape, so failure markers and terminal Close handoffs
+carry stable numeric GitHub comment IDs instead of GraphQL `IC_...` node IDs. Before closing a
+Signal, the terminalizer fresh-reads both that Signal and its Review Issue under the close lock and
+revalidates the exact review comment, revision, Proposal digest, and Content digest.
+
+如果 `request-changes` 的 bounded generation 失败，可信 marker 会把失败精确绑定到 proposal
+revision 与 review comment ID；重放不会再次调用 AI。首条命令仍是权威输入，只有绑定该命令的
+精确 failure marker 才能释放它，随后授权 reviewer 可追加新的同 revision 命令接管。Proposal
+文本与不可信评论都不能伪造这一状态。Review decision 始终使用 fresh REST shape，因此 failure
+marker 与 terminal Close handoff 携带稳定的 GitHub numeric comment ID，而不是 GraphQL
+`IC_...` node ID。关闭 Signal 前，terminalizer 会在 close lock 内同时 fresh-read 该 Signal 与其
+Review Issue，并重新校验精确的 review comment、revision、Proposal digest 与 Content digest。
+
+Package-only recovery has one explicit liveness limit: the Proposal controls and the trusted
+`issue-create` marker both live in the mutable Proposal Issue body. If an operator rewrites both so
+the original group and cycle disappear, this package cannot reconstruct that historical cycle from
+GitHub alone and may reuse its external-effect dedup after durable runtime loss. Such an Issue is
+manual triage: stop the Shadow lane, freeze the artifacts, and do not reuse the group. Eliminating
+this limit requires an immutable receipt outside that body in the official package or Host, which is
+outside v0.3.0 and requires separate review.
+
+Package-only recovery 有一个明确的 liveness 边界：Proposal controls 与可信 `issue-create` marker
+都位于可编辑的 Proposal Issue body。如果运营同时改写二者，导致原 group 与 cycle 都消失，
+本 package 无法仅凭 GitHub 重建历史 cycle；durable runtime 丢失后可能复用 external-effect dedup。
+遇到这种 Issue 必须进入人工 triage：停止 Shadow lane、冻结 artifact、禁止复用该 group。彻底消除
+该限制需要 official package 或 Host 在正文之外提供 immutable receipt，不属于 v0.3.0，必须另行
+评审。
 
 ## Immutable Content / 不可变 Content
 
@@ -303,10 +373,23 @@ Formal local gates use mocked GitHub, Codex, NyxID, and X boundaries:
 正式本地门禁会 mock GitHub、Codex、NyxID 和 X boundary：
 
 ```bash
-scripts/run.sh check
-scripts/run.sh test
-scripts/run.sh test-composed
+scripts/run.sh formal-gate
 ```
+
+The release gate ignores `.fkst/env`, rejects framework and official-source pin overrides, and runs
+`verify-framework`, `check`, `test`, and `test-composed` sequentially. The resulting evidence must
+show the tracked/effective official URL/ref, fetched official commit SHA, and locked tree digest.
+The checker intentionally reports `hosted_ref_class=mutable-shadow-only` and
+`stable_hosted_release=blocked`: passing this gate does not turn the official branch into an
+immutable Stable Hosted dependency. Alternate framework runs remain diagnostics and are not release
+evidence.
+
+Release gate 会忽略 `.fkst/env`，拒绝 framework 与 official-source pin override，并顺序执行
+`verify-framework`、`check`、`test` 与 `test-composed`。门禁证据必须包含 tracked/effective
+official URL/ref、实际 fetch 的 official commit SHA 与 locked tree digest。Checker 会明确输出
+`hosted_ref_class=mutable-shadow-only` 与 `stable_hosted_release=blocked`；门禁通过不会把
+official branch 变成 Stable Hosted 的不可变依赖。Alternate framework 运行仍只属于 diagnostic，
+不能作为发布证据。
 
 The RC Hosted Shadow temporarily uses the `hzz780` account and the isolated `auto-x-hzz780` lane.
 It creates copies of source Issues `#116/#117/#118/#124`, normalizes only those copies to

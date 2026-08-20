@@ -1,4 +1,5 @@
 local draft_generator = require("draft_generator")
+local strings = require("contract.strings")
 local t = fkst.test
 
 local function signals()
@@ -42,8 +43,25 @@ end
 local function runner(stdout, capture)
   return function(options)
     capture.options = options
+    capture.calls = (capture.calls or 0) + 1
     return { exit_code = 0, stdout = stdout, stderr = "" }
   end
+end
+
+local function sequence_runner(outputs, capture)
+  return function(options)
+    capture.options = options
+    capture.prompts = capture.prompts or {}
+    capture.prompts[#capture.prompts + 1] = options.prompt
+    local output = outputs[#capture.prompts]
+    return { exit_code = 0, stdout = output, stderr = "" }
+  end
+end
+
+local function draft_stdout(tweet_text)
+  return '{"tweet_text":' .. strings.json_string(tweet_text)
+    .. ',"evidence_refs":["owner/repo#issue/11","owner/repo#issue/12"]'
+    .. ',"action":"add","target_ref":"","semantic_conflict":false,"conflict_reason":""}'
 end
 
 return {
@@ -57,9 +75,62 @@ return {
     t.eq(capture.options.timeout, 600)
     t.is_true(capture.options.prompt:find("authorized_review_change_request", 1, true) ~= nil)
     t.is_true(capture.options.prompt:find("Narrative scope: add one update only.", 1, true) ~= nil)
+    t.is_true(capture.options.prompt:find("<=280 weighted characters", 1, true) ~= nil)
+    t.is_true(capture.options.prompt:find("target <=240 weighted characters", 1, true) ~= nil)
     t.eq(draft.revision, 2)
     t.eq(draft.action, "add")
     t.eq(#draft.evidence_refs, 2)
+  end,
+
+  test_generator_enforces_formal_x_text_ascii_boundaries = function()
+    local at_limit = string.rep("x", 280)
+    local accepted = assert(draft_generator.generate(
+      signals(), 1, runner(draft_stdout(at_limit), {})))
+    t.eq(accepted.tweet_text, at_limit)
+    t.eq(accepted.weighted_length, 280)
+
+    local rejected_capture = {}
+    local rejected, why = draft_generator.generate(signals(), 1, runner(
+      draft_stdout(string.rep("x", 281)), rejected_capture))
+    t.is_nil(rejected)
+    t.eq(why, "draft-correction-exhausted:invalid-x-text:text too long")
+    t.eq(rejected_capture.calls, 2)
+  end,
+
+  test_generator_corrects_overlength_draft_within_same_delivery = function()
+    local capture = {}
+    local generated = assert(draft_generator.generate(signals(), 1, sequence_runner({
+      draft_stdout(string.rep("x", 281)),
+      draft_stdout("A bounded corrected draft with cited evidence."),
+    }, capture)))
+
+    t.eq(generated.tweet_text, "A bounded corrected draft with cited evidence.")
+    t.eq(#capture.prompts, 2)
+    t.is_true(capture.prompts[2]:find("CORRECTION_ATTEMPT=2", 1, true) ~= nil)
+    t.is_true(capture.prompts[2]:find("invalid-x-text:text too long", 1, true) ~= nil)
+  end,
+
+  test_generator_uses_formal_url_and_unicode_weights = function()
+    local url = "https://example.com/releases/" .. string.rep("a", 512)
+    local url_limit = string.rep("x", 256) .. " " .. url
+    local accepted_url = assert(draft_generator.generate(
+      signals(), 1, runner(draft_stdout(url_limit), {})))
+    t.eq(accepted_url.weighted_length, 280)
+
+    local rejected_url, url_why = draft_generator.generate(
+      signals(), 1, runner(draft_stdout(string.rep("x", 257) .. " " .. url), {}))
+    t.is_nil(rejected_url)
+    t.eq(url_why, "draft-correction-exhausted:invalid-x-text:text too long")
+
+    local cjk = string.char(0xE4, 0xB8, 0xAD)
+    local accepted_unicode = assert(draft_generator.generate(
+      signals(), 1, runner(draft_stdout(string.rep(cjk, 140)), {})))
+    t.eq(accepted_unicode.weighted_length, 280)
+
+    local rejected_unicode, unicode_why = draft_generator.generate(
+      signals(), 1, runner(draft_stdout(string.rep(cjk, 141)), {}))
+    t.is_nil(rejected_unicode)
+    t.eq(unicode_why, "draft-correction-exhausted:invalid-x-text:text too long")
   end,
 
   test_generator_fails_closed_on_non_json_extra_fields_scope_conflict_or_missing_evidence = function()
@@ -87,6 +158,14 @@ return {
       t.is_nil(generated)
       t.eq(why, case.why)
     end
+  end,
+
+  test_generator_canonicalizes_multiline_semantic_conflict_reason = function()
+    local generated, why = draft_generator.generate(signals(), 1, runner(
+      '{"tweet_text":"Draft","evidence_refs":["owner/repo#issue/11","owner/repo#issue/12"],"action":"add","target_ref":"","semantic_conflict":true,"conflict_reason":"first line\\r\\nsecond line"}',
+      {}))
+    t.is_nil(generated)
+    t.eq(why, "semantic-conflict:first line second line")
   end,
 
   test_generator_accepts_real_world_9kb_body_and_rejects_missing_or_oversized_context = function()

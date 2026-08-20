@@ -1,4 +1,5 @@
 local marketing_content = require("contract.marketing_content")
+local proposal_identity = require("proposal_identity")
 local marketing_schedule = require("contract.marketing_schedule")
 local session_route = require("contract.session_route")
 local strings = require("contract.strings")
@@ -622,12 +623,17 @@ function M.comment_request(candidate, proposal)
   if body == nil then
     return nil, "invalid-supersession-correlation"
   end
+  local dedup_key, dedup_why = proposal_identity.dedup_key(
+    proposal.group_key, "/supersede/" .. digest)
+  if dedup_key == nil then
+    return nil, dedup_why
+  end
   return {
     schema = "github-proxy.v1",
     repo = candidate.source_ref.ref:match("^([^#]+)#"),
     issue_number = candidate.number,
     body = body,
-    dedup_key = proposal.group_key .. "/supersede/" .. digest,
+    dedup_key = dedup_key,
     source_ref = candidate.source_ref,
   }
 end

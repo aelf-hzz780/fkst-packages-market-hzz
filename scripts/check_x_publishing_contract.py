@@ -14,6 +14,31 @@ from typing import NoReturn
 ROOT = Path(__file__).resolve().parents[1]
 LOCK_PATH = Path("contract-locks/x-publishing-contract.lock.json")
 MANIFEST_PATH = Path("manifests/auto-twitter-marketing.json")
+WORKSPACE_PATH = Path("fkst.workspace.toml")
+EXTERNAL_LOCK_PATH = Path("fkst.lock")
+RUN_SCRIPT_PATH = Path("scripts/run.sh")
+ENV_EXAMPLE_PATH = Path(".fkst/env.example")
+OFFICIAL_SOURCE_URL = "https://github.com/ChronoAIProject/fkst-hosted.git"
+OFFICIAL_PACKAGE_PATH = "packages/github-proxy"
+HOSTED_SHADOW_OFFICIAL_REF = "packages"
+HOSTED_SHADOW_REF_CLASS = "mutable-shadow-only"
+STABLE_HOSTED_RELEASE_STATUS = "blocked"
+STABLE_HOSTED_BLOCKER_GUIDANCE = (
+    "Do not start a Stable Hosted Session while stable_hosted_release=blocked."
+)
+FORBIDDEN_BLOCKED_STABLE_START_PHRASES = (
+    "before starting stable",
+    "stable session then takes over",
+    "let stable sequentially take over",
+    "由 stable 顺序接管",
+    "再由 stable 顺序接管",
+)
+OFFICIAL_DESCRIPTOR_DOCS = (
+    Path("README.md"),
+    Path("docs/auto-twitter-marketing-workflow.md"),
+    Path("docs/x-publishing-contract.md"),
+    Path("docs/hzz780-v0.3.0-rc.3-acceptance.md"),
+)
 GENERATED_PATHS = (
     Path("libraries/contract/x_publishing_contract.lua"),
     Path("packages/x-publisher/tests/fixtures/x_publishing_conformance.lua"),
@@ -149,6 +174,135 @@ def validate_release_manifest() -> str:
     return validate_package_descriptors(manifest.get("packages"))
 
 
+def validate_official_source_pin() -> str:
+    path = ROOT / WORKSPACE_PATH
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        fail("missing_workspace", WORKSPACE_PATH.as_posix())
+    except OSError:
+        fail("invalid_workspace", WORKSPACE_PATH.as_posix())
+
+    match = re.search(
+        r'^\[\[external_sources\]\]\n'
+        r'id = "fkst-official"\n'
+        r'git = "https://github\.com/ChronoAIProject/fkst-hosted\.git"\n'
+        r'rev = "(?P<rev>[0-9a-f]{40})"\n'
+        r'packages = \["github-proxy"\]\n'
+        r'libraries = \[\]\s*$',
+        text,
+        re.MULTILINE,
+    )
+    if match is None or text.count("[[external_sources]]") != 1:
+        fail("mutable_or_invalid_official_source", WORKSPACE_PATH.as_posix())
+    return match.group("rev")
+
+
+def validate_official_lock(source_ref: str) -> str:
+    try:
+        text = (ROOT / EXTERNAL_LOCK_PATH).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        fail("missing_external_lock", EXTERNAL_LOCK_PATH.as_posix())
+    except OSError:
+        fail("invalid_external_lock", EXTERNAL_LOCK_PATH.as_posix())
+    match = re.fullmatch(
+        r'\[\[external_source\]\]\n'
+        r'id = "fkst-official"\n'
+        r'git = "https://github\.com/ChronoAIProject/fkst-hosted\.git"\n'
+        r'libraries = \[\]\n\n'
+        r'\[external_source\.intent\]\n'
+        r'rev = "(?P<intent>[0-9a-f]{40})"\n\n'
+        r'\[external_source\.resolved\]\n'
+        r'rev = "(?P<resolved>[0-9a-f]{40})"\n'
+        r'tree_sha256 = "(?P<tree>sha256-[0-9a-f]{64})"\n?',
+        text,
+    )
+    if match is None or match.group("intent") != source_ref \
+            or match.group("resolved") != source_ref:
+        fail("official_lock_drift", EXTERNAL_LOCK_PATH.as_posix())
+    return match.group("tree")
+
+
+def classify_hosted_official_ref(hosted_ref: str) -> str:
+    if re.fullmatch(r"[0-9A-Fa-f]{40}", hosted_ref) is not None:
+        fail(
+            "hosted_raw_sha_unsupported",
+            "the current Hosted clone path accepts branch/tag refs but cannot start "
+            "a package workspace from a raw commit SHA",
+        )
+    if hosted_ref == HOSTED_SHADOW_OFFICIAL_REF:
+        return HOSTED_SHADOW_REF_CLASS
+    fail("unsupported_hosted_official_ref", hosted_ref)
+
+
+def validate_official_release_descriptors(source_ref: str) -> str:
+    expected = (
+        f"ChronoAIProject/fkst-hosted@{HOSTED_SHADOW_OFFICIAL_REF}:"
+        f"{OFFICIAL_PACKAGE_PATH}"
+    )
+    descriptor_pattern = re.compile(
+        r"ChronoAIProject/fkst-hosted@([^:`\s]+):packages/github-proxy"
+    )
+    observed_classes: set[str] = set()
+    for relative_path in OFFICIAL_DESCRIPTOR_DOCS:
+        try:
+            text = (ROOT / relative_path).read_text(encoding="utf-8")
+        except FileNotFoundError:
+            fail("missing_release_document", relative_path.as_posix())
+        except OSError:
+            fail("unreadable_release_document", relative_path.as_posix())
+        refs = descriptor_pattern.findall(text)
+        if not refs:
+            fail("official_descriptor_drift", relative_path.as_posix())
+        for hosted_ref in refs:
+            observed_classes.add(classify_hosted_official_ref(hosted_ref))
+        if expected not in text:
+            fail("official_descriptor_drift", relative_path.as_posix())
+        if STABLE_HOSTED_BLOCKER_GUIDANCE not in text:
+            fail("missing_stable_hosted_blocker_guidance", relative_path.as_posix())
+        lowered = text.lower()
+        if STABLE_HOSTED_RELEASE_STATUS == "blocked" and any(
+            phrase in lowered for phrase in FORBIDDEN_BLOCKED_STABLE_START_PHRASES
+        ):
+            fail("stable_hosted_blocker_contradiction", relative_path.as_posix())
+
+    acceptance = (ROOT / OFFICIAL_DESCRIPTOR_DOCS[-1]).read_text(encoding="utf-8")
+    if source_ref not in acceptance:
+        fail("missing_official_shadow_sha_guard", OFFICIAL_DESCRIPTOR_DOCS[-1].as_posix())
+
+    try:
+        run_script = (ROOT / RUN_SCRIPT_PATH).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        fail("missing_run_script", RUN_SCRIPT_PATH.as_posix())
+    except OSError:
+        fail("unreadable_run_script", RUN_SCRIPT_PATH.as_posix())
+    matches = re.findall(
+        r'^DEFAULT_OFFICIAL_SOURCE_REF="([0-9a-f]{40})"$',
+        run_script,
+        re.MULTILINE,
+    )
+    url_matches = re.findall(
+        r'^DEFAULT_OFFICIAL_SOURCE_URL="([^"]+)"$', run_script, re.MULTILINE
+    )
+    if matches != [source_ref] or url_matches != [OFFICIAL_SOURCE_URL]:
+        fail("official_runtime_pin_drift", RUN_SCRIPT_PATH.as_posix())
+
+    try:
+        env_example = (ROOT / ENV_EXAMPLE_PATH).read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        fail("invalid_env_example", ENV_EXAMPLE_PATH.as_posix())
+    env_refs = re.findall(
+        r'^# FKST_OFFICIAL_PACKAGE_SOURCE_REF=([0-9a-f]{40})$',
+        env_example,
+        re.MULTILINE,
+    )
+    if env_refs != [source_ref]:
+        fail("official_env_pin_drift", ENV_EXAMPLE_PATH.as_posix())
+    if observed_classes != {HOSTED_SHADOW_REF_CLASS}:
+        fail("official_descriptor_drift", "hosted-ref-class")
+    return HOSTED_SHADOW_REF_CLASS
+
+
 def validate_artifact(
     relative_path: Path,
     expected_version: str,
@@ -197,10 +351,16 @@ def main() -> int:
             artifact_hashes[relative_path.as_posix()],
         )
     package_ref = validate_release_manifest()
+    official_ref = validate_official_source_pin()
+    official_tree = validate_official_lock(official_ref)
+    hosted_ref_class = validate_official_release_descriptors(official_ref)
     print(
         "X_PUBLISHING_CONTRACT_CHECK_OK "
         f"version={version} source_sha256={digest} artifacts={len(GENERATED_PATHS)} "
-        f"package_ref={package_ref}"
+        f"package_ref={package_ref} official_ref={official_ref} official_tree={official_tree} "
+        f"hosted_official_ref={HOSTED_SHADOW_OFFICIAL_REF} "
+        f"hosted_ref_class={hosted_ref_class} "
+        f"stable_hosted_release={STABLE_HOSTED_RELEASE_STATUS}"
     )
     return 0
 

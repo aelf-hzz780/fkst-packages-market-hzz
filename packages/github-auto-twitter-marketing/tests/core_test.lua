@@ -87,6 +87,17 @@ return {
     t.eq(fields["content-ref"], "#124")
     t.is_nil(fields.token)
     t.is_nil(fields.owner)
+    local fenced = core.parse_control_fields(table.concat({
+      "account: test_primary",
+      "tweet-text:",
+      "````",
+      "account: another_account",
+      "content-ref: #999",
+      "```",
+      "````",
+    }, "\n"))
+    t.eq(fenced.account, "test_primary")
+    t.is_nil(fenced["content-ref"])
     t.is_nil(core.work_label())
     t.eq(core.work_label(logical_label), logical_label)
     t.eq(#core.saga_conformance_errors(), 0)

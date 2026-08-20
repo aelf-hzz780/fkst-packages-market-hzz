@@ -1,3 +1,4 @@
+local markdown_fields = require("contract.markdown_fields")
 local session_route = require("contract.session_route")
 local sha256 = require("contract.sha256")
 local strings = require("contract.strings")
@@ -120,8 +121,7 @@ local function normalized_record(input)
       and ((record.quote_mode ~= "native" and record.quote_mode ~= "link") or record.quote_url == "") then
     return nil, "invalid quote content"
   end
-  if record.tweet_text == "" or #record.tweet_text > 1200
-      or record.tweet_text:find("```", 1, true) ~= nil then
+  if record.tweet_text == "" or #record.tweet_text > 1200 then
     return nil, "invalid tweet text"
   end
   return record, nil
@@ -177,9 +177,7 @@ function M.render(input)
   end
   lines[#lines + 1] = ""
   lines[#lines + 1] = "tweet-text:"
-  lines[#lines + 1] = "```"
-  lines[#lines + 1] = record.tweet_text
-  lines[#lines + 1] = "```"
+  lines[#lines + 1] = markdown_fields.render_fenced(record.tweet_text)
   return table.concat(lines, "\n"), digest
 end
 
@@ -188,12 +186,13 @@ local function parse_fields(body)
     return nil, "invalid content body"
   end
   local fields = {}
-  local in_fence = false
-  local text = body:gsub("\r\n", "\n"):gsub("\r", "\n") .. "\n"
-  for line in text:gmatch("(.-)\n") do
-    if line:match("^%s*```") then
-      in_fence = not in_fence
-    elseif not in_fence then
+  local tokens, token_why = markdown_fields.tokenize(body)
+  if tokens == nil then
+    return nil, "invalid content body"
+  end
+  for _, token in ipairs(tokens) do
+    if token.kind == "text" then
+      local line = token.line
       local key, value = line:match("^%s*([%w_-]+)%s*:%s*(.-)%s*$")
       if key ~= nil then
         local normalized = key:lower():gsub("_", "-")
@@ -210,12 +209,14 @@ local function parse_fields(body)
       end
     end
   end
-  if in_fence then
+  if token_why ~= nil then
     return nil, "unterminated content fence"
   end
-  local tweet = text:match("\ntweet%-text:%s*\n```[^\n]*\n(.-)\n```%s*\n")
-    or text:match("^tweet%-text:%s*\n```[^\n]*\n(.-)\n```%s*\n")
+  local tweet, tweet_why = markdown_fields.fenced_field(body, "tweet-text")
   if tweet == nil then
+    if tweet_why == "duplicate-fenced-field:tweet-text" then
+      return nil, "duplicate tweet text"
+    end
     return nil, "missing tweet text"
   end
   fields.tweet_text = tweet

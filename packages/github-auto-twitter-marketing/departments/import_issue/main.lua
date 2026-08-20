@@ -47,8 +47,8 @@ local function fetched_issue(github, payload)
   end
   local ok, issue = pcall(function()
     return github.read_issue(source_ref, {
-      updated_at = payload.updated_at,
       consumer = "github-auto-twitter-marketing",
+      force_fresh = true,
     })
   end)
   if not ok then
