@@ -6,6 +6,7 @@ local issue_close_contract = require("issue_close_contract")
 local limits = require("limits")
 local proposal_identity = require("proposal_identity")
 local proposal_provenance = require("proposal_provenance")
+local rc2_proposal = require("rc2_proposal")
 local review_commands = require("review_commands")
 local session_route = require("contract.session_route")
 local session_authority = require("session_authority")
@@ -297,6 +298,8 @@ function M.classify_issue(payload, options)
 end
 
 M.proposal_group_key = proposal_identity.group_key
+M.proposal_rc2_group_key = proposal_identity.rc2_group_key
+M.inspect_rc2_proposal = rc2_proposal.inspect
 
 local function normalized_signal_set(input_signals, session)
   local by_source = {}

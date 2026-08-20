@@ -23,6 +23,8 @@ OFFICIAL_PACKAGE_PATH = "packages/github-proxy"
 HOSTED_SHADOW_OFFICIAL_REF = "packages"
 HOSTED_SHADOW_REF_CLASS = "mutable-shadow-only"
 STABLE_HOSTED_RELEASE_STATUS = "blocked"
+ACTIVE_ACCEPTANCE_PATH = Path("docs/hzz780-v0.3.0-rc.4-acceptance.md")
+ACTIVE_PACKAGE_README_PATH = Path("packages/github-auto-twitter-marketing/README.md")
 STABLE_HOSTED_BLOCKER_GUIDANCE = (
     "Do not start a Stable Hosted Session while stable_hosted_release=blocked."
 )
@@ -37,7 +39,13 @@ OFFICIAL_DESCRIPTOR_DOCS = (
     Path("README.md"),
     Path("docs/auto-twitter-marketing-workflow.md"),
     Path("docs/x-publishing-contract.md"),
-    Path("docs/hzz780-v0.3.0-rc.3-acceptance.md"),
+    ACTIVE_ACCEPTANCE_PATH,
+)
+ACTIVE_BUSINESS_RELEASE_DOCS = (
+    Path("README.md"),
+    Path("docs/auto-twitter-marketing-workflow.md"),
+    ACTIVE_ACCEPTANCE_PATH,
+    ACTIVE_PACKAGE_README_PATH,
 )
 GENERATED_PATHS = (
     Path("libraries/contract/x_publishing_contract.lua"),
@@ -68,6 +76,19 @@ PACKAGE_DESCRIPTOR_PATTERN = re.compile(
     r"^aelf-hzz780/fkst-packages-market-hzz@"
     rf"(?P<ref>v{PACKAGE_SEMVER}):"
     r"packages/(?P<package>x-publisher|github-auto-twitter-marketing|marketing-radar)$"
+)
+BUSINESS_RELEASE_DESCRIPTOR_PATTERN = re.compile(
+    r"aelf-hzz780/fkst-packages-market-hzz@"
+    rf"(?P<ref>v{PACKAGE_SEMVER}):"
+    r"(?:manifests/auto-twitter-marketing\.json|"
+    r"packages/(?:x-publisher|github-auto-twitter-marketing|marketing-radar))"
+)
+ACTIVE_RUNBOOK_PATTERN = re.compile(
+    rf"hzz780-(?P<ref>v{PACKAGE_SEMVER})(?=-acceptance\.md)"
+)
+ACCEPTANCE_OFFICIAL_TREE_PATTERN = re.compile(
+    r"(?:and tree|和 tree)\s+`?(?P<tree>sha256-[0-9A-Za-z]{1,128})`?",
+    re.IGNORECASE,
 )
 EXPECTED_PACKAGES = {
     "x-publisher",
@@ -223,6 +244,50 @@ def validate_official_lock(source_ref: str) -> str:
     return match.group("tree")
 
 
+def read_release_document(relative_path: Path) -> str:
+    try:
+        return (ROOT / relative_path).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        fail("missing_release_document", relative_path.as_posix())
+    except OSError:
+        fail("unreadable_release_document", relative_path.as_posix())
+
+
+def validate_active_business_release_docs(package_ref: str) -> None:
+    for relative_path in ACTIVE_BUSINESS_RELEASE_DOCS:
+        text = read_release_document(relative_path)
+        refs = {
+            match.group("ref")
+            for pattern in (
+                BUSINESS_RELEASE_DESCRIPTOR_PATTERN,
+                ACTIVE_RUNBOOK_PATTERN,
+            )
+            for match in pattern.finditer(text)
+        }
+        if not refs:
+            fail("missing_business_release_ref", relative_path.as_posix())
+        if refs != {package_ref}:
+            fail(
+                "business_release_ref_drift",
+                f"{relative_path.as_posix()} expected={package_ref} "
+                f"observed={','.join(sorted(refs))}",
+            )
+
+
+def validate_acceptance_official_tree(official_tree: str) -> None:
+    text = read_release_document(ACTIVE_ACCEPTANCE_PATH)
+    observed = {
+        match.group("tree")
+        for match in ACCEPTANCE_OFFICIAL_TREE_PATTERN.finditer(text)
+    }
+    if observed != {official_tree}:
+        fail(
+            "official_tree_doc_drift",
+            f"{ACTIVE_ACCEPTANCE_PATH.as_posix()} expected={official_tree} "
+            f"observed={','.join(sorted(observed)) or 'missing'}",
+        )
+
+
 def classify_hosted_official_ref(hosted_ref: str) -> str:
     if re.fullmatch(r"[0-9A-Fa-f]{40}", hosted_ref) is not None:
         fail(
@@ -245,12 +310,7 @@ def validate_official_release_descriptors(source_ref: str) -> str:
     )
     observed_classes: set[str] = set()
     for relative_path in OFFICIAL_DESCRIPTOR_DOCS:
-        try:
-            text = (ROOT / relative_path).read_text(encoding="utf-8")
-        except FileNotFoundError:
-            fail("missing_release_document", relative_path.as_posix())
-        except OSError:
-            fail("unreadable_release_document", relative_path.as_posix())
+        text = read_release_document(relative_path)
         refs = descriptor_pattern.findall(text)
         if not refs:
             fail("official_descriptor_drift", relative_path.as_posix())
@@ -353,6 +413,8 @@ def main() -> int:
     package_ref = validate_release_manifest()
     official_ref = validate_official_source_pin()
     official_tree = validate_official_lock(official_ref)
+    validate_active_business_release_docs(package_ref)
+    validate_acceptance_official_tree(official_tree)
     hosted_ref_class = validate_official_release_descriptors(official_ref)
     print(
         "X_PUBLISHING_CONTRACT_CHECK_OK "

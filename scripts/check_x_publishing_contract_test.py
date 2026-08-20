@@ -59,16 +59,89 @@ class SemverValidationTest(unittest.TestCase):
                 self.assertEqual(error.exception.code, "mutable_or_invalid_package_ref")
 
     def test_release_manifest_uses_one_rc_semver_ref(self) -> None:
-        self.assertEqual(checker.validate_release_manifest(), "v0.3.0-rc.3")
+        self.assertEqual(checker.validate_release_manifest(), "v0.3.0-rc.4")
 
     def test_official_package_source_pins_local_tests_and_supported_hosted_ref(self) -> None:
+        package_ref = checker.validate_release_manifest()
         source_ref = checker.validate_official_source_pin()
+        official_tree = checker.validate_official_lock(source_ref)
         self.assertEqual(source_ref, "6fe5f82f76f6b2c02058488587f5f6281c203cf3")
-        self.assertRegex(checker.validate_official_lock(source_ref), r"^sha256-[0-9a-f]{64}$")
+        self.assertRegex(official_tree, r"^sha256-[0-9a-f]{64}$")
         self.assertEqual(
             checker.validate_official_release_descriptors(source_ref),
             checker.HOSTED_SHADOW_REF_CLASS,
         )
+        checker.validate_active_business_release_docs(package_ref)
+        checker.validate_acceptance_official_tree(official_tree)
+
+    def test_active_business_release_docs_must_match_manifest_ref(self) -> None:
+        package_ref = "v0.3.0-rc.4"
+        descriptor = (
+            "aelf-hzz780/fkst-packages-market-hzz@"
+            f"{package_ref}:manifests/auto-twitter-marketing.json"
+        )
+        runbook_link = f"hzz780-{package_ref}-acceptance.md"
+        with tempfile.TemporaryDirectory(prefix="business-release-docs-") as temporary:
+            root = Path(temporary)
+            for relative_path in checker.ACTIVE_BUSINESS_RELEASE_DOCS:
+                path = root / relative_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if relative_path == checker.ACTIVE_PACKAGE_README_PATH:
+                    path.write_text(runbook_link + "\n", encoding="utf-8")
+                else:
+                    path.write_text(descriptor + "\n", encoding="utf-8")
+
+            with mock.patch.object(checker, "ROOT", root):
+                checker.validate_active_business_release_docs(package_ref)
+
+                readme = root / checker.ACTIVE_BUSINESS_RELEASE_DOCS[0]
+                readme.write_text(
+                    descriptor.replace(package_ref, "v0.3.0-rc.3") + "\n",
+                    encoding="utf-8",
+                )
+                with self.assertRaises(checker.ContractCheckError) as error:
+                    checker.validate_active_business_release_docs(package_ref)
+                self.assertEqual(error.exception.code, "business_release_ref_drift")
+
+                readme.write_text(descriptor + "\n", encoding="utf-8")
+                package_readme = root / checker.ACTIVE_PACKAGE_README_PATH
+                package_readme.write_text(
+                    runbook_link.replace(package_ref, "v0.3.0-rc.3") + "\n",
+                    encoding="utf-8",
+                )
+                with self.assertRaises(checker.ContractCheckError) as error:
+                    checker.validate_active_business_release_docs(package_ref)
+                self.assertEqual(error.exception.code, "business_release_ref_drift")
+
+    def test_acceptance_runbook_must_match_locked_official_tree(self) -> None:
+        official_tree = "sha256-" + "a" * 64
+        with tempfile.TemporaryDirectory(prefix="official-tree-doc-") as temporary:
+            root = Path(temporary)
+            path = root / checker.ACTIVE_ACCEPTANCE_PATH
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                "pinned official commit and tree\n"
+                + official_tree
+                + "\ncontent-digest: sha256-"
+                + "c" * 64
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(checker, "ROOT", root):
+                checker.validate_acceptance_official_tree(official_tree)
+
+                path.write_text(
+                    "pinned official commit and tree\n"
+                    + official_tree
+                    + "\n固定 official commit 和 tree\nsha256-"
+                    + "b" * 64
+                    + "\n",
+                    encoding="utf-8",
+                )
+                with self.assertRaises(checker.ContractCheckError) as error:
+                    checker.validate_acceptance_official_tree(official_tree)
+                self.assertEqual(error.exception.code, "official_tree_doc_drift")
 
     def test_official_release_descriptor_rejects_raw_sha_and_other_branches(self) -> None:
         source_ref = "a" * 40
@@ -181,8 +254,8 @@ class SemverValidationTest(unittest.TestCase):
         self.assertEqual(mutable_error.exception.code, "mutable_or_invalid_package_ref")
 
         mixed = [
-            "aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.3:packages/x-publisher",
-            "aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.3:packages/github-auto-twitter-marketing",
+            "aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.4:packages/x-publisher",
+            "aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.4:packages/github-auto-twitter-marketing",
             "aelf-hzz780/fkst-packages-market-hzz@v0.2.2:packages/marketing-radar",
         ]
         with self.assertRaises(checker.ContractCheckError) as mixed_error:

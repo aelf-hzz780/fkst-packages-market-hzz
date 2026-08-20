@@ -8,6 +8,11 @@ local M = {}
 local row_author = issue_catalog.row_author
 local row_labels = issue_catalog.row_labels
 local row_assignees = issue_catalog.row_assignees
+local LEGACY_PROVENANCE_OPTIONS = { allow_legacy_group = true }
+
+local function create_provenance(body)
+  return caps.proposal_create_provenance(body, LEGACY_PROVENANCE_OPTIONS)
+end
 
 local function issue_source_ref(repo, number)
   if strings.trim(repo) == "" or tonumber(number) == nil then
@@ -92,7 +97,7 @@ end
 
 local function fresh_candidate(
     github, repo, row, identity, session, options, catalog_group_matched,
-    catalog_provenance, trigger_signal, terminal_history_only, classify)
+    catalog_provenance, trigger_signal, include_terminal_history, classify)
   local issue = review_issue(github, repo, row)
   if type(issue) ~= "table" then
     return nil, "review-read-failed"
@@ -107,19 +112,39 @@ local function fresh_candidate(
   if state ~= "OPEN" and state ~= "CLOSED" then
     return nil, "invalid-review-state"
   end
-  if terminal_history_only then
-    if state ~= "CLOSED" or not has_authorized_terminal_command(issue, options) then
-      return nil, nil
-    end
-  elseif state == "CLOSED" then
-    return nil, nil
-  end
-  local fresh_provenance, fresh_provenance_why = caps.proposal_create_provenance(issue.body)
+  local fresh_provenance, fresh_provenance_why = create_provenance(issue.body)
   if fresh_provenance == nil then
     return nil, "active-review-invalid:" .. tostring(fresh_provenance_why)
   end
   if fresh_provenance.group_key ~= identity.group_key then
+    local legacy_group = type(identity.first) == "table"
+      and caps.proposal_rc2_group_key(identity.first) or nil
+    local fresh_group, fresh_intent = caps.proposal_catalog_group(issue.body)
+    local legacy = caps.inspect_rc2_proposal(issue.body)
+    local exact_legacy = legacy_group ~= nil
+      and fresh_intent and fresh_group == identity.group_key
+      and fresh_provenance.group_key == legacy_group
+      and legacy ~= nil and legacy.group_key == legacy_group
+      and strings.trim(legacy.work_label) == strings.trim(session.logical_work_label)
+      and catalog_provenance ~= nil
+      and catalog_provenance.group_key == fresh_provenance.group_key
+      and catalog_provenance.cycle == fresh_provenance.cycle
+    if exact_legacy then
+      if state == "CLOSED" then
+        return nil, nil
+      end
+      return nil, "active-review-invalid:legacy-proposal-requires-retirement"
+    end
     return nil, "active-review-invalid:proposal-create-provenance-group-mismatch"
+  end
+  if include_terminal_history then
+    -- Fresh state is authoritative. Validate OPEN rows too so a stale catalog
+    -- snapshot cannot hide a reopened or just-closed review.
+    if state == "CLOSED" and not has_authorized_terminal_command(issue, options) then
+      return nil, nil
+    end
+  elseif state == "CLOSED" then
+    return nil, nil
   end
   if catalog_provenance ~= nil
       and (fresh_provenance.group_key ~= catalog_provenance.group_key
@@ -179,7 +204,7 @@ end
 
 function M.matching_review(
     github, rows, repo, identity, session, options, trigger_signal,
-    terminal_history_only, classify)
+    include_terminal_history, classify)
   local expected_bot = caps.normalized_login(options.bot_login)
   if expected_bot == nil then
     return nil, "missing-bot-login"
@@ -187,10 +212,8 @@ function M.matching_review(
   local active = {}
   local terminal_same_set = {}
   for _, row in ipairs(rows) do
-    local catalog_state = tostring(row.state or ""):upper()
-    if caps.normalized_login(row_author(row)) == expected_bot
-        and (not terminal_history_only or catalog_state == "CLOSED") then
-      local catalog_provenance = caps.proposal_create_provenance(row.body)
+    if caps.normalized_login(row_author(row)) == expected_bot then
+      local catalog_provenance = create_provenance(row.body)
       local group_key, intent = caps.proposal_catalog_group(row.body)
       local catalog_group_matched = group_key == identity.group_key
       local marker_group_matched = catalog_provenance ~= nil
@@ -200,7 +223,7 @@ function M.matching_review(
         local candidate, candidate_why = fresh_candidate(
           github, repo, row, identity, session, options,
           catalog_group_matched or marker_group_matched, catalog_provenance,
-          trigger_signal, terminal_history_only, classify)
+          trigger_signal, include_terminal_history, classify)
         if candidate_why ~= nil then
           return nil, candidate_why
         end
@@ -221,7 +244,74 @@ function M.matching_review(
   return active[1] or terminal_same_set[1], nil
 end
 
-function M.next_cycle(rows, group_key, bot_login)
+function M.retired_rc2_history(github, rows, repo, identity, session, options)
+  local expected_bot = caps.normalized_login(options.bot_login)
+  local legacy_group = type(identity.first) == "table"
+    and caps.proposal_rc2_group_key(identity.first) or nil
+  if expected_bot == nil or legacy_group == nil then
+    return nil, "missing-legacy-history-authority"
+  end
+  local guards = {}
+  local seen = {}
+  for _, row in ipairs(rows or {}) do
+    local number = tonumber(row.number)
+    if number ~= nil and not seen[number]
+        and caps.normalized_login(row_author(row)) == expected_bot then
+      seen[number] = true
+      local catalog_provenance = create_provenance(row.body)
+      local catalog_group, catalog_intent = caps.proposal_catalog_group(row.body)
+      if catalog_provenance ~= nil and catalog_provenance.group_key == legacy_group
+          and catalog_intent and catalog_group == identity.group_key then
+        local issue = review_issue(github, repo, row)
+        if type(issue) ~= "table" then
+          return nil, "review-read-failed"
+        end
+        if routed_to_session(issue, session) then
+          local fresh_provenance = create_provenance(issue.body)
+          local fresh_group, fresh_intent = caps.proposal_catalog_group(issue.body)
+          local legacy = caps.inspect_rc2_proposal(issue.body)
+          if caps.normalized_login(row_author(issue)) ~= expected_bot
+              or fresh_provenance == nil
+              or fresh_provenance.group_key ~= legacy_group
+              or fresh_provenance.cycle ~= catalog_provenance.cycle
+              or not fresh_intent or fresh_group ~= identity.group_key
+              or legacy == nil or legacy.group_key ~= legacy_group
+              or strings.trim(legacy.work_label) ~= strings.trim(session.logical_work_label) then
+            return nil, "active-review-invalid:proposal-create-provenance-group-mismatch"
+          end
+          if tostring(issue.state or ""):upper() ~= "CLOSED" then
+            return nil, "active-review-invalid:legacy-proposal-requires-retirement"
+          end
+          guards[#guards + 1] = {
+            number = number,
+            body = issue.body,
+          }
+        end
+      end
+    end
+  end
+  return guards, nil
+end
+
+function M.revalidate_retired_rc2(github, repo, guards, session, options)
+  local expected_bot = caps.normalized_login(options.bot_login)
+  if expected_bot == nil then
+    return nil, "missing-bot-login"
+  end
+  for _, guard in ipairs(guards or {}) do
+    local issue = review_issue(github, repo, guard)
+    if type(issue) ~= "table"
+        or caps.normalized_login(row_author(issue)) ~= expected_bot
+        or tostring(issue.state or ""):upper() ~= "CLOSED"
+        or not routed_to_session(issue, session)
+        or issue.body ~= guard.body then
+      return nil, "proposal-history-changed-before-create"
+    end
+  end
+  return true, nil
+end
+
+function M.next_cycle(rows, group_key, legacy_group_key, bot_login)
   local expected_bot = caps.normalized_login(bot_login)
   if expected_bot == nil then
     return nil, "missing-bot-login"
@@ -234,8 +324,9 @@ function M.next_cycle(rows, group_key, bot_login)
     if number ~= nil and not seen[number]
         and caps.normalized_login(row_author(row)) == expected_bot then
       seen[number] = true
-      local provenance, provenance_why, provenance_intent = caps.proposal_create_provenance(row.body)
+      local provenance, provenance_why, provenance_intent = create_provenance(row.body)
       local candidate_group, intent = caps.proposal_catalog_group(row.body)
+      local state = tostring(row.state or ""):upper()
       if provenance ~= nil then
         if provenance.group_key == group_key then
           if cycles[provenance.cycle] ~= nil and cycles[provenance.cycle] ~= number then
@@ -243,8 +334,14 @@ function M.next_cycle(rows, group_key, bot_login)
           end
           cycles[provenance.cycle] = number
           max_cycle = math.max(max_cycle, provenance.cycle)
-        elseif intent and candidate_group == group_key then
-          return nil, "proposal-create-provenance-group-conflict"
+        else
+          local legacy = state == "CLOSED" and caps.inspect_rc2_proposal(row.body) or nil
+          local exact_closed_legacy = intent and candidate_group == group_key
+            and provenance.group_key == legacy_group_key
+            and legacy ~= nil and legacy.group_key == legacy_group_key
+          if intent and candidate_group == group_key and not exact_closed_legacy then
+            return nil, "proposal-create-provenance-group-conflict"
+          end
         end
       elseif provenance_intent then
         return nil, provenance_why

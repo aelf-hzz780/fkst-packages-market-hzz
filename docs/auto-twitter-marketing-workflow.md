@@ -18,17 +18,17 @@ release tag. The manifest intentionally declares no shared work label.
 Manifest 有意不声明共享 work label。
 
 The operator procedure for the RC Shadow is
-[`hzz780-v0.3.0-rc.3-acceptance.md`](hzz780-v0.3.0-rc.3-acceptance.md). It is the authoritative
+[`hzz780-v0.3.0-rc.4-acceptance.md`](hzz780-v0.3.0-rc.4-acceptance.md). It is the authoritative
 runbook for fixture isolation, account normalization, evidence capture, canary approval, and
 rollback.
 
 RC Shadow 的运营步骤见
-[`hzz780-v0.3.0-rc.3-acceptance.md`](hzz780-v0.3.0-rc.3-acceptance.md)。该 Runbook 是隔离
+[`hzz780-v0.3.0-rc.4-acceptance.md`](hzz780-v0.3.0-rc.4-acceptance.md)。该 Runbook 是隔离
 fixture、账号归一、证据留存、Canary 批准与回滚的权威操作说明。
 
 ```text
 ChronoAIProject/fkst-hosted@packages:packages/github-proxy
-aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.3:manifests/auto-twitter-marketing.json
+aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.4:manifests/auto-twitter-marketing.json
 ```
 
 Only the business manifest is immutable. Hosted currently cannot clone the official package from a
@@ -43,13 +43,13 @@ official tag 包含 `packages/github-proxy`，因此 RC 使用受支持的 `@pac
 Runbook 规定的 SHA drift guard；本地与 CI composed test 仍使用 `fkst.workspace.toml` 记录的
 完整 SHA。
 
-The isolated acceptance Session pins `v0.3.0-rc.3`. After shadow acceptance, freeze the evidence and
+The isolated acceptance Session pins `v0.3.0-rc.4`. After shadow acceptance, freeze the evidence and
 stop that Session. Do not create the `v0.3.0` descriptor or a Stable Hosted Session until the official
 dependency has an immutable Hosted-supported ref, or a separately reviewed Host solution is
 approved. Once the blocker is resolved, tag the exact clean commit, rerun `scripts/run.sh
 formal-gate`, and only then plan a sequential work-label takeover.
 
-隔离验收 Session 固定使用 `v0.3.0-rc.3`。Shadow 验收通过后只冻结证据并停止该 Session。在
+隔离验收 Session 固定使用 `v0.3.0-rc.4`。Shadow 验收通过后只冻结证据并停止该 Session。在
 official dependency 提供 Hosted 支持的 immutable ref，或单独评审批准 Host 方案前，不得创建
 `v0.3.0` descriptor 或 Stable Hosted Session。Blocker 解除后，必须对精确 clean commit 打 tag、
 重跑 `scripts/run.sh formal-gate`，之后才能规划顺序接管 work label。

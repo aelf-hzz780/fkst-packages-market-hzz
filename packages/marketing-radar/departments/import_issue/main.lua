@@ -176,10 +176,10 @@ local function signal_group(rows, repo, current, session, signal_authors)
 end
 
 local function matching_review(
-    github, rows, repo, identity, session, options, trigger_signal, terminal_history_only)
+    github, rows, repo, identity, session, options, trigger_signal, include_terminal_history)
   return proposal_reviews.matching_review(
     github, rows, repo, identity, session, options, trigger_signal,
-    terminal_history_only, classify)
+    include_terminal_history, classify)
 end
 
 local next_proposal_cycle = proposal_reviews.next_cycle
@@ -466,11 +466,19 @@ local function make_department(handles)
       return
     end
     local all_rows
+    local retired_rc2 = {}
     if existing == nil then
       all_rows = catalog_rows(github, item.repo, "all")
       existing, existing_why = matching_review(
         github, all_rows, item.repo, identity, session, options, item, true)
       if existing_why ~= nil then
+        raise("github-proxy.github_issue_comment_request", caps.status_comment(
+          item, "needs-triage: " .. tostring(existing_why)))
+        return
+      end
+      retired_rc2, existing_why = proposal_reviews.retired_rc2_history(
+        github, all_rows, item.repo, identity, session, options)
+      if retired_rc2 == nil then
         raise("github-proxy.github_issue_comment_request", caps.status_comment(
           item, "needs-triage: " .. tostring(existing_why)))
         return
@@ -588,9 +596,35 @@ local function make_department(handles)
       error("marketing-radar: proposal generation failed: " .. tostring(proposal_why), 0)
     end
     if existing == nil then
-      all_rows = all_rows or catalog_rows(github, item.repo, "all")
+      local history_unchanged, history_why = proposal_reviews.revalidate_retired_rc2(
+        github, item.repo, retired_rc2, session, options)
+      if not history_unchanged then
+        raise("github-proxy.github_issue_comment_request", caps.status_comment(
+          item, "needs-triage: " .. tostring(history_why)))
+        return
+      end
+      all_rows = catalog_rows(github, item.repo, "all")
+      local concurrent, concurrent_why = matching_review(
+        github, all_rows, item.repo, identity, session, options, item, false)
+      if concurrent_why ~= nil then
+        raise("github-proxy.github_issue_comment_request", caps.status_comment(
+          item, "needs-triage: " .. tostring(concurrent_why)))
+        return
+      end
+      local concurrent_terminal, terminal_why = matching_review(
+        github, all_rows, item.repo, identity, session, options, item, true)
+      if terminal_why ~= nil then
+        raise("github-proxy.github_issue_comment_request", caps.status_comment(
+          item, "needs-triage: " .. tostring(terminal_why)))
+        return
+      end
+      if concurrent ~= nil or concurrent_terminal ~= nil then
+        raise("github-proxy.github_issue_comment_request", caps.status_comment(
+          item, "awaiting-review"))
+        return
+      end
       local cycle, cycle_why = next_proposal_cycle(
-        all_rows, identity.group_key, options.bot_login)
+        all_rows, identity.group_key, caps.proposal_rc2_group_key(identity.first), options.bot_login)
       if cycle == nil then
         raise("github-proxy.github_issue_comment_request", caps.status_comment(
           item, "needs-triage: " .. tostring(cycle_why)))

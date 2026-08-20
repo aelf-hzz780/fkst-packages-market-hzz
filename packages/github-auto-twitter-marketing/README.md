@@ -16,11 +16,11 @@ queues.
 调用官方 `github-proxy` 与本仓库的 `x-publisher`。
 
 See the [complete v0.3.0 workflow](../../docs/auto-twitter-marketing-workflow.md) and the
-[hzz780 RC Shadow runbook](../../docs/hzz780-v0.3.0-rc.3-acceptance.md) for lifecycle and operator
+[hzz780 RC Shadow runbook](../../docs/hzz780-v0.3.0-rc.4-acceptance.md) for lifecycle and operator
 procedures.
 
 完整生命周期见 [v0.3.0 workflow](../../docs/auto-twitter-marketing-workflow.md)，RC Shadow 的
-运营步骤见 [hzz780 Runbook](../../docs/hzz780-v0.3.0-rc.3-acceptance.md)。
+运营步骤见 [hzz780 Runbook](../../docs/hzz780-v0.3.0-rc.4-acceptance.md)。
 
 ## Session route / Session 路由
 

@@ -13,6 +13,7 @@ local ISSUE_CREATE_NAMESPACE = ISSUE_CREATE_INTENT .. "/"
 local REVISION_INTENT = "/weekly-plan-change/revision"
 local REVISION_NAMESPACE = REVISION_INTENT .. "/"
 local GROUP_KEY_LIMIT = proposal_identity.GROUP_KEY_LIMIT
+local DEDUP_KEY_LIMIT = proposal_identity.DEDUP_KEY_LIMIT
 local MAX_PROPOSAL_REVISION = proposal_identity.MAX_REVISION
 
 local function trim(value)
@@ -55,7 +56,7 @@ local function marker_values(body, prefix, intent_path)
   return values, nil, outside_intent
 end
 
-function M.issue_create(body)
+function M.issue_create(body, options)
   local values, why, intent = marker_values(body, ISSUE_CREATE_PREFIX, ISSUE_CREATE_INTENT)
   if values == nil then
     return nil, intent and "proposal-create-provenance-invalid:" .. tostring(why)
@@ -75,7 +76,10 @@ function M.issue_create(body)
   end
   local group_key, digits = create_values[1]:match("^(.-)/create/cycle%-(%d+)$")
   local cycle = tonumber(digits)
-  if group_key == nil or group_key == "" or #group_key > GROUP_KEY_LIMIT
+  local allow_legacy_group = options and options.allow_legacy_group == true
+  local invalid_length = allow_legacy_group and #create_values[1] > DEDUP_KEY_LIMIT
+    or not allow_legacy_group and group_key ~= nil and #group_key > GROUP_KEY_LIMIT
+  if group_key == nil or group_key == "" or invalid_length
       or group_key:sub(-#"/weekly-plan-change") ~= "/weekly-plan-change"
       or cycle == nil or cycle < 1 or cycle % 1 ~= 0
       or #digits > 10 or cycle > 2147483647 or tostring(cycle) ~= digits then

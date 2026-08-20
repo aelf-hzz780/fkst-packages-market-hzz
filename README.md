@@ -30,7 +30,7 @@ Hosted 运行时由 official package 与用户 package 组合。请单独导入�
 
 ```text
 ChronoAIProject/fkst-hosted@packages:packages/github-proxy
-aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.3:manifests/auto-twitter-marketing.json
+aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.4:manifests/auto-twitter-marketing.json
 ```
 
 The business manifest is immutable. The official adapter is a documented Hosted exception: the
@@ -51,13 +51,13 @@ SHA；Shadow 启动前及每次重启后，都必须确认 `@packages` 仍解析
 For reproducible business packages, keep the SemVer pin. Do not use `main` or a mutable feature
 branch.
 
-The isolated shadow rollout uses `v0.3.0-rc.3`. After acceptance, freeze the evidence and stop the RC
+The isolated shadow rollout uses `v0.3.0-rc.4`. After acceptance, freeze the evidence and stop the RC
 Session. Do not create a stable descriptor or Session until the official dependency has an immutable
 Hosted-supported ref, or a separately reviewed Host solution is approved. Only after that blocker is
 resolved may the exact clean commit be tagged `v0.3.0`, verified again with `scripts/run.sh
 formal-gate`, and considered for a sequential takeover of the account-specific work label.
 
-隔离 Shadow 阶段使用 `v0.3.0-rc.3`；验收通过后只冻结证据并停止 RC Session。在 official
+隔离 Shadow 阶段使用 `v0.3.0-rc.4`；验收通过后只冻结证据并停止 RC Session。在 official
 dependency 提供 Hosted 支持的 immutable ref，或单独评审批准 Host 方案前，不得创建 stable
 descriptor 或 Session。Blocker 解除后，才可将精确的 clean commit 标记为 `v0.3.0`，重新执行
 `scripts/run.sh formal-gate`，再评估顺序接管账号专属 work label。
@@ -67,9 +67,9 @@ descriptor 或 Session。Blocker 解除后，才可将精确的 clean commit 标
 The market manifest expands only to the business packages:
 
 ```text
-aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.3:packages/x-publisher
-aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.3:packages/github-auto-twitter-marketing
-aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.3:packages/marketing-radar
+aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.4:packages/x-publisher
+aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.4:packages/github-auto-twitter-marketing
+aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.4:packages/marketing-radar
 ```
 
 Manifest 只展开上述三个 business package，不会隐式加载 host/runtime package。
@@ -89,10 +89,10 @@ assignee 必须是 Session creator；Issue 的 `account` 还必须与
 `X_PUBLISH_EXPECTED_USERNAME` 一致。
 
 The RC acceptance procedure for the `hzz780` account is documented in
-[`docs/hzz780-v0.3.0-rc.3-acceptance.md`](docs/hzz780-v0.3.0-rc.3-acceptance.md).
+[`docs/hzz780-v0.3.0-rc.4-acceptance.md`](docs/hzz780-v0.3.0-rc.4-acceptance.md).
 
 `hzz780` 账号的 RC 验收步骤见
-[`docs/hzz780-v0.3.0-rc.3-acceptance.md`](docs/hzz780-v0.3.0-rc.3-acceptance.md)。
+[`docs/hzz780-v0.3.0-rc.4-acceptance.md`](docs/hzz780-v0.3.0-rc.4-acceptance.md)。
 
 ## Credential posture
 

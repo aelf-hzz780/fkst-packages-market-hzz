@@ -16,6 +16,13 @@ local function contains(values, expected)
   return false
 end
 
+local function assert_exact(values, expected)
+  t.eq(#(values or {}), #expected)
+  for _, value in ipairs(expected) do
+    t.is_true(contains(values, value))
+  end
+end
+
 return {
   test_departments_declare_only_explicit_namespaced_external_seams = function()
     local importer = load("departments.import_issue.main")
@@ -24,6 +31,12 @@ return {
     t.is_true(contains(importer.spec.consumes, "github-proxy.github_issue_observed"))
     t.is_true(contains(importer.spec.produces, "github-proxy.github_issue_comment_request"))
     t.is_true(contains(importer.spec.produces, "github-proxy.github_issue_create_request"))
+    assert_exact(importer.spec.produces, {
+      "radar_config_imported",
+      "radar_signal_imported",
+      "github-proxy.github_issue_comment_request",
+      "github-proxy.github_issue_create_request",
+    })
     t.is_true(contains(terminalizer.spec.consumes, "github-proxy.github_comment_written"))
     t.is_true(contains(terminalizer.spec.fanout, "github-proxy.github_comment_written"))
     for _, env_name in ipairs({

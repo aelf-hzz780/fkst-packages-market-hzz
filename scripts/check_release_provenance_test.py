@@ -17,7 +17,7 @@ sys.path.insert(0, str(SCRIPT_ROOT))
 import check_release_provenance as provenance  # noqa: E402
 
 
-PACKAGE_REF = "v0.3.0-rc.3"
+PACKAGE_REF = "v0.3.0-rc.4"
 
 
 class ReleaseProvenanceTest(unittest.TestCase):
@@ -155,8 +155,8 @@ class ReleaseProvenanceTest(unittest.TestCase):
         subprocess.run(("git", "tag", PACKAGE_REF), cwd=self.root, check=True)
         environment = self.github_environment(
             ref_type="tag",
-            ref_name="v0.3.0-rc.4",
-            ref="refs/tags/v0.3.0-rc.4",
+            ref_name="v0.3.0-rc.5",
+            ref="refs/tags/v0.3.0-rc.5",
         )
 
         with self.assertRaises(provenance.ReleaseProvenanceError) as error:

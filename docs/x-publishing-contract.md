@@ -115,11 +115,11 @@ a real X write.
 ## 稳定发布 / Stable Release
 
 当前 `stable_hosted_release=blocked` 时，不得创建 `v0.3.0` descriptor，也不得启动 Stable Hosted
-Session。先完成 `v0.3.0-rc.3` Shadow 验收并冻结证据；只有 official dependency 提供 Hosted
+Session。先完成 `v0.3.0-rc.4` Shadow 验收并冻结证据；只有 official dependency 提供 Hosted
 支持的 immutable ref，或单独评审批准 Host 方案后，才可继续 stable 发布。
 
 While `stable_hosted_release=blocked`, do not create the `v0.3.0` descriptor or start a Stable
-Hosted Session. First complete and freeze the `v0.3.0-rc.3` Shadow evidence; continue to a stable
+Hosted Session. First complete and freeze the `v0.3.0-rc.4` Shadow evidence; continue to a stable
 release only after the official dependency has an immutable Hosted-supported ref or a separately
 reviewed Host solution is approved.
 

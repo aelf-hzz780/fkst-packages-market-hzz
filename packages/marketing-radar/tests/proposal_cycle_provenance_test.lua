@@ -1,4 +1,6 @@
 local core = require("core")
+local marketing_content = require("contract.marketing_content")
+local sha256 = require("contract.sha256")
 local testing = require("testkit.testing")
 local t = fkst.test
 
@@ -41,6 +43,13 @@ local function signal_issue(number, project)
   }
 end
 
+local function signal_issue_in_group(number, week, topic)
+  local issue = signal_issue(number)
+  issue.body = assert(issue.body:gsub("week: 2026%-W33", "week: " .. week, 1))
+  issue.body = assert(issue.body:gsub("topic: FKST automation", "topic: " .. topic, 1))
+  return issue
+end
+
 local function event(issue)
   return {
     queue = "github-proxy.github_issue_changed",
@@ -72,6 +81,95 @@ local function proposal(signal)
     evidence_refs = { signal.source_ref.ref },
     tweet_text = "A reviewed and bounded FKST automation update.",
   }))
+end
+
+local function rc2_legacy_group(signal)
+  return table.concat({
+    "marketing-radar",
+    core.runtime_segment(signal.project),
+    core.runtime_segment(signal.account),
+    core.runtime_segment(signal.week),
+    core.runtime_segment(signal.topic or "general"),
+    core.runtime_segment(signal.action or "unknown"),
+    core.runtime_segment(signal.target_ref or "none", 180),
+    "weekly-plan-change",
+  }, "/")
+end
+
+local function replace_once(value, from, to)
+  local at = assert(tostring(value):find(from, 1, true))
+  return value:sub(1, at - 1) .. to .. value:sub(at + #from)
+end
+
+local function rc2_legacy_review(number, source, state, cycle, with_terminal_command)
+  local signal = classified(source)
+  local legacy_group = rc2_legacy_group(signal)
+  local signal_set_digest = assert(core.signal_set_identity({ signal }, session())).signal_set_digest
+  local proposal_id = "proposal-"
+    .. sha256.hex(legacy_group .. "\n" .. signal_set_digest):sub(1, 24)
+  local content_id = "content-" .. sha256.hex(proposal_id):sub(1, 24)
+  local tweet_text = "A reviewed and bounded FKST automation update."
+  local content_digest = assert(marketing_content.digest({
+    project = signal.project,
+    account = signal.account,
+    work_label = session().logical_work_label,
+    week = signal.week,
+    content_id = content_id,
+    content_revision = 1,
+    proposal_id = proposal_id,
+    proposal_revision = 1,
+    approval_id = proposal_id .. "@1",
+    content_status = "approved",
+    tweet_text = tweet_text,
+  }))
+  local legacy_proposal = {
+    proposal_id = proposal_id,
+  }
+  local body = table.concat({
+    "contract: marketing-radar.weekly-plan-change.v2",
+    "type: weekly-plan-change",
+    "project: " .. signal.project,
+    "account: " .. signal.account,
+    "work-label: " .. session().logical_work_label,
+    "week: " .. signal.week,
+    "topic: " .. signal.topic,
+    "action: " .. signal.action,
+    "change-scope: " .. signal.change_scope,
+    "supersede-mode: " .. signal.supersede_mode,
+    "proposal-id: " .. proposal_id,
+    "proposal-revision: 1",
+    "content-id: " .. content_id,
+    "content-revision: 1",
+    "signal-set-digest: " .. signal_set_digest,
+    "content-digest: " .. content_digest,
+    "status: awaiting-review",
+    "signal: " .. signal.source_ref.ref .. " " .. signal.signal_digest,
+    "evidence: " .. signal.source_ref.ref,
+    "",
+    "tweet-text:",
+    "```",
+    tweet_text,
+    "```",
+  }, "\n")
+  local comments = {}
+  if with_terminal_command then
+    comments[1] = {
+      id = 490,
+      author_login = "test-operator",
+      body = "/marketing approve " .. legacy_proposal.proposal_id .. "@1",
+    }
+  end
+  return {
+    number = number,
+    body = body .. "\n\n<!-- fkst:github-proxy:issue-create:"
+      .. legacy_group .. "/create/cycle-" .. tostring(cycle or 1) .. " -->",
+    state = state,
+    labels = { "host-test-primary" },
+    assignees = { "test-operator" },
+    author_login = "fkst-test-bot",
+    comments = comments,
+    source_ref = source_ref(number),
+  }, legacy_group
 end
 
 local function row(issue)
@@ -164,6 +262,407 @@ local function add_terminal_status(review, terminal_proposal, status, overrides)
 end
 
 return {
+  test_frozen_real_rc2_root_is_recognized_as_exact_legacy = function()
+    local body = table.concat({
+      "contract: marketing-radar.weekly-plan-change.v2",
+      "type: weekly-plan-change",
+      "project: aelf-x-ops",
+      "account: hzz780",
+      "work-label: auto-x-hzz780",
+      "week: 2026-W33",
+      "topic: publishing-gap",
+      "action: add",
+      "change-scope: append",
+      "supersede-mode: none",
+      "proposal-id: proposal-d5b518f734bbd0e4f5192903",
+      "proposal-revision: 1",
+      "content-id: content-18e2957e615859b6d28fce50",
+      "content-revision: 1",
+      "signal-set-digest: sha256:082922131f38e884ac2bb1b5d6f4543c1165181d9f9f705f50f6c567f6e4d8dc",
+      "content-digest: sha256:e3b206f7256915532c0dcfa632b15d14e5f49adce2f1f6abf691d8ec8aa5a0e0",
+      "status: awaiting-review",
+      "signal: aelf-hzz780/fkst-packages-market-hzz#issue/127 sha256:1397138abc2685c207738d00277588ec1da402e3f691001b508bb31329cee8d0",
+      "signal: aelf-hzz780/fkst-packages-market-hzz#issue/128 sha256:3783deb9072ac46cbcbac12d459a5d5fdd004feff3dd4ba8a27264c8d78bdd56",
+      "signal: aelf-hzz780/fkst-packages-market-hzz#issue/126 sha256:8ee5c62c820b43888a8536899d08338f4201e6c66f169444cb6a302b0962ac59",
+      "evidence: aelf-hzz780/fkst-packages-market-hzz#issue/126",
+      "evidence: aelf-hzz780/fkst-packages-market-hzz#issue/127",
+      "evidence: aelf-hzz780/fkst-packages-market-hzz#issue/128",
+      "",
+      "tweet-text:",
+      "```",
+      "Can a payment retry avoid a second signature when the network stalls? In our tDVV pilot, the retry returned the same tx reference, not another signature. Read the test boundary and evidence links before you ship the flow.",
+      "```",
+      "",
+      "<!-- fkst:github-proxy:issue-create:marketing-radar/aelf-x-ops/hzz780/2026-W33/publishing-gap/add/none/weekly-plan-change/create/cycle-1 -->",
+    }, "\n")
+    local legacy, why = core.inspect_rc2_proposal(body)
+    t.is_nil(why)
+    t.eq(legacy.group_key,
+      "marketing-radar/aelf-x-ops/hzz780/2026-W33/publishing-gap/add/none/weekly-plan-change")
+    t.eq(legacy.proposal_id, "proposal-d5b518f734bbd0e4f5192903")
+    t.eq(#legacy.signals, 3)
+  end,
+
+  test_closed_current_root_with_rc2_marker_fails_closed = function()
+    local source = signal_issue(186)
+    local current = proposal(classified(source))
+    local request = core.weekly_plan_change_issue_request(current, session(), 1)
+    local legacy_group = rc2_legacy_group(classified(source))
+    local review = {
+      number = 187,
+      body = request.body .. "\n\n<!-- fkst:github-proxy:issue-create:"
+        .. legacy_group .. "/create/cycle-1 -->",
+      state = "CLOSED",
+      labels = { "host-test-primary" },
+      assignees = { "test-operator" },
+      author_login = "fkst-test-bot",
+      comments = {},
+      source_ref = source_ref(187),
+    }
+    local issues = { [source.number] = source, [review.number] = review }
+    local github = {}
+    function github.read_issue(ref, _options)
+      return issues[tonumber(ref.ref:match("#issue/(%d+)$"))]
+    end
+    function github.api_paginate_slurp(path, _timeout)
+      return tostring(path):find("state=all", 1, true)
+        and { row(source), row(review) } or { row(source) }
+    end
+
+    local drafts = 0
+    local result = testing.run_fake(department(github, function()
+      drafts = drafts + 1
+      return nil, "must-not-run"
+    end), event(source))
+    t.eq(drafts, 0)
+    t.eq(#raises_for(result, "github-proxy.github_issue_create_request"), 0)
+    local comments = raises_for(result, "github-proxy.github_issue_comment_request")
+    t.eq(#comments, 1)
+    t.is_true(comments[1].body:find(
+      "active-review-invalid:proposal-create-provenance-group-mismatch", 1, true) ~= nil)
+  end,
+
+  test_closed_exact_rc2_legacy_review_starts_new_canonical_cycle_one = function()
+    local source = signal_issue(190)
+    local legacy, legacy_group = rc2_legacy_review(191, source, "CLOSED", 1, true)
+    t.eq(legacy_group,
+      "marketing-radar/chronoai/test_primary/2026-W33/FKST_automation/add/none/weekly-plan-change")
+    local issues = { [source.number] = source, [legacy.number] = legacy }
+    local github = {}
+    function github.read_issue(ref, _options)
+      return issues[tonumber(ref.ref:match("#issue/(%d+)$"))]
+    end
+    function github.api_paginate_slurp(path, _timeout)
+      return tostring(path):find("state=all", 1, true)
+        and { row(source), row(legacy) } or { row(source) }
+    end
+
+    local drafts = 0
+    local result = testing.run_fake(department(github, function(signals, revision)
+      drafts = drafts + 1
+      return {
+        revision = revision,
+        action = signals[1].action,
+        evidence_refs = { signals[1].source_ref.ref },
+        tweet_text = "A reviewed and bounded FKST automation update.",
+      }
+    end), event(source))
+    t.eq(drafts, 1)
+    local creates = raises_for(result, "github-proxy.github_issue_create_request")
+    t.eq(#creates, 1)
+    t.is_true(creates[1].dedup_key:find("/sha256-", 1, true) ~= nil)
+    t.is_true(creates[1].dedup_key:sub(-#"/create/cycle-1") == "/create/cycle-1")
+    local created = assert(core.parse_proposal(creates[1].body))
+    t.eq(#created.signals, 1)
+    t.eq(created.signals[1].source_ref.ref, source.source_ref.ref)
+    for _, comment in ipairs(raises_for(result, "github-proxy.github_issue_comment_request")) do
+      t.is_nil(comment.handoff)
+      t.is_nil(comment.body:find("needs-triage", 1, true))
+    end
+    t.eq(#raises_for(result, "x-publisher.x_publish_request"), 0)
+    t.eq(#raises_for(result, "x-publisher.x_published"), 0)
+  end,
+
+  test_open_exact_rc2_legacy_review_remains_fail_closed = function()
+    local source = signal_issue(192)
+    local legacy = rc2_legacy_review(193, source, "OPEN", 1, false)
+    local issues = { [source.number] = source, [legacy.number] = legacy }
+    local github = {}
+    function github.read_issue(ref, _options)
+      return issues[tonumber(ref.ref:match("#issue/(%d+)$"))]
+    end
+    function github.api_paginate_slurp(_path, _timeout)
+      return { row(source), row(legacy) }
+    end
+
+    local drafts = 0
+    local result = testing.run_fake(department(github, function()
+      drafts = drafts + 1
+      return nil, "must-not-run"
+    end), event(source))
+    t.eq(drafts, 0)
+    t.eq(#raises_for(result, "github-proxy.github_issue_create_request"), 0)
+    local comments = raises_for(result, "github-proxy.github_issue_comment_request")
+    t.eq(#comments, 1)
+    t.is_true(comments[1].body:find(
+      "active-review-invalid:legacy-proposal-requires-retirement", 1, true) ~= nil)
+    t.eq(#raises_for(result, "x-publisher.x_publish_request"), 0)
+    t.eq(#raises_for(result, "x-publisher.x_published"), 0)
+  end,
+
+  test_catalog_closed_fresh_open_rc2_legacy_review_remains_fail_closed = function()
+    local source = signal_issue(198)
+    local legacy = rc2_legacy_review(199, source, "CLOSED", 1, false)
+    local catalog_legacy = row(legacy)
+    legacy.state = "OPEN"
+    local issues = { [source.number] = source, [legacy.number] = legacy }
+    local github = {}
+    function github.read_issue(ref, _options)
+      return issues[tonumber(ref.ref:match("#issue/(%d+)$"))]
+    end
+    function github.api_paginate_slurp(path, _timeout)
+      return tostring(path):find("state=all", 1, true)
+        and { row(source), catalog_legacy } or { row(source) }
+    end
+
+    local drafts = 0
+    local result = testing.run_fake(department(github, function()
+      drafts = drafts + 1
+      return nil, "must-not-run"
+    end), event(source))
+    t.eq(drafts, 0)
+    t.eq(#raises_for(result, "github-proxy.github_issue_create_request"), 0)
+    local comments = raises_for(result, "github-proxy.github_issue_comment_request")
+    t.eq(#comments, 1)
+    t.is_true(comments[1].body:find(
+      "active-review-invalid:legacy-proposal-requires-retirement", 1, true) ~= nil)
+  end,
+
+  test_rc2_history_is_revalidated_after_draft_before_create = function()
+    local mutations = {
+      function(issue) issue.state = "OPEN" end,
+      function(issue) issue.labels = { "other-session" } end,
+      function(issue) issue.assignees = { "other-operator" } end,
+      function(issue)
+        issue.body = replace_once(issue.body, "/create/cycle-1", "/create/cycle-2")
+      end,
+    }
+    for index, mutate in ipairs(mutations) do
+      local source = signal_issue(300 + index * 2)
+      local legacy = rc2_legacy_review(source.number + 1, source, "CLOSED", 1, true)
+      local issues = { [source.number] = source, [legacy.number] = legacy }
+      local github = {}
+      function github.read_issue(ref, _options)
+        return issues[tonumber(ref.ref:match("#issue/(%d+)$"))]
+      end
+      function github.api_paginate_slurp(path, _timeout)
+        return tostring(path):find("state=all", 1, true)
+          and { row(source), row(legacy) } or { row(source) }
+      end
+
+      local result = testing.run_fake(department(github, function(signals, revision)
+        mutate(legacy)
+        return {
+          revision = revision,
+          action = signals[1].action,
+          evidence_refs = { signals[1].source_ref.ref },
+          tweet_text = "A reviewed and bounded FKST automation update.",
+        }
+      end), event(source))
+      t.eq(#raises_for(result, "github-proxy.github_issue_create_request"), 0)
+      local comments = raises_for(result, "github-proxy.github_issue_comment_request")
+      t.eq(#comments, 1)
+      t.is_true(comments[1].body:find(
+        "proposal-history-changed-before-create", 1, true) ~= nil)
+    end
+  end,
+
+  test_rc2_provenance_bounds_the_complete_legacy_dedup_key = function()
+    local suffix = "/weekly-plan-change"
+    local prefix = "marketing-radar/"
+    local function group_of_length(length)
+      return prefix .. string.rep("a", length - #prefix - #suffix) .. suffix
+    end
+    local group = group_of_length(489)
+    local body = "<!-- fkst:github-proxy:issue-create:" .. group .. "/create/cycle-1 -->"
+    local strict = core.proposal_create_provenance(body)
+    t.is_nil(strict)
+    local legacy, legacy_why = core.proposal_create_provenance(body, {
+      allow_legacy_group = true,
+    })
+    t.is_nil(legacy_why)
+    t.eq(legacy.group_key, group)
+
+    local max_cycle_group = group_of_length(488)
+    local max_cycle = core.proposal_create_provenance(
+      "<!-- fkst:github-proxy:issue-create:" .. max_cycle_group
+        .. "/create/cycle-2147483647 -->",
+      { allow_legacy_group = true })
+    t.eq(max_cycle.group_key, max_cycle_group)
+
+    local oversized = core.proposal_create_provenance(
+      "<!-- fkst:github-proxy:issue-create:" .. group_of_length(498)
+        .. "/create/cycle-1 -->",
+      { allow_legacy_group = true })
+    t.is_nil(oversized)
+    local long_cycle = core.proposal_create_provenance(
+      "<!-- fkst:github-proxy:issue-create:" .. group
+        .. "/create/cycle-2147483647 -->",
+      { allow_legacy_group = true })
+    t.is_nil(long_cycle)
+  end,
+
+  test_closed_rc2_legacy_marker_does_not_change_canonical_cycle_number = function()
+    local source = signal_issue(194)
+    local legacy = rc2_legacy_review(195, source, "CLOSED", 7, false)
+    local canonical_proposal = proposal(classified(signal_issue(196)))
+    local canonical_request = core.weekly_plan_change_issue_request(canonical_proposal, session(), 3)
+    local canonical = {
+      number = 197,
+      body = canonical_request.body
+        .. "\n\n<!-- fkst:github-proxy:issue-create:" .. canonical_request.dedup_key .. " -->",
+      state = "CLOSED",
+      labels = { "host-test-primary" },
+      assignees = { "test-operator" },
+      author_login = "fkst-test-bot",
+      comments = {},
+      source_ref = source_ref(197),
+    }
+    local issues = {
+      [source.number] = source,
+      [legacy.number] = legacy,
+      [canonical.number] = canonical,
+    }
+    local github = {}
+    function github.read_issue(ref, _options)
+      return issues[tonumber(ref.ref:match("#issue/(%d+)$"))]
+    end
+    function github.api_paginate_slurp(path, _timeout)
+      return tostring(path):find("state=all", 1, true)
+        and { row(source), row(legacy), row(canonical) } or { row(source) }
+    end
+
+    local result = testing.run_fake(department(github), event(source))
+    local creates = raises_for(result, "github-proxy.github_issue_create_request")
+    t.eq(#creates, 1)
+    t.is_true(creates[1].dedup_key:sub(-#"/create/cycle-4") == "/create/cycle-4")
+  end,
+
+  test_rc2_closed_history_allows_exactly_two_w33_w34_canonical_proposals = function()
+    local w33_a = signal_issue_in_group(260, "2026-W33", "publishing-gap")
+    local w33_b = signal_issue_in_group(261, "2026-W33", "publishing-gap")
+    local w33_c = signal_issue_in_group(262, "2026-W33", "publishing-gap")
+    local w34 = signal_issue_in_group(263, "2026-W34", "content-supply-gap")
+    local legacy_w33 = rc2_legacy_review(264, w33_a, "CLOSED", 1, true)
+    local legacy_w34 = rc2_legacy_review(265, w34, "CLOSED", 1, true)
+    local issues = {
+      [w33_a.number] = w33_a,
+      [w33_b.number] = w33_b,
+      [w33_c.number] = w33_c,
+      [w34.number] = w34,
+      [legacy_w33.number] = legacy_w33,
+      [legacy_w34.number] = legacy_w34,
+    }
+    local open_rows = { row(w33_a), row(w33_b), row(w33_c), row(w34) }
+    local all_rows = {
+      row(w33_a), row(w33_b), row(w33_c), row(w34), row(legacy_w33), row(legacy_w34),
+    }
+    local github = {}
+    function github.read_issue(ref, _options)
+      return issues[tonumber(ref.ref:match("#issue/(%d+)$"))]
+    end
+    function github.api_paginate_slurp(path, _timeout)
+      return tostring(path):find("state=all", 1, true) and all_rows or open_rows
+    end
+
+    local w33_result = testing.run_fake(department(github), event(w33_a))
+    local w34_result = testing.run_fake(department(github), event(w34))
+    local creates = {}
+    for _, result in ipairs({ w33_result, w34_result }) do
+      for _, request in ipairs(raises_for(result, "github-proxy.github_issue_create_request")) do
+        creates[#creates + 1] = request
+      end
+    end
+    t.eq(#creates, 2)
+    local by_week = {}
+    for _, request in ipairs(creates) do
+      t.is_true(request.dedup_key:find("/sha256-", 1, true) ~= nil)
+      t.is_true(request.dedup_key:sub(-#"/create/cycle-1") == "/create/cycle-1")
+      local created = assert(core.parse_proposal(request.body))
+      by_week[created.week] = created
+    end
+    t.eq(#assert(by_week["2026-W33"]).signals, 3)
+    t.eq(#assert(by_week["2026-W34"]).signals, 1)
+    t.eq(#raises_for(w33_result, "x-publisher.x_publish_request"), 0)
+    t.eq(#raises_for(w34_result, "x-publisher.x_publish_request"), 0)
+    t.eq(#raises_for(w33_result, "x-publisher.x_published"), 0)
+    t.eq(#raises_for(w34_result, "x-publisher.x_published"), 0)
+  end,
+
+  test_rc2_compatibility_rejects_non_exact_marker_variants = function()
+    for index, variant in ipairs({ "foreign", "leading-zero", "duplicate" }) do
+      local source = signal_issue(270 + index * 3)
+      local legacy, legacy_group = rc2_legacy_review(
+        source.number + 1, source, "CLOSED", 1, true)
+      if variant == "foreign" then
+        local foreign_group = rc2_legacy_group(classified(
+          signal_issue(source.number + 2, "another-project")))
+        legacy.body = replace_once(legacy.body, legacy_group, foreign_group)
+      elseif variant == "leading-zero" then
+        legacy.body = replace_once(legacy.body, "/create/cycle-1", "/create/cycle-01")
+      else
+        local marker = "<!-- fkst:github-proxy:issue-create:"
+          .. legacy_group .. "/create/cycle-1 -->"
+        legacy.body = legacy.body .. "\n" .. marker
+      end
+      local issues = { [source.number] = source, [legacy.number] = legacy }
+      local github = {}
+      function github.read_issue(ref, _options)
+        return issues[tonumber(ref.ref:match("#issue/(%d+)$"))]
+      end
+      function github.api_paginate_slurp(path, _timeout)
+        return tostring(path):find("state=all", 1, true)
+          and { row(source), row(legacy) } or { row(source) }
+      end
+
+      local drafts = 0
+      local result = testing.run_fake(department(github, function()
+        drafts = drafts + 1
+        return nil, "must-not-run"
+      end), event(source))
+      t.eq(drafts, 0)
+      t.eq(#raises_for(result, "github-proxy.github_issue_create_request"), 0)
+      local comments = raises_for(result, "github-proxy.github_issue_comment_request")
+      t.eq(#comments, 1)
+      t.is_true(comments[1].body:find("active-review-invalid:proposal-create-provenance-", 1, true)
+        ~= nil)
+    end
+  end,
+
+  test_foreign_exact_rc2_history_does_not_poison_current_group = function()
+    local source = signal_issue(282)
+    local foreign_source = signal_issue(283, "another-project")
+    local foreign_legacy = rc2_legacy_review(284, foreign_source, "CLOSED", 1, true)
+    local issues = {
+      [source.number] = source,
+      [foreign_source.number] = foreign_source,
+      [foreign_legacy.number] = foreign_legacy,
+    }
+    local github = {}
+    function github.read_issue(ref, _options)
+      return issues[tonumber(ref.ref:match("#issue/(%d+)$"))]
+    end
+    function github.api_paginate_slurp(path, _timeout)
+      return tostring(path):find("state=all", 1, true)
+        and { row(source), row(foreign_legacy) } or { row(source) }
+    end
+
+    local result = testing.run_fake(department(github), event(source))
+    local creates = raises_for(result, "github-proxy.github_issue_create_request")
+    t.eq(#creates, 1)
+    t.is_true(creates[1].dedup_key:sub(-#"/create/cycle-1") == "/create/cycle-1")
+  end,
+
   test_foreign_create_marker_cannot_hide_current_group_cycle = function()
     local source = signal_issue(201)
     local current_proposal = proposal(classified(source))

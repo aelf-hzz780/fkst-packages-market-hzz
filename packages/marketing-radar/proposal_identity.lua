@@ -95,8 +95,8 @@ local function encoded_group_values(values)
   return table.concat(parts, "\n")
 end
 
-function M.group_key(signal)
-  local values = {
+local function group_values(signal)
+  return {
     project = signal.project,
     account = signal.account,
     week = signal.week,
@@ -104,11 +104,23 @@ function M.group_key(signal)
     action = signal.action or "unknown",
     target_ref = signal.target_ref or "none",
   }
-  local readable = table.concat({
+end
+
+local function readable_group(values)
+  return table.concat({
     "marketing-radar", M.runtime_segment(values.project), M.runtime_segment(values.account),
     M.runtime_segment(values.week), M.runtime_segment(values.topic), M.runtime_segment(values.action),
     M.runtime_segment(values.target_ref, 180),
   }, "/")
+end
+
+function M.rc2_group_key(signal)
+  return readable_group(group_values(signal)) .. "/weekly-plan-change"
+end
+
+function M.group_key(signal)
+  local values = group_values(signal)
+  local readable = readable_group(values)
   local suffix = "/sha256-" .. sha256.hex(encoded_group_values(values))
     .. "/weekly-plan-change"
   return readable:sub(1, M.GROUP_KEY_LIMIT - #suffix) .. suffix

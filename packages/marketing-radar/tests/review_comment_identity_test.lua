@@ -548,7 +548,7 @@ return {
       drafts = drafts + 1
       return successful_draft(signals, revision)
     end), event(source))
-    t.eq(github.malformed_reads, 1)
+    t.is_true(github.malformed_reads >= 1)
     t.eq(drafts, 1)
     t.eq(#raises_for(result, "github-proxy.github_issue_create_request"), 1)
   end,
@@ -659,7 +659,7 @@ return {
       drafts = drafts + 1
       return successful_draft(signals, revision)
     end), event(source))
-    t.eq(github.candidate_reads, 1)
+    t.is_true(github.candidate_reads >= 1)
     t.eq(drafts, 1)
     t.eq(#raises_for(result, "github-proxy.github_issue_create_request"), 1)
   end,

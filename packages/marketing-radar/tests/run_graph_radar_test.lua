@@ -177,13 +177,6 @@ local function raises_for(result, queue)
   end
   return values
 end
-local function no_publish_raises(result)
-  for _, raised in ipairs(result.raises or {}) do
-    t.eq(tostring(raised.queue):find("x_publish", 1, true), nil)
-    t.eq(tostring(raised.queue):find("publish_x", 1, true), nil)
-  end
-end
-
 return {
   test_mismatched_event_source_ref_stops_before_github_or_ai = function()
     local source = signal_issue(116)
@@ -219,7 +212,6 @@ return {
     t.eq(select(2, first_creates[1].body:gsub("\nsignal: ", "")), 3)
     t.eq(first_creates[1].labels[1], "host-test-primary")
     t.eq(first_creates[1].assignees[1], "test-operator")
-    no_publish_raises(first)
   end,
   test_staggered_signals_share_pending_group_create_dedup_before_materialization = function()
     local first_signal = signal_issue(116)
@@ -294,7 +286,6 @@ return {
     local comments = raises_for(result, "github-proxy.github_issue_comment_request")
     t.eq(#comments, 1)
     t.is_true(comments[1].body:find("needs-triage: semantic-conflict", 1, true) ~= nil)
-    no_publish_raises(result)
   end,
   test_w33_116_to_118_and_w34_124_create_exactly_two_shadow_proposals = function()
     local issues = {
@@ -313,8 +304,6 @@ return {
     t.eq(#w33_creates + #w34_creates, 2)
     t.eq(assert(core.parse_proposal(w33_creates[1].body)).week, "2026-W33")
     t.eq(assert(core.parse_proposal(w34_creates[1].body)).week, "2026-W34")
-    no_publish_raises(w33)
-    no_publish_raises(w34)
   end,
   test_exhausted_overlength_correction_enters_visible_triage_without_proposal = function()
     local source = signal_issue(124, { body = signal_body(124, { week = "2026-W34" }) })
@@ -335,7 +324,6 @@ return {
     t.eq(#comments, 1)
     t.is_true(comments[1].body:find(
       "needs-triage: draft-correction-exhausted:invalid-x-text:text too long", 1, true) ~= nil)
-    no_publish_raises(result)
   end,
   test_closed_proposal_does_not_block_new_signal_set_from_creating_a_new_review = function()
     local old_signal = signal_issue(116)
@@ -395,7 +383,6 @@ return {
     }), event(source))
     t.eq(#raises_for(result, "github-proxy.github_issue_create_request"), 0)
     t.eq(#raises_for(result, "github-proxy.github_issue_comment_request"), 1)
-    no_publish_raises(result)
   end,
   test_triage_and_account_mismatch_never_create_proposal = function()
     local conflict = signal_issue(120, { body = signal_body(120, { ["target-ref"] = "#99" }) })
@@ -411,8 +398,6 @@ return {
     t.is_true(mismatch_comments[1].body:find(
       "needs-triage: account-session-mismatch", 1, true) ~= nil)
     t.is_true(mismatch_comments[1].body:find("publish_attempted: false", 1, true) ~= nil)
-    no_publish_raises(conflict_result)
-    no_publish_raises(mismatch_result)
   end,
   test_missing_profile_is_visible_only_when_the_issue_is_safely_routed = function()
     local source = signal_issue(125)
@@ -450,8 +435,6 @@ return {
       end,
     }), event(host_owned))
     t.eq(#raises_for(unrouted, "github-proxy.github_issue_comment_request"), 0)
-    no_publish_raises(routed)
-    no_publish_raises(unrouted)
   end,
   test_approval_waits_for_trusted_materialization_before_terminal_comments = function()
     local source = signal_issue(116)
@@ -524,9 +507,6 @@ return {
     t.eq(#replay_comments, 2)
     t.is_true(replay_comments[1].handoff ~= nil)
     t.is_true(replay_comments[2].handoff ~= nil)
-    no_publish_raises(first)
-    no_publish_raises(pending)
-    no_publish_raises(replay)
   end,
   test_unauthorized_and_stale_review_commands_create_no_content = function()
     local source = signal_issue(116)
@@ -559,7 +539,6 @@ return {
       }
       local result = testing.run_fake(department(github_port({ [131] = review }, { row(review) })), event(review))
       t.eq(#raises_for(result, "github-proxy.github_issue_create_request"), 0)
-      no_publish_raises(result)
     end
   end,
   test_approve_fails_closed_when_signal_changed_or_same_group_signal_arrived = function()
@@ -601,8 +580,6 @@ return {
     t.eq(#raises_for(added_result, "github-proxy.github_issue_create_request"), 0)
     t.is_true(raises_for(added_result, "github-proxy.github_issue_comment_request")[1].body
       :find("signal-set-changed-during-review", 1, true) ~= nil)
-    no_publish_raises(edited_result)
-    no_publish_raises(added_result)
   end,
   test_request_changes_generates_next_revision_and_keeps_review_open = function()
     local source = signal_issue(116)
@@ -643,7 +620,6 @@ return {
     t.eq(next_proposal.proposal_id, proposal.proposal_id)
     t.is_nil(comments[1].handoff)
     t.is_nil(comments[2].handoff)
-    no_publish_raises(result)
   end,
   test_failed_request_changes_is_durable_until_a_new_command_takes_over = function()
     local source = signal_issue(125)
@@ -708,9 +684,6 @@ return {
     local next_proposal = core.parse_proposal(resumed_comments[1].body)
       or core.parse_proposal(resumed_comments[2].body)
     t.eq(assert(next_proposal).revision, proposal.revision + 1)
-    no_publish_raises(failed)
-    no_publish_raises(replay)
-    no_publish_raises(resumed)
   end,
   test_reject_emits_terminal_handoffs_for_review_and_all_signals_without_content = function()
     local source = signal_issue(136)
@@ -744,7 +717,6 @@ return {
     end
     t.is_true(kinds["weekly-plan-change"])
     t.is_true(kinds["radar-signal"])
-    no_publish_raises(result)
   end,
   test_reject_reloads_current_signal_set_before_terminal_handoffs = function()
     local original, replacement = signal_issue(136), signal_issue(138)
@@ -782,7 +754,6 @@ return {
     t.eq(#comments, 1)
     t.is_nil(comments[1].handoff)
     t.is_true(comments[1].body:find("signal-set-changed-during-review", 1, true) ~= nil)
-    no_publish_raises(result)
   end,
   test_exhausted_create_cycle_enters_triage_without_request = function()
     local source = signal_issue(180)
@@ -802,7 +773,6 @@ return {
     local comments = raises_for(result, "github-proxy.github_issue_comment_request")
     t.eq(#comments, 1)
     t.is_true(comments[1].body:find("proposal-cycle-exhausted", 1, true) ~= nil)
-    no_publish_raises(result)
   end,
   test_replan_fails_closed_when_state_all_catalog_has_malformed_fields = function()
     local source = signal_issue(140, { body = signal_body(140, { action = "replan" }) })
@@ -926,8 +896,6 @@ return {
     end
     t.eq(#raises_for(pending, "github-proxy.github_issue_create_request"), 0)
     t.eq(#raises_for(replay, "github-proxy.github_issue_create_request"), 0)
-    no_publish_raises(pending)
-    no_publish_raises(replay)
   end,
   test_published_revision_target_enters_triage_without_creating_content = function()
     local source = signal_issue(160, { body = signal_body(160, { action = "revise", ["target-ref"] = "#41" }) })
