@@ -165,6 +165,8 @@ local function department(github, draft_counter)
       return { bot_login = "aelf-hzz780", authorized_reviewers = { "aelf-hzz780" } }
     end,
     signal_author_logins = function() return { "nwnwnw413", "aelf-hzz780" } end,
+    clock = function() return 1786924800 end,
+    past_week_migration_refs = function() return nil end,
     draft_generator = function(signals, revision)
       draft_counter.count = draft_counter.count + 1
       local evidence_refs = {}

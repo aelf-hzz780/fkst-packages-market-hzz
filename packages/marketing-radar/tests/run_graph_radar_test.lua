@@ -24,7 +24,7 @@ local function signal_body(number, overrides)
     ["work-label"] = "auto-x-test-primary",
     week = "2026-W33",
     action = "add",
-    topic = "FKST automation",
+    topic = "fkst-automation",
     ["source-url"] = "https://github.example/owner/repo/issues/" .. tostring(number),
     insight = "Use signal " .. tostring(number) .. " as cited drafting evidence.",
   }
@@ -153,6 +153,8 @@ local function department(github, overrides)
     signal_author_logins = function()
       return { "test-operator", "test-collaborator" }
     end,
+    clock = options.clock or function() return 1786320000 end,
+    past_week_migration_refs = options.past_week_migration_refs or function() return nil end,
     draft_generator = options.draft_generator or function(_signals, revision)
       local evidence = {}
       for _, signal in ipairs(_signals) do
@@ -398,6 +400,30 @@ return {
     t.is_true(mismatch_comments[1].body:find(
       "needs-triage: account-session-mismatch", 1, true) ~= nil)
     t.is_true(mismatch_comments[1].body:find("publish_attempted: false", 1, true) ~= nil)
+  end,
+  test_legacy_loop_critic_signal_is_acked_without_ai_or_proposal = function()
+    local legacy_body = signal_body(122):gsub(
+      "contract: marketing%-radar%.radar%-signal%.v2",
+      "contract: loop-critic.radar-signal.v1", 1)
+      .. "\n\n<!-- loop-critic:v1 source=coo -->"
+    local legacy = signal_issue(122, { body = legacy_body })
+    local drafts = 0
+    local result = testing.run_fake(department(
+      github_port({ [122] = legacy }, { row(legacy) }), {
+        draft_generator = function()
+          drafts = drafts + 1
+          return nil, "must-not-run"
+        end,
+      }
+    ), event(legacy))
+
+    t.eq(drafts, 0)
+    t.eq(#raises_for(result, "github-proxy.github_issue_create_request"), 0)
+    local comments = raises_for(result, "github-proxy.github_issue_comment_request")
+    t.eq(#comments, 1)
+    t.is_true(comments[1].body:find(
+      "needs-triage: legacy-signal-contract", 1, true) ~= nil)
+    t.is_true(comments[1].body:find("publish_attempted: false", 1, true) ~= nil)
   end,
   test_missing_profile_is_visible_only_when_the_issue_is_safely_routed = function()
     local source = signal_issue(125)

@@ -35,7 +35,7 @@ local function signal_issue(insight)
       "work-label: auto-x-test-primary",
       "week: 2026-W33",
       "action: add",
-      "topic: FKST automation",
+      "topic: fkst-automation",
       "insight: " .. tostring(insight or "Generate a cited update."),
     }, "\n"),
   }

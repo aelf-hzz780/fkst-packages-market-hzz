@@ -13,6 +13,7 @@ local session_authority = require("session_authority")
 local sha256 = require("contract.sha256")
 local source_identity = require("source_identity")
 local strings = require("contract.strings")
+local topic_policy = require("topic_policy")
 local x_text = require("contract.x_text")
 
 local M = {}
@@ -56,6 +57,24 @@ local function canonical_body(body)
   local text = tostring(body or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
   text = text:gsub("[ \t]+\n", "\n")
   return trim(text)
+end
+
+local function has_legacy_signal_marker(body)
+  local lines = control_fields.unfenced_lines(body)
+  if lines == nil then
+    return false
+  end
+  local marker = "<!-- loop-critic:v1"
+  for _, line in ipairs(lines) do
+    local candidate = trim(line)
+    local boundary = candidate:sub(#marker + 1, #marker + 1)
+    if candidate:sub(1, #marker) == marker
+        and boundary:match("%s") ~= nil
+        and candidate:sub(-3) == "-->" then
+      return true
+    end
+  end
+  return false
 end
 
 local function encode_fields(fields, keys)
@@ -222,7 +241,8 @@ function M.classify_issue(payload, options)
     -- The effective label routed this Issue to this Session, so malformed
     -- authority or controls are explicit triage instead of silent handoff.
   elseif fields.contract ~= expected_contract then
-    identity_why = "invalid-v2-contract"
+    identity_why = kind == "radar-signal" and has_legacy_signal_marker(body)
+      and "legacy-signal-contract" or "invalid-v2-contract"
   elseif account == nil then
     identity_why = "missing-account"
   elseif account ~= session.account then
@@ -237,6 +257,7 @@ function M.classify_issue(payload, options)
 
   if kind == "radar-signal" then
     local strategy, strategy_why = action_strategies.evaluate(item.action, item.target_ref)
+    local canonical_topic, topic_why = topic_policy.validate(item.topic)
     local issue_author = options and options.issue_author_login or payload.author_login
     local trusted_body = canonical_body(body)
     if identity_why ~= nil then
@@ -255,7 +276,11 @@ function M.classify_issue(payload, options)
     elseif strategy == nil then
       item.status = "needs-triage"
       item.triage_reason = item.action == nil and "missing-action" or strategy_why
+    elseif canonical_topic == nil then
+      item.status = "needs-triage"
+      item.triage_reason = topic_why
     else
+      item.topic = canonical_topic
       item.status = "awaiting-review"
       item.signal_authorized = options and options.authorized_signal_authors ~= nil and true or nil
       item.trusted_body_context = item.signal_authorized and trusted_body or nil

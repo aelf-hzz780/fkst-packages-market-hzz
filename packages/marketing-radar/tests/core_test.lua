@@ -31,7 +31,7 @@ local function signal(number, action, target_ref)
   if target_ref ~= nil then
     lines[#lines + 1] = "target-ref: " .. target_ref
   end
-  lines[#lines + 1] = "topic: FKST automation"
+  lines[#lines + 1] = "topic: fkst-automation"
   lines[#lines + 1] = "source-url: https://github.example/owner/repo/issues/" .. tostring(number)
   lines[#lines + 1] = "insight: Generate a reviewed update from cited evidence."
   local body = table.concat(lines, "\n")
@@ -177,7 +177,7 @@ return {
     local body = signal(11).source_ref and table.concat({
       "contract: marketing-radar.radar-signal.v2", "type: radar-signal", "project: chronoai",
       "account: test_primary", "work-label: auto-x-test-primary", "week: 2026-W33",
-      "action: add", "topic: FKST automation",
+      "action: add", "topic: fkst-automation",
     }, "\n")
     local payload = {
       schema = "github-proxy.v1", type = "issue", repo = "owner/repo", number = 11,

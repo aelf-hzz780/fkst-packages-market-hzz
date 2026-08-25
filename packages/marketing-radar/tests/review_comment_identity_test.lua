@@ -25,7 +25,7 @@ local function signal_issue(number)
       "work-label: auto-x-test-primary",
       "week: 2026-W33",
       "action: add",
-      "topic: FKST automation",
+      "topic: fkst-automation",
       "insight: Use cited release evidence.",
     }, "\n"),
     state = "OPEN",
@@ -151,6 +151,8 @@ local function department(github, draft_generator)
     signal_author_logins = function()
       return { "test-operator" }
     end,
+    clock = function() return 1786320000 end,
+    past_week_migration_refs = function() return nil end,
     draft_generator = draft_generator,
   })
 end

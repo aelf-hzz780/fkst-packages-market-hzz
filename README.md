@@ -30,7 +30,7 @@ Hosted 运行时由 official package 与用户 package 组合。请单独导入�
 
 ```text
 ChronoAIProject/fkst-hosted@packages:packages/github-proxy
-aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.4:manifests/auto-twitter-marketing.json
+aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.5:manifests/auto-twitter-marketing.json
 ```
 
 The business manifest is immutable. The official adapter is a documented Hosted exception: the
@@ -51,13 +51,13 @@ SHA；Shadow 启动前及每次重启后，都必须确认 `@packages` 仍解析
 For reproducible business packages, keep the SemVer pin. Do not use `main` or a mutable feature
 branch.
 
-The isolated shadow rollout uses `v0.3.0-rc.4`. After acceptance, freeze the evidence and stop the RC
+The isolated shadow rollout uses `v0.3.0-rc.5`. After acceptance, freeze the evidence and stop the RC
 Session. Do not create a stable descriptor or Session until the official dependency has an immutable
 Hosted-supported ref, or a separately reviewed Host solution is approved. Only after that blocker is
 resolved may the exact clean commit be tagged `v0.3.0`, verified again with `scripts/run.sh
 formal-gate`, and considered for a sequential takeover of the account-specific work label.
 
-隔离 Shadow 阶段使用 `v0.3.0-rc.4`；验收通过后只冻结证据并停止 RC Session。在 official
+隔离 Shadow 阶段使用 `v0.3.0-rc.5`；验收通过后只冻结证据并停止 RC Session。在 official
 dependency 提供 Hosted 支持的 immutable ref，或单独评审批准 Host 方案前，不得创建 stable
 descriptor 或 Session。Blocker 解除后，才可将精确的 clean commit 标记为 `v0.3.0`，重新执行
 `scripts/run.sh formal-gate`，再评估顺序接管账号专属 work label。
@@ -67,9 +67,9 @@ descriptor 或 Session。Blocker 解除后，才可将精确的 clean commit 标
 The market manifest expands only to the business packages:
 
 ```text
-aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.4:packages/x-publisher
-aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.4:packages/github-auto-twitter-marketing
-aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.4:packages/marketing-radar
+aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.5:packages/x-publisher
+aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.5:packages/github-auto-twitter-marketing
+aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.5:packages/marketing-radar
 ```
 
 Manifest 只展开上述三个 business package，不会隐式加载 host/runtime package。
@@ -88,11 +88,23 @@ Manifest 不再声明共享 work label。每个账号的 Hosted Session 必须�
 assignee 必须是 Session creator；Issue 的 `account` 还必须与
 `X_PUBLISH_EXPECTED_USERNAME` 一致。
 
+Signal intake is producer-first and strict: producers must emit the complete v2 contract, including
+an operator-approved lower-kebab-case canonical topic. Legacy COO markers are diagnosed but never
+silently upgraded. Past-week Signals stay in triage by default; an isolated migration Session may
+admit only exact `owner/repo#issue/N` refs through the `marketing-radar` Package Env. See the active
+acceptance runbook for the all-or-nothing and `add`-only migration rules.
+
+Signal ingress 采用 producer-first strict importer：producer 必须生成完整 v2 contract，并提供经
+运营确认的 lower-kebab-case canonical topic。Legacy COO marker 只会获得诊断，不会被静默升级。
+历史周 Signal 默认保持 triage；只有隔离 migration Session 可以通过 `marketing-radar` Package Env
+接收精确的 `owner/repo#issue/N` ref。完整 group 必须全部授权且只允许 `add`，详见当前验收
+Runbook。
+
 The RC acceptance procedure for the `hzz780` account is documented in
-[`docs/hzz780-v0.3.0-rc.4-acceptance.md`](docs/hzz780-v0.3.0-rc.4-acceptance.md).
+[`docs/hzz780-v0.3.0-rc.5-acceptance.md`](docs/hzz780-v0.3.0-rc.5-acceptance.md).
 
 `hzz780` 账号的 RC 验收步骤见
-[`docs/hzz780-v0.3.0-rc.4-acceptance.md`](docs/hzz780-v0.3.0-rc.4-acceptance.md)。
+[`docs/hzz780-v0.3.0-rc.5-acceptance.md`](docs/hzz780-v0.3.0-rc.5-acceptance.md)。
 
 ## Credential posture
 
@@ -199,7 +211,21 @@ diagnostic 期望的 framework，不会修改仓库内的 release pin，且 `for
 override。GitHub Actions 的正式 `ci / test` 永远只使用 tracked pin；alternate ref 只运行独立的
 `framework diagnostic` job，不能作为发布门禁。
 
-`scripts/run.sh` exports the official `github-proxy` package and its official runtime libraries from the pinned `ChronoAIProject/fkst-hosted` package source into ignored `.fkst/official/` runtime state for local/composed tests. The official package source is not copied into this repository.
+For local, composed, and formal test commands, `scripts/run.sh` fetches the pinned
+`ChronoAIProject/fkst-hosted` commit into a process-private `.fkst/run/invocation.*` workspace,
+exports one read-only `github-proxy` snapshot, and removes the workspace on exit. Concurrent runners
+therefore never share a mutable Git cache, package root, or test root. The explicit
+`scripts/run.sh export-official` command instead creates a unique read-only artifact under
+`.fkst/official/exports/` and prints its absolute `official_package_root`; runtime commands never
+consume that persistent diagnostic artifact. Official source files are not copied into this
+repository.
+
+对于本地、composed 与 formal test 命令，`scripts/run.sh` 会把锁定的
+`ChronoAIProject/fkst-hosted` commit 拉取到进程私有的 `.fkst/run/invocation.*` workspace，导出一份
+只读 `github-proxy` snapshot，并在退出时清理。并发 runner 不再共享可变 Git cache、package root 或
+test root。显式执行 `scripts/run.sh export-official` 时，则会在 `.fkst/official/exports/` 下生成唯一的
+只读 artifact，并打印其绝对 `official_package_root`；runtime command 不会消费该持久诊断 artifact。
+Official source 文件不会复制进本仓库。
 
 ## Workflow contract
 

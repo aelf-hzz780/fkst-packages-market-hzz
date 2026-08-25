@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -67,6 +68,29 @@ if [ "${1:-}" = "run" ]; then
   esac
   exit 0
 fi
+if [ "${FAKE_ASSERT_OFFICIAL_READONLY:-0}" = "1" ]; then
+  expect_package_root=false
+  for argument in "$@"; do
+    if [ "$expect_package_root" = true ]; then
+      case "$argument" in
+        */official/export/fkst-hosted/packages/github-proxy)
+          if [ ! -r "$argument/main.lua" ]; then
+            echo "official package root is not readable: $argument" >&2
+            exit 96
+          fi
+          if touch "$argument/.write-probe-$$" 2>/dev/null; then
+            rm -f "$argument/.write-probe-$$"
+            echo "official package root is writable: $argument" >&2
+            exit 95
+          fi
+          ;;
+      esac
+      expect_package_root=false
+    elif [ "$argument" = "--package-root" ]; then
+      expect_package_root=true
+    fi
+  done
+fi
 if [ -n "${FAKE_COMMAND_LOG:-}" ]; then
   printf 'framework:%s\n' "$*" >> "$FAKE_COMMAND_LOG"
 fi
@@ -90,7 +114,17 @@ exit 97
     def run_runner(
         self, actual_pin: str, command: str = "verify-framework", **extra_env: str
     ) -> subprocess.CompletedProcess[str]:
-        env = {
+        return subprocess.run(
+            [str(self.root / "scripts/run.sh"), command],
+            cwd=self.root,
+            env=self.runner_environment(actual_pin, **extra_env),
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+
+    def runner_environment(self, actual_pin: str, **extra_env: str) -> dict[str, str]:
+        return {
             "PATH": os.environ.get("PATH", ""),
             "BIN": str(self.framework),
             "FAKE_FRAMEWORK_SOURCE_SHA": actual_pin,
@@ -98,14 +132,6 @@ exit 97
             "FKST_FRAMEWORK_SOURCE_ROOT": str(self.source),
             **extra_env,
         }
-        return subprocess.run(
-            [str(self.root / "scripts/run.sh"), command],
-            cwd=self.root,
-            env=env,
-            capture_output=True,
-            check=False,
-            text=True,
-        )
 
     def create_official_source(self) -> tuple[Path, str]:
         source = self.root / "official-source"
@@ -168,6 +194,48 @@ printf 'python:%s\\n' "$*" >> "${FAKE_COMMAND_LOG:?}"
         )
         fake_python.chmod(
             fake_python.stat().st_mode
+            | stat.S_IXUSR
+            | stat.S_IXGRP
+            | stat.S_IXOTH
+        )
+        real_git = shutil.which("git")
+        self.assertIsNotNone(real_git)
+        fake_git = tool_bin / "git"
+        fake_git.write_text(
+            f"""#!/usr/bin/env bash
+set -euo pipefail
+printf 'git:%s\\n' "$*" >> "${{FAKE_COMMAND_LOG:?}}"
+if [ "${{3:-}}" = "fetch" ] && [ -n "${{FAKE_GIT_FETCH_BARRIER_DIR:-}}" ]; then
+  mkdir -p "$FAKE_GIT_FETCH_BARRIER_DIR"
+  touch "$FAKE_GIT_FETCH_BARRIER_DIR/$$"
+  barrier_attempt=0
+  while [ "$(find "$FAKE_GIT_FETCH_BARRIER_DIR" -type f | wc -l | tr -d ' ')" -lt 2 ]; do
+    barrier_attempt=$((barrier_attempt + 1))
+    if [ "$barrier_attempt" -gt 250 ]; then
+      echo "git fetch barrier timed out" >&2
+      exit 87
+    fi
+    sleep 0.02
+  done
+fi
+if [ "${{3:-}}" = "archive" ] && [ -n "${{FAKE_GIT_ARCHIVE_COUNTER:-}}" ]; then
+  archive_count=0
+  if [ -f "$FAKE_GIT_ARCHIVE_COUNTER" ]; then
+    archive_count="$(sed -n '1p' "$FAKE_GIT_ARCHIVE_COUNTER")"
+  fi
+  archive_count=$((archive_count + 1))
+  printf '%s\\n' "$archive_count" > "$FAKE_GIT_ARCHIVE_COUNTER"
+  if [ "$archive_count" = "${{FAKE_GIT_FAIL_ARCHIVE_CALL:-0}}" ]; then
+    echo "injected git archive failure: call=$archive_count" >&2
+    exit 86
+  fi
+fi
+exec {shlex.quote(real_git)} "$@"
+""",
+            encoding="ascii",
+        )
+        fake_git.chmod(
+            fake_git.stat().st_mode
             | stat.S_IXUSR
             | stat.S_IXGRP
             | stat.S_IXOTH
@@ -293,36 +361,56 @@ printf 'python:%s\\n' "$*" >> "${FAKE_COMMAND_LOG:?}"
         self.assertEqual(result.returncode, 2)
         self.assertIn("cannot attest framework source checkout", result.stderr)
 
-    def test_official_export_ignores_dirty_and_untracked_cache_files(self) -> None:
+    def test_official_export_is_unique_read_only_and_ignores_upstream_worktree_changes(self) -> None:
         official_source, official_ref = self.create_official_source()
+        proxy = official_source / "packages/github-proxy"
+        (proxy / "main.lua").write_text("return 'dirty'\n", encoding="ascii")
+        (proxy / "injected.lua").write_text("return 'untracked'\n", encoding="ascii")
+        cache_sentinel = self.root / ".fkst/cache/user-sentinel"
+        official_sentinel = self.root / ".fkst/official/user-sentinel"
+        cache_sentinel.parent.mkdir(parents=True)
+        official_sentinel.parent.mkdir(parents=True)
+        cache_sentinel.write_text("keep\n", encoding="ascii")
+        official_sentinel.write_text("keep\n", encoding="ascii")
         options = {
             "FKST_OFFICIAL_PACKAGE_SOURCE_URL": str(official_source),
             "FKST_OFFICIAL_PACKAGE_SOURCE_REF": official_ref,
         }
-        first = self.run_runner(self.tracked_pin, "export-official", **options)
-        self.assertEqual(first.returncode, 0, first.stderr)
+        result = self.run_runner(self.tracked_pin, "export-official", **options)
 
-        cache_proxy = self.root / ".fkst/cache/fkst-hosted-src/packages/github-proxy"
-        (cache_proxy / "main.lua").write_text("return 'dirty'\n", encoding="ascii")
-        (cache_proxy / "injected.lua").write_text("return 'untracked'\n", encoding="ascii")
-
-        second = self.run_runner(self.tracked_pin, "export-official", **options)
-        self.assertEqual(second.returncode, 0, second.stderr)
-        cache_head = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=self.root / ".fkst/cache/fkst-hosted-src",
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        exported = self.root / ".fkst/official/fkst-hosted/packages/github-proxy"
-        self.assertEqual(cache_head, official_ref)
-        self.assertEqual((exported / "main.lua").read_text(encoding="ascii"), "return 'tracked'\n")
-        self.assertFalse((exported / "injected.lua").exists())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        roots = [
+            Path(line.removeprefix("official_package_root="))
+            for line in result.stdout.splitlines()
+            if line.startswith("official_package_root=")
+        ]
+        self.assertEqual(len(roots), 1, result.stdout)
+        exported = roots[0]
+        self.assertTrue(exported.is_dir())
+        self.assertIn(self.root / ".fkst/official/exports", exported.parents)
+        self.assertEqual(
+            exported.stat().st_mode & (stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH),
+            0,
+        )
+        exported_proxy = exported / "packages/github-proxy"
+        self.assertEqual(
+            (exported_proxy / "main.lua").read_text(encoding="ascii"),
+            "return 'tracked'\n",
+        )
+        self.assertFalse((exported_proxy / "injected.lua").exists())
+        self.assertEqual(cache_sentinel.read_text(encoding="ascii"), "keep\n")
+        self.assertEqual(official_sentinel.read_text(encoding="ascii"), "keep\n")
+        self.assertEqual(list((self.root / ".fkst/run").glob("invocation.*")), [])
 
     def test_formal_gate_skips_local_env_and_reports_locked_provenance_in_order(self) -> None:
         official_source, official_ref, tool_bin = self.prepare_formal_gate_fixture()
         command_log = self.root / "formal-command.log"
+        cache_sentinel = self.root / ".fkst/cache/user-sentinel"
+        official_sentinel = self.root / ".fkst/official/user-sentinel"
+        cache_sentinel.parent.mkdir(parents=True)
+        official_sentinel.parent.mkdir(parents=True)
+        cache_sentinel.write_text("keep\n", encoding="ascii")
+        official_sentinel.write_text("keep\n", encoding="ascii")
         (self.root / ".fkst/env").write_text(
             "\n".join(
                 (
@@ -341,6 +429,7 @@ printf 'python:%s\\n' "$*" >> "${FAKE_COMMAND_LOG:?}"
             "formal-gate",
             PATH=f"{tool_bin}{os.pathsep}{os.environ.get('PATH', '')}",
             FAKE_COMMAND_LOG=str(command_log),
+            FAKE_ASSERT_OFFICIAL_READONLY="1",
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -364,6 +453,145 @@ printf 'python:%s\\n' "$*" >> "${FAKE_COMMAND_LOG:?}"
         self.assertIn("check_x_publishing_contract.py", calls)
         self.assertIn("framework:test --project-root", calls)
         self.assertIn("framework:conformance --project-root", calls)
+        official_fetches = [
+            line
+            for line in calls.splitlines()
+            if line.startswith("git:-C ")
+            and " fetch --no-tags --depth 1 " in line
+        ]
+        official_inits = [
+            line
+            for line in calls.splitlines()
+            if line.startswith("git:-C ")
+            and line.endswith(" init --bare -q")
+        ]
+        official_archives = [
+            line
+            for line in calls.splitlines()
+            if line.startswith("git:-C ")
+            and " archive --format=tar " in line
+        ]
+        self.assertEqual(len(official_fetches), 1, official_fetches)
+        self.assertEqual(len(official_inits), 1, official_inits)
+        self.assertEqual(len(official_archives), 1, official_archives)
+        fetch_args = shlex.split(official_fetches[0].removeprefix("git:"))
+        source_root = Path(fetch_args[1])
+        self.assertEqual(fetch_args[0], "-C")
+        self.assertIn(self.root / ".fkst/run", source_root.parents)
+        self.assertEqual(source_root.parent.name, "official")
+        self.assertTrue(source_root.parents[1].name.startswith("invocation."))
+        package_roots = {
+            Path(tokens[index + 1])
+            for line in calls.splitlines()
+            if line.startswith("framework:")
+            for tokens in [shlex.split(line.removeprefix("framework:"))]
+            for index, token in enumerate(tokens[:-1])
+            if token == "--package-root"
+            and tokens[index + 1].endswith(
+                "/official/export/fkst-hosted/packages/github-proxy"
+            )
+        }
+        self.assertEqual(len(package_roots), 1, package_roots)
+        self.assertFalse(source_root.parent.exists())
+        self.assertEqual(cache_sentinel.read_text(encoding="ascii"), "keep\n")
+        self.assertEqual(official_sentinel.read_text(encoding="ascii"), "keep\n")
+
+    def test_formal_gate_fails_closed_and_cleans_up_when_export_fails(self) -> None:
+        _, _, tool_bin = self.prepare_formal_gate_fixture()
+        command_log = self.root / "failed-export-command.log"
+        archive_counter = self.root / "archive-counter.txt"
+
+        result = self.run_runner(
+            self.tracked_pin,
+            "formal-gate",
+            PATH=f"{tool_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+            FAKE_COMMAND_LOG=str(command_log),
+            FAKE_GIT_ARCHIVE_COUNTER=str(archive_counter),
+            FAKE_GIT_FAIL_ARCHIVE_CALL="1",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("injected git archive failure: call=1", result.stderr)
+        self.assertNotIn("formal_gate_status=passed", result.stdout)
+        self.assertEqual(archive_counter.read_text(encoding="ascii"), "1\n")
+        calls = command_log.read_text(encoding="utf-8")
+        self.assertEqual(
+            calls.count(" fetch --no-tags --depth 1 "),
+            1,
+        )
+        self.assertNotIn("framework:test --project-root", calls)
+        fetch_line = next(
+            line
+            for line in calls.splitlines()
+            if line.startswith("git:-C ")
+            and " fetch --no-tags --depth 1 " in line
+        )
+        source_root = Path(shlex.split(fetch_line.removeprefix("git:"))[1])
+        self.assertFalse(source_root.parent.exists())
+
+    def test_concurrent_formal_gates_use_disjoint_official_workspaces(self) -> None:
+        _, _, tool_bin = self.prepare_formal_gate_fixture()
+        barrier = self.root / "fetch-barrier"
+        processes: list[tuple[subprocess.Popen[str], Path]] = []
+        for index in range(2):
+            command_log = self.root / f"concurrent-{index}.log"
+            process = subprocess.Popen(
+                [str(self.root / "scripts/run.sh"), "formal-gate"],
+                cwd=self.root,
+                env=self.runner_environment(
+                    self.tracked_pin,
+                    PATH=f"{tool_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+                    FAKE_COMMAND_LOG=str(command_log),
+                    FAKE_GIT_FETCH_BARRIER_DIR=str(barrier),
+                    FAKE_ASSERT_OFFICIAL_READONLY="1",
+                ),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            processes.append((process, command_log))
+
+        outputs: list[tuple[str, str]] = []
+        try:
+            for process, _ in processes:
+                outputs.append(process.communicate(timeout=40))
+        finally:
+            for process, _ in processes:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
+
+        source_roots = set()
+        package_roots = set()
+        for (process, command_log), (stdout, stderr) in zip(processes, outputs):
+            self.assertEqual(process.returncode, 0, stderr)
+            self.assertIn("formal_gate_status=passed", stdout)
+            calls = command_log.read_text(encoding="utf-8")
+            fetches = [
+                line
+                for line in calls.splitlines()
+                if line.startswith("git:-C ")
+                and " fetch --no-tags --depth 1 " in line
+            ]
+            self.assertEqual(len(fetches), 1, fetches)
+            source_roots.add(
+                Path(shlex.split(fetches[0].removeprefix("git:"))[1])
+            )
+            for line in calls.splitlines():
+                if not line.startswith("framework:"):
+                    continue
+                tokens = shlex.split(line.removeprefix("framework:"))
+                for argument_index, token in enumerate(tokens[:-1]):
+                    candidate = tokens[argument_index + 1]
+                    if token == "--package-root" and candidate.endswith(
+                        "/official/export/fkst-hosted/packages/github-proxy"
+                    ):
+                        package_roots.add(Path(candidate))
+
+        self.assertEqual(len(source_roots), 2, source_roots)
+        self.assertEqual(len(package_roots), 2, package_roots)
+        for source_root in source_roots:
+            self.assertFalse(source_root.parent.exists())
 
     def test_formal_gate_rejects_release_pin_process_overrides(self) -> None:
         _, _, tool_bin = self.prepare_formal_gate_fixture()

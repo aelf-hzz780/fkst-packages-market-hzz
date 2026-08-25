@@ -16,11 +16,23 @@ queues.
 调用官方 `github-proxy` 与本仓库的 `x-publisher`。
 
 See the [complete v0.3.0 workflow](../../docs/auto-twitter-marketing-workflow.md) and the
-[hzz780 RC Shadow runbook](../../docs/hzz780-v0.3.0-rc.4-acceptance.md) for lifecycle and operator
+[hzz780 RC Shadow runbook](../../docs/hzz780-v0.3.0-rc.5-acceptance.md) for lifecycle and operator
 procedures.
 
 完整生命周期见 [v0.3.0 workflow](../../docs/auto-twitter-marketing-workflow.md)，RC Shadow 的
-运营步骤见 [hzz780 Runbook](../../docs/hzz780-v0.3.0-rc.4-acceptance.md)。
+运营步骤见 [hzz780 Runbook](../../docs/hzz780-v0.3.0-rc.5-acceptance.md)。
+
+Upstream Signal intake is producer-first and strict. A producer must provide the complete v2
+contract and a lower-kebab-case canonical topic; legacy markers are triaged rather than silently
+converted. Past-week Signals are blocked before Proposal creation unless an isolated
+`marketing-radar` Package Env explicitly lists every exact `owner/repo#issue/N` ref in the group.
+That migration exception remains `add`-only and never authorizes Content, Schedule, or X by itself.
+
+上游 Signal ingress 采用 producer-first strict importer。Producer 必须提供完整 v2 contract 与
+lower-kebab-case canonical topic；legacy marker 只进入 triage，不会被静默转换。历史周 Signal
+默认在 Proposal 创建前阻断；只有隔离的 `marketing-radar` Package Env 显式列出 group 内每个
+精确 `owner/repo#issue/N` ref 时才允许 migration。该例外只支持 `add`，本身绝不授权 Content、
+Schedule 或 X。
 
 ## Session route / Session 路由
 

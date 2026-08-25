@@ -59,7 +59,7 @@ class SemverValidationTest(unittest.TestCase):
                 self.assertEqual(error.exception.code, "mutable_or_invalid_package_ref")
 
     def test_release_manifest_uses_one_rc_semver_ref(self) -> None:
-        self.assertEqual(checker.validate_release_manifest(), "v0.3.0-rc.4")
+        self.assertEqual(checker.validate_release_manifest(), "v0.3.0-rc.5")
 
     def test_official_package_source_pins_local_tests_and_supported_hosted_ref(self) -> None:
         package_ref = checker.validate_release_manifest()
@@ -75,7 +75,7 @@ class SemverValidationTest(unittest.TestCase):
         checker.validate_acceptance_official_tree(official_tree)
 
     def test_active_business_release_docs_must_match_manifest_ref(self) -> None:
-        package_ref = "v0.3.0-rc.4"
+        package_ref = "v0.3.0-rc.5"
         descriptor = (
             "aelf-hzz780/fkst-packages-market-hzz@"
             f"{package_ref}:manifests/auto-twitter-marketing.json"
@@ -254,8 +254,8 @@ class SemverValidationTest(unittest.TestCase):
         self.assertEqual(mutable_error.exception.code, "mutable_or_invalid_package_ref")
 
         mixed = [
-            "aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.4:packages/x-publisher",
-            "aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.4:packages/github-auto-twitter-marketing",
+            "aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.5:packages/x-publisher",
+            "aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.5:packages/github-auto-twitter-marketing",
             "aelf-hzz780/fkst-packages-market-hzz@v0.2.2:packages/marketing-radar",
         ]
         with self.assertRaises(checker.ContractCheckError) as mixed_error:

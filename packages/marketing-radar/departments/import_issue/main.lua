@@ -1,6 +1,7 @@
 local caps = require("import_issue_caps")
 local draft_port = require("draft_generator")
 local durable_triage = require("durable_triage")
+local event_week_gate = require("event_week_gate")
 local ingress_block = require("ingress_block")
 local materialization = require("materialization")
 local issue_catalog = require("issue_catalog")
@@ -261,6 +262,13 @@ local function make_department(handles)
   local draft_generator = ports.draft_generator or function(signals, revision, context)
     return draft_port.generate(signals, revision, ports.spawn_codex_sync, context)
   end
+  local function new_event_week_gate()
+    return event_week_gate.new({
+      clock = ports.clock,
+      past_week_migration_refs = ports.past_week_migration_refs,
+      evaluate_week_group = ports.evaluate_week_group,
+    })
+  end
 
   local function reload_proposal_signals(proposal, session)
     local signals = {}
@@ -440,9 +448,9 @@ local function make_department(handles)
     }, nil
   end
 
-  local function handle_signal(item, current_issue, session)
-    raise("radar_signal_imported", caps.radar_signal_imported(item))
+  local function handle_signal(item, current_issue, session, week_gate)
     if item.status == "needs-triage" then
+      raise("radar_signal_imported", caps.radar_signal_imported(item))
       raise("github-proxy.github_issue_comment_request", caps.status_comment(
         item, "needs-triage: " .. tostring(item.triage_reason)))
       return
@@ -526,7 +534,16 @@ local function make_department(handles)
       end
       return
     end
+    local _, initial_week_why = week_gate.check({ item })
+    local _, group_week_why = week_gate.check(identity.signals)
+    local signal_week_why = initial_week_why or group_week_why
+    if signal_week_why ~= nil then
+      raise("github-proxy.github_issue_comment_request", caps.status_comment(
+        item, "needs-triage: " .. tostring(signal_week_why)))
+      return
+    end
     if existing ~= nil and existing.latest.signal_set_digest == identity.signal_set_digest then
+      raise("radar_signal_imported", caps.radar_signal_imported(item))
       raise("github-proxy.github_issue_comment_request", caps.status_comment(item, "awaiting-review"))
       return
     end
@@ -539,6 +556,13 @@ local function make_department(handles)
     -- From this point onward all proposal inputs are the fresh classified set.
     identity = fresh_set.identity
     signals = fresh_set.signals
+    local _, fresh_week_why = week_gate.check(signals)
+    if fresh_week_why ~= nil then
+      raise("github-proxy.github_issue_comment_request", caps.status_comment(
+        item, "needs-triage: " .. tostring(fresh_week_why)))
+      return
+    end
+    raise("radar_signal_imported", caps.radar_signal_imported(item))
     local anchor, anchor_why = durable_triage.anchor(identity)
     if anchor == nil then
       error("marketing-radar: durable triage anchor failed: " .. tostring(anchor_why), 0)
@@ -639,7 +663,7 @@ local function make_department(handles)
     raise("github-proxy.github_issue_comment_request", caps.status_comment(item, "awaiting-review"))
   end
 
-  local function handle_review(item, current_issue, session)
+  local function handle_review(item, current_issue, session, week_gate)
     local decision, why = caps.review_decision(current_issue, review_options())
     if decision == nil then
       if why ~= "no-review-command" then
@@ -653,6 +677,12 @@ local function make_department(handles)
       if signals == nil then
         raise("github-proxy.github_issue_comment_request", caps.status_comment(
           item, "needs-triage: " .. tostring(reload_why)))
+        return
+      end
+      local _, week_why = week_gate.check(signals)
+      if week_why ~= nil then
+        raise("github-proxy.github_issue_comment_request", caps.status_comment(
+          item, "blocked: " .. tostring(week_why)))
         return
       end
       local revision, revision_why = caps.next_proposal_revision(decision.proposal.revision)
@@ -699,6 +729,12 @@ local function make_department(handles)
       if approved_signals == nil then
         raise("github-proxy.github_issue_comment_request", caps.status_comment(
           item, "needs-triage: " .. tostring(signals_why)))
+        return
+      end
+      local _, week_why = week_gate.check(approved_signals)
+      if week_why ~= nil then
+        raise("github-proxy.github_issue_comment_request", caps.status_comment(
+          item, "blocked: " .. tostring(week_why)))
         return
       end
       local supersede = {}
@@ -807,6 +843,7 @@ local function make_department(handles)
 
   local function act(event)
     local payload = event.payload or {}
+    local week_gate = new_event_week_gate()
     local session, session_why = session_authority()
     if session == nil then
       local route = route_authority()
@@ -839,14 +876,14 @@ local function make_department(handles)
       return
     end
     if item.kind == "radar-signal" then
-      handle_signal(item, current_or_error, session)
+      handle_signal(item, current_or_error, session, week_gate)
     elseif item.kind == "weekly-plan-change" then
       if item.status == "needs-triage" then
         raise("github-proxy.github_issue_comment_request", caps.status_comment(
           item, "needs-triage: " .. tostring(item.triage_reason)))
         return
       end
-      handle_review(item, current_or_error, session)
+      handle_review(item, current_or_error, session, week_gate)
     elseif item.kind == "radar-config" then
       if item.status == "needs-triage" then
         raise("github-proxy.github_issue_comment_request", caps.status_comment(

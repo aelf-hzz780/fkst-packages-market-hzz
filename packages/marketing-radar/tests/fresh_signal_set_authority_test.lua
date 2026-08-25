@@ -27,7 +27,7 @@ local function body(number, insight)
     "work-label: auto-x-test-primary",
     "week: 2026-W33",
     "action: add",
-    "topic: FKST automation",
+    "topic: fkst-automation",
     "source-url: https://github.example/owner/repo/issues/" .. tostring(number),
     "insight: " .. tostring(insight or "Use cited evidence for the reviewed draft."),
   }, "\n")
@@ -101,6 +101,8 @@ local function department(github, draft_generator)
       return { bot_login = "fkst-test-bot", authorized_reviewers = { "test-operator" } }
     end,
     signal_author_logins = function() return { "test-operator" } end,
+    clock = function() return 1786320000 end,
+    past_week_migration_refs = function() return nil end,
     draft_generator = draft_generator,
   })
 end
@@ -159,6 +161,7 @@ local function assert_non_anchor_change_blocks_draft(mutate)
 
   t.is_true((fresh_reads[changed_number] or 0) >= 1)
   t.eq(draft_calls, 0)
+  t.eq(#raises_for(result, "radar_signal_imported"), 0)
   t.eq(#raises_for(result, "github-proxy.github_issue_create_request"), 0)
 end
 

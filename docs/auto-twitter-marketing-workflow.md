@@ -18,17 +18,17 @@ release tag. The manifest intentionally declares no shared work label.
 Manifest 有意不声明共享 work label。
 
 The operator procedure for the RC Shadow is
-[`hzz780-v0.3.0-rc.4-acceptance.md`](hzz780-v0.3.0-rc.4-acceptance.md). It is the authoritative
+[`hzz780-v0.3.0-rc.5-acceptance.md`](hzz780-v0.3.0-rc.5-acceptance.md). It is the authoritative
 runbook for fixture isolation, account normalization, evidence capture, canary approval, and
 rollback.
 
 RC Shadow 的运营步骤见
-[`hzz780-v0.3.0-rc.4-acceptance.md`](hzz780-v0.3.0-rc.4-acceptance.md)。该 Runbook 是隔离
+[`hzz780-v0.3.0-rc.5-acceptance.md`](hzz780-v0.3.0-rc.5-acceptance.md)。该 Runbook 是隔离
 fixture、账号归一、证据留存、Canary 批准与回滚的权威操作说明。
 
 ```text
 ChronoAIProject/fkst-hosted@packages:packages/github-proxy
-aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.4:manifests/auto-twitter-marketing.json
+aelf-hzz780/fkst-packages-market-hzz@v0.3.0-rc.5:manifests/auto-twitter-marketing.json
 ```
 
 Only the business manifest is immutable. Hosted currently cannot clone the official package from a
@@ -43,13 +43,13 @@ official tag 包含 `packages/github-proxy`，因此 RC 使用受支持的 `@pac
 Runbook 规定的 SHA drift guard；本地与 CI composed test 仍使用 `fkst.workspace.toml` 记录的
 完整 SHA。
 
-The isolated acceptance Session pins `v0.3.0-rc.4`. After shadow acceptance, freeze the evidence and
+The isolated acceptance Session pins `v0.3.0-rc.5`. After shadow acceptance, freeze the evidence and
 stop that Session. Do not create the `v0.3.0` descriptor or a Stable Hosted Session until the official
 dependency has an immutable Hosted-supported ref, or a separately reviewed Host solution is
 approved. Once the blocker is resolved, tag the exact clean commit, rerun `scripts/run.sh
 formal-gate`, and only then plan a sequential work-label takeover.
 
-隔离验收 Session 固定使用 `v0.3.0-rc.4`。Shadow 验收通过后只冻结证据并停止该 Session。在
+隔离验收 Session 固定使用 `v0.3.0-rc.5`。Shadow 验收通过后只冻结证据并停止该 Session。在
 official dependency 提供 Hosted 支持的 immutable ref，或单独评审批准 Host 方案前，不得创建
 `v0.3.0` descriptor 或 Stable Hosted Session。Blocker 解除后，必须对精确 clean commit 打 tag、
 重跑 `scripts/run.sh formal-gate`，之后才能规划顺序接管 work label。
@@ -80,7 +80,20 @@ v2 `radar-signal` 必须由 Session creator、已授权 Session collaborator，�
 policy 明确允许的账号提交。`action` 必填且是权威输入；AI draft 步骤不能修改 action，也不能
 扩大它的影响范围。
 
+The ingestion boundary is producer-first and strict. The Signal producer must emit the complete v2
+control block; the package validates it and never guesses missing controls or silently converts a
+legacy payload. The producer login must also be admitted by the Session author policy. For example,
+a COO bot such as `nwnwnw413` must be configured as a Session collaborator or another explicitly
+authorized login before its Issue can reach the read-only draft adapter. The Issue body cannot grant
+author authority to itself.
+
+Ingress 采用 producer-first strict importer。Signal producer 必须生成完整的 v2 control block；
+package 只做校验，不猜测缺失字段，也不会静默转换 legacy payload。Producer login 还必须通过
+Session author policy；例如 COO bot `nwnwnw413` 必须先配置为 Session collaborator 或其他显式
+授权 login，其 Issue 才能进入 read-only draft adapter。Issue 正文不能为自身授予 author authority。
+
 ```yaml
+contract: marketing-radar.radar-signal.v2
 type: radar-signal
 project: example-project
 account: test_primary
@@ -91,6 +104,74 @@ topic: product-evidence
 source-url: https://example.test/evidence/42
 insight: Explain the verified user impact and cite the supplied evidence.
 ```
+
+`topic` is a required stable taxonomy key, not display text. It must be 1-80 bytes of lowercase
+ASCII letters, digits, and single hyphens, with no leading, trailing, or repeated hyphen. Valid
+examples include `publishing-gap` and `mcp-v2-release`; `Publishing gap`, `publishing_gap`, and
+`发布断档` enter `needs-triage: noncanonical-topic`. The producer or an operator-approved migration
+must choose the key before ingestion. AI output never canonicalizes it.
+
+`topic` 是必填的稳定 taxonomy key，不是展示文案。它只能由 1-80 bytes 的小写 ASCII 字母、数字
+和单个连字符组成，禁止开头、结尾或连续连字符。`publishing-gap`、`mcp-v2-release` 合法；
+`Publishing gap`、`publishing_gap`、`发布断档` 会进入
+`needs-triage: noncanonical-topic`。Producer 或经运营批准的 migration 必须在 ingress 前确定该
+key，AI 输出永远不负责 canonicalize topic。
+
+An Issue carrying the unfenced `<!-- loop-critic:v1 ... -->` marker without the required v2
+contract receives the explicit `needs-triage: legacy-signal-contract` diagnosis. It stays Open,
+makes zero AI calls, and creates no Proposal. Other missing or incorrect contracts use
+`invalid-v2-contract`. Legacy diagnosis is informational only and never bypasses route, assignee,
+account, work-label, or author checks.
+
+未携带必需 v2 contract、且正文包含未被 code fence 包裹的
+`<!-- loop-critic:v1 ... -->` marker 时，Issue 会获得明确的
+`needs-triage: legacy-signal-contract` 诊断；它保持 Open、AI 调用数为 0、Proposal 创建数为 0。
+其他缺失或错误 contract 使用 `invalid-v2-contract`。Legacy 诊断只用于说明原因，绝不绕过
+route、assignee、account、work-label 或 author 校验。
+
+The package compares every Signal week with one UTC ISO reference week captured for that event.
+Current and future weeks are eligible; a past week defaults to `needs-triage: stale-signal-week`
+before AI or Proposal creation. Invalid ISO weeks, including a nonexistent week 53, also fail
+closed. This prevents old critique Issues from becoming current content merely because a Session is
+started later.
+
+Package 会把每条 Signal 的 week 与该 event 内只获取一次的 UTC ISO reference week 比较。当前周
+与未来周可继续处理；历史周默认在 AI 与 Proposal 创建前进入
+`needs-triage: stale-signal-week`。非法 ISO week（包括不存在的 week 53）同样 fail closed。这样
+即使后续重新启动 Session，旧 critique Issue 也不会自动变成当前内容。
+
+Past-week processing is an explicit, package-scoped migration exception. Set
+`FKST_MARKETING_PAST_WEEK_MIGRATION_REFS` only under the `marketing-radar` Package Env block to a
+comma-separated list of exact canonical refs in the form `owner/repo#issue/N`. Every Signal in an
+aggregate must appear in the allowlist, and historical migration accepts only `action: add`.
+Wildcards, duplicate refs, partial-group allowlists, malformed refs, `revise`, and `replan` fail
+closed. The exception does not bypass any v2, route, account, author, topic, or human-review gate.
+
+历史周只能通过显式、package-scoped migration 例外处理。仅可在 `marketing-radar` 的 Package
+Env block 中设置 `FKST_MARKETING_PAST_WEEK_MIGRATION_REFS`，值是以逗号分隔的精确 canonical
+ref，格式为 `owner/repo#issue/N`。同一 aggregate 内每条 Signal 都必须在 allowlist 中，且历史
+migration 只接受 `action: add`。Wildcard、重复 ref、不完整 group allowlist、非法 ref、`revise`
+与 `replan` 全部 fail closed。该例外不会绕过任何 v2、route、account、author、topic 或人工审核
+门禁。
+
+```md
+### Package Env
+
+#### marketing-radar
+FKST_MARKETING_PAST_WEEK_MIGRATION_REFS=owner/repo#issue/116,owner/repo#issue/117
+```
+
+Remove the exception by stopping the migration Session; never copy it into a reusable Environment
+Profile. A review command is evaluated against the current UTC week again. Once a Proposal week is
+past, `approve` and `request-changes` require the same complete exact allowlist for the Proposal's
+current Signal set; without it they fail closed. An authorized digest-bound `reject` does not consume
+the migration exception and may always terminate obsolete work without producing Content.
+
+停止 migration Session 即表示移除该例外；禁止把它写入可复用 Environment Profile。Review
+command 还会再次按当前 UTC week 校验。Proposal week 过期后，`approve` 与 `request-changes`
+必须继续由同一份完整、精确的 allowlist 覆盖 Proposal 当前的全部 Signal；缺少该授权时 fail
+closed。经授权且绑定 digest 的 `reject` 不读取 migration 例外，始终可以终结过期工作且不会生成
+Content。
 
 The action strategies are deliberately separate:
 

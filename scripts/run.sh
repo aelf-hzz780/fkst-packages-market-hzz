@@ -42,9 +42,12 @@ if [[ ! "$FKST_OFFICIAL_PACKAGE_SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]; then
   exit 2
 fi
 
-OFFICIAL_CACHE="$ROOT/.fkst/cache/fkst-hosted-src"
-OFFICIAL_ROOT="$ROOT/.fkst/official/fkst-hosted"
-OFFICIAL_PROXY_ROOT="$OFFICIAL_ROOT/packages/github-proxy"
+RUN_INVOCATION_ROOT=""
+OFFICIAL_SOURCE_ROOT=""
+OFFICIAL_ROOT=""
+OFFICIAL_PROXY_ROOT=""
+OFFICIAL_FETCHED_SHA=""
+OFFICIAL_PACKAGE_STATE="uninitialized"
 
 MARKETING_ROOTS=(
   "$ROOT/packages/x-publisher"
@@ -84,6 +87,63 @@ require_runtime_path() {
       exit 2
       ;;
   esac
+}
+
+cleanup_run_invocation() {
+  local status=$?
+  local cleanup_failed=false
+  trap - EXIT HUP INT TERM
+
+  if [ -n "$RUN_INVOCATION_ROOT" ]; then
+    case "$RUN_INVOCATION_ROOT" in
+      "$ROOT"/.fkst/run/invocation.*) ;;
+      *)
+        echo "refusing to clean invalid invocation root: $RUN_INVOCATION_ROOT" >&2
+        exit 2
+        ;;
+    esac
+    if [ -L "$RUN_INVOCATION_ROOT" ]; then
+      echo "refusing to clean symlink invocation root: $RUN_INVOCATION_ROOT" >&2
+      cleanup_failed=true
+    elif [ -e "$RUN_INVOCATION_ROOT" ]; then
+      if ! chmod -R u+w "$RUN_INVOCATION_ROOT" \
+          || ! rm -rf -- "$RUN_INVOCATION_ROOT"; then
+        echo "cannot clean invocation root: $RUN_INVOCATION_ROOT" >&2
+        cleanup_failed=true
+      fi
+    fi
+  fi
+
+  if [ "$cleanup_failed" = true ] && [ "$status" -eq 0 ]; then
+    status=2
+  fi
+  exit "$status"
+}
+
+trap cleanup_run_invocation EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+ensure_run_invocation_root() {
+  local candidate
+  if [ -n "$RUN_INVOCATION_ROOT" ]; then
+    case "$RUN_INVOCATION_ROOT" in
+      "$ROOT"/.fkst/run/invocation.*) return 0 ;;
+      *)
+        echo "invalid invocation root: $RUN_INVOCATION_ROOT" >&2
+        return 2
+        ;;
+    esac
+  fi
+
+  mkdir -p "$ROOT/.fkst/run"
+  if ! candidate="$(mktemp -d "$ROOT/.fkst/run/invocation.XXXXXX")"; then
+    echo "cannot create private runner invocation root" >&2
+    return 2
+  fi
+  require_runtime_path "$candidate"
+  RUN_INVOCATION_ROOT="$candidate"
 }
 
 resolve_bin() {
@@ -333,8 +393,6 @@ FRAMEWORK_VERIFICATION="$(verify_framework_source "$FRAMEWORK_BIN" "$TRACKED_FRA
 export FKST_RUNTIME_ROOT="${FKST_RUNTIME_ROOT:-$ROOT/.fkst/run/runtime}"
 export FKST_DURABLE_ROOT="${FKST_DURABLE_ROOT:-$ROOT/.fkst/run/durable}"
 
-OFFICIAL_FETCHED_SHA=""
-
 read_locked_official_tree() {
   local lock_file="$ROOT/fkst.lock"
   local tree_lines
@@ -356,8 +414,9 @@ read_locked_official_tree() {
 
 ensure_official_package() {
   local fetched_sha
-  local cache_head
-  local export_root
+  local source_commit
+  local preparing_root
+  local final_root
   local file
   local path
   local -a required_paths=(
@@ -371,19 +430,43 @@ ensure_official_package() {
   )
   local -a archive_paths=("${required_paths[@]}")
 
-  require_runtime_path "$OFFICIAL_CACHE"
-  require_runtime_path "$OFFICIAL_ROOT"
-
-  mkdir -p "$ROOT/.fkst/cache" "$ROOT/.fkst/official"
-
-  if [ ! -d "$OFFICIAL_CACHE/.git" ]; then
-    rm -rf "$OFFICIAL_CACHE"
-    git clone --no-checkout --filter=blob:none "$FKST_OFFICIAL_PACKAGE_SOURCE_URL" "$OFFICIAL_CACHE" >/dev/null
+  if [ "$OFFICIAL_PACKAGE_STATE" = "ready" ]; then
+    if [ "$OFFICIAL_FETCHED_SHA" != "$FKST_OFFICIAL_PACKAGE_SOURCE_REF" ] \
+        || [ ! -d "$OFFICIAL_SOURCE_ROOT" ] \
+        || [ ! -d "$OFFICIAL_ROOT" ] \
+        || [ ! -d "$OFFICIAL_PROXY_ROOT" ] \
+        || [ -w "$OFFICIAL_SOURCE_ROOT" ] \
+        || [ -w "$OFFICIAL_ROOT" ]; then
+      echo "official package ready-state invariant failed" >&2
+      return 2
+    fi
+    return 0
   fi
+  if [ "$OFFICIAL_PACKAGE_STATE" != "uninitialized" ]; then
+    echo "official package preparation is incomplete: state=$OFFICIAL_PACKAGE_STATE" >&2
+    return 2
+  fi
+  OFFICIAL_PACKAGE_STATE="preparing"
 
-  git -C "$OFFICIAL_CACHE" remote set-url origin "$FKST_OFFICIAL_PACKAGE_SOURCE_URL"
-  git -C "$OFFICIAL_CACHE" fetch --no-tags --depth 1 origin "$FKST_OFFICIAL_PACKAGE_SOURCE_REF" >/dev/null
-  if ! fetched_sha="$(git -C "$OFFICIAL_CACHE" rev-parse --verify 'FETCH_HEAD^{commit}' 2>/dev/null)"; then
+  ensure_run_invocation_root || return $?
+  OFFICIAL_SOURCE_ROOT="$RUN_INVOCATION_ROOT/official/source.git"
+  preparing_root="$RUN_INVOCATION_ROOT/official/export/fkst-hosted.preparing"
+  final_root="$RUN_INVOCATION_ROOT/official/export/fkst-hosted"
+  require_runtime_path "$OFFICIAL_SOURCE_ROOT"
+  require_runtime_path "$preparing_root"
+  require_runtime_path "$final_root"
+
+  if ! mkdir -p "$OFFICIAL_SOURCE_ROOT" "$(dirname "$preparing_root")" \
+      || ! git -C "$OFFICIAL_SOURCE_ROOT" init --bare -q; then
+    echo "cannot initialize private official package source" >&2
+    return 2
+  fi
+  if ! git -C "$OFFICIAL_SOURCE_ROOT" fetch --no-tags --depth 1 \
+      "$FKST_OFFICIAL_PACKAGE_SOURCE_URL" "$FKST_OFFICIAL_PACKAGE_SOURCE_REF" >/dev/null; then
+    echo "cannot fetch official package source: ref=$FKST_OFFICIAL_PACKAGE_SOURCE_REF" >&2
+    return 2
+  fi
+  if ! fetched_sha="$(git -C "$OFFICIAL_SOURCE_ROOT" rev-parse --verify 'FETCH_HEAD^{commit}' 2>/dev/null)"; then
     echo "official package source ref is not a usable commit: ref=$FKST_OFFICIAL_PACKAGE_SOURCE_REF" >&2
     return 2
   fi
@@ -391,44 +474,70 @@ ensure_official_package() {
     echo "official package fetch mismatch: expected=$FKST_OFFICIAL_PACKAGE_SOURCE_REF fetched=$fetched_sha" >&2
     return 2
   fi
-  OFFICIAL_FETCHED_SHA="$fetched_sha"
-
-  git -C "$OFFICIAL_CACHE" checkout --detach --force "$fetched_sha" >/dev/null
-  if ! cache_head="$(git -C "$OFFICIAL_CACHE" rev-parse --verify 'HEAD^{commit}' 2>/dev/null)"; then
-    echo "cannot read official package cache HEAD: $OFFICIAL_CACHE" >&2
-    return 2
-  fi
-  if [ "$cache_head" != "$fetched_sha" ]; then
-    echo "official package cache HEAD mismatch: fetched=$fetched_sha head=$cache_head" >&2
+  if ! source_commit="$(git -C "$OFFICIAL_SOURCE_ROOT" rev-parse --verify "$fetched_sha^{commit}" 2>/dev/null)" \
+      || [ "$source_commit" != "$fetched_sha" ]; then
+    echo "official package private source mismatch: fetched=$fetched_sha source=$source_commit" >&2
     return 2
   fi
 
   for path in "${required_paths[@]}"; do
-    if ! git -C "$OFFICIAL_CACHE" cat-file -e "$cache_head:$path" 2>/dev/null; then
-      echo "official package source is missing required tracked path: ref=$cache_head path=$path" >&2
+    if ! git -C "$OFFICIAL_SOURCE_ROOT" cat-file -e "$fetched_sha:$path" 2>/dev/null; then
+      echo "official package source is missing required tracked path: ref=$fetched_sha path=$path" >&2
       return 2
     fi
   done
 
   for file in fkst.workspace.toml fkst.lock; do
-    if git -C "$OFFICIAL_CACHE" cat-file -e "$cache_head:$file" 2>/dev/null; then
+    if git -C "$OFFICIAL_SOURCE_ROOT" cat-file -e "$fetched_sha:$file" 2>/dev/null; then
       archive_paths+=("$file")
     fi
   done
 
-  export_root="$(mktemp -d "$ROOT/.fkst/official/fkst-hosted.XXXXXX")"
-  require_runtime_path "$export_root"
-  if ! git -C "$OFFICIAL_CACHE" archive --format=tar "$cache_head" -- "${archive_paths[@]}" \
-      | tar -xf - -C "$export_root"; then
-    rm -rf -- "$export_root"
-    echo "cannot export official package source: ref=$cache_head" >&2
+  if ! mkdir -p "$preparing_root"; then
+    echo "cannot create private official package export" >&2
+    return 2
+  fi
+  if ! git -C "$OFFICIAL_SOURCE_ROOT" archive --format=tar "$fetched_sha" -- "${archive_paths[@]}" \
+      | tar -xf - -C "$preparing_root"; then
+    rm -rf -- "$preparing_root"
+    echo "cannot export official package source: ref=$fetched_sha" >&2
     return 2
   fi
 
-  rm -rf "$export_root/packages/github-proxy/tests"
-  rm -rf "$export_root/packages/github-proxy/departments/test_entity_view_probe"
-  rm -rf "$OFFICIAL_ROOT"
-  mv "$export_root" "$OFFICIAL_ROOT"
+  if ! rm -rf "$preparing_root/packages/github-proxy/tests" \
+      "$preparing_root/packages/github-proxy/departments/test_entity_view_probe" \
+      || ! mv "$preparing_root" "$final_root" \
+      || ! chmod -R a-w "$OFFICIAL_SOURCE_ROOT" "$final_root"; then
+    echo "cannot finalize private official package export: ref=$fetched_sha" >&2
+    return 2
+  fi
+
+  OFFICIAL_FETCHED_SHA="$fetched_sha"
+  OFFICIAL_ROOT="$final_root"
+  OFFICIAL_PROXY_ROOT="$OFFICIAL_ROOT/packages/github-proxy"
+  OFFICIAL_PACKAGE_STATE="ready"
+}
+
+persist_official_export() {
+  local export_parent="$ROOT/.fkst/official/exports"
+  local destination
+
+  ensure_official_package
+  require_runtime_path "$export_parent"
+  mkdir -p "$export_parent"
+  if ! destination="$(mktemp -d "$export_parent/fkst-hosted-$OFFICIAL_FETCHED_SHA.XXXXXX")"; then
+    echo "cannot create persistent official package export" >&2
+    return 2
+  fi
+  require_runtime_path "$destination"
+  if ! cp -R "$OFFICIAL_ROOT/." "$destination/" \
+      || ! chmod -R a-w "$destination"; then
+    chmod -R u+w "$destination" 2>/dev/null || true
+    rm -rf -- "$destination"
+    echo "cannot persist official package export: ref=$OFFICIAL_FETCHED_SHA" >&2
+    return 2
+  fi
+  printf 'official_package_root=%s\n' "$destination"
 }
 
 package_root_for() {
@@ -496,7 +605,9 @@ cmd_check() {
 
 prepare_test_roots() {
   local name="$1"
-  local test_root="$ROOT/.fkst/run/test/$name"
+  local test_root
+  ensure_run_invocation_root
+  test_root="$RUN_INVOCATION_ROOT/test/$name"
   require_runtime_path "$test_root"
   rm -rf "$test_root"
   mkdir -p "$test_root"
@@ -619,7 +730,7 @@ case "${1:-}" in
     cmd_supervise "$@"
     ;;
   export-official)
-    ensure_official_package
+    persist_official_export
     ;;
   *)
     usage >&2

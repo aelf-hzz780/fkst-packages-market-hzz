@@ -31,7 +31,7 @@ local function signal_issue(number, project)
       "work-label: auto-x-test-primary",
       "week: 2026-W33",
       "action: add",
-      "topic: FKST automation",
+      "topic: fkst-automation",
       "insight: Use cited release evidence.",
     }, "\n"),
     state = "OPEN",
@@ -46,7 +46,7 @@ end
 local function signal_issue_in_group(number, week, topic)
   local issue = signal_issue(number)
   issue.body = assert(issue.body:gsub("week: 2026%-W33", "week: " .. week, 1))
-  issue.body = assert(issue.body:gsub("topic: FKST automation", "topic: " .. topic, 1))
+  issue.body = assert(issue.body:gsub("topic: fkst%-automation", "topic: " .. topic, 1))
   return issue
 end
 
@@ -203,6 +203,8 @@ local function department(github, generate_draft)
       return { bot_login = "fkst-test-bot", authorized_reviewers = { "test-operator" } }
     end,
     signal_author_logins = function() return { "test-operator" } end,
+    clock = function() return 1786320000 end,
+    past_week_migration_refs = function() return nil end,
     draft_generator = generate_draft or function(signals, revision)
       local evidence_refs = {}
       for _, signal in ipairs(signals) do
@@ -346,7 +348,7 @@ return {
     local source = signal_issue(190)
     local legacy, legacy_group = rc2_legacy_review(191, source, "CLOSED", 1, true)
     t.eq(legacy_group,
-      "marketing-radar/chronoai/test_primary/2026-W33/FKST_automation/add/none/weekly-plan-change")
+      "marketing-radar/chronoai/test_primary/2026-W33/fkst-automation/add/none/weekly-plan-change")
     local issues = { [source.number] = source, [legacy.number] = legacy }
     local github = {}
     function github.read_issue(ref, _options)

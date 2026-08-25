@@ -155,6 +155,8 @@ local function department(github, draft_generator)
       }
     end,
     signal_author_logins = function() return { "test-operator" } end,
+    clock = function() return 1786320000 end,
+    past_week_migration_refs = function() return nil end,
     draft_generator = draft_generator or successful_draft,
   })
 end

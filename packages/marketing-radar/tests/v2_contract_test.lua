@@ -28,7 +28,7 @@ local function signal_body(overrides)
     ["work-label"] = "auto-x-test-primary",
     week = "2026-W33",
     action = "add",
-    topic = "FKST hosted automation",
+    topic = "fkst-hosted-automation",
     insight = "Use the cited release evidence when drafting the update.",
     ["source-url"] = "https://github.example/owner/repo/issues/11",
   }
