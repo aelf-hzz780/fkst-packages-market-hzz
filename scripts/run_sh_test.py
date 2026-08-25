@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import os
+import signal
 import shlex
 import shutil
 import stat
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -400,6 +402,65 @@ exec {shlex.quote(real_git)} "$@"
         self.assertFalse((exported_proxy / "injected.lua").exists())
         self.assertEqual(cache_sentinel.read_text(encoding="ascii"), "keep\n")
         self.assertEqual(official_sentinel.read_text(encoding="ascii"), "keep\n")
+        self.assertEqual(list((self.root / ".fkst/run").glob("invocation.*")), [])
+
+    def test_official_export_signal_cleans_pending_persistent_artifact(self) -> None:
+        official_source, official_ref = self.create_official_source()
+        tool_bin = self.root / "interrupt-bin"
+        tool_bin.mkdir()
+        started = self.root / "cp-started"
+        real_cp = shutil.which("cp")
+        self.assertIsNotNone(real_cp)
+        fake_cp = tool_bin / "cp"
+        fake_cp.write_text(
+            f"""#!/usr/bin/env bash
+set -euo pipefail
+if [ -n "${{FAKE_CP_STARTED:-}}" ]; then
+  touch "$FAKE_CP_STARTED"
+  trap 'exit 143' HUP INT TERM
+  while true; do
+    sleep 0.05
+  done
+fi
+exec {shlex.quote(real_cp)} "$@"
+""",
+            encoding="ascii",
+        )
+        fake_cp.chmod(
+            fake_cp.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+        )
+        process = subprocess.Popen(
+            [str(self.root / "scripts/run.sh"), "export-official"],
+            cwd=self.root,
+            env=self.runner_environment(
+                self.tracked_pin,
+                PATH=f"{tool_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+                FAKE_CP_STARTED=str(started),
+                FKST_OFFICIAL_PACKAGE_SOURCE_URL=str(official_source),
+                FKST_OFFICIAL_PACKAGE_SOURCE_REF=official_ref,
+            ),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+
+        try:
+            deadline = time.monotonic() + 10
+            while not started.exists() and process.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertTrue(started.exists(), "export did not reach the persistent copy stage")
+            os.killpg(process.pid, signal.SIGTERM)
+            stdout, stderr = process.communicate(timeout=10)
+            self.assertNotEqual(process.returncode, 0, stdout + stderr)
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=5)
+
+        export_parent = self.root / ".fkst/official/exports"
+        artifacts = list(export_parent.iterdir()) if export_parent.exists() else []
+        self.assertEqual(artifacts, [])
         self.assertEqual(list((self.root / ".fkst/run").glob("invocation.*")), [])
 
     def test_formal_gate_skips_local_env_and_reports_locked_provenance_in_order(self) -> None:

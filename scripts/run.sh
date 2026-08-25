@@ -48,6 +48,8 @@ OFFICIAL_ROOT=""
 OFFICIAL_PROXY_ROOT=""
 OFFICIAL_FETCHED_SHA=""
 OFFICIAL_PACKAGE_STATE="uninitialized"
+PENDING_OFFICIAL_EXPORT=""
+PENDING_OFFICIAL_EXPORT_DESTINATION=""
 
 MARKETING_ROOTS=(
   "$ROOT/packages/x-publisher"
@@ -89,10 +91,47 @@ require_runtime_path() {
   esac
 }
 
+cleanup_pending_official_export() {
+  local cleanup_failed=false
+  local target
+  for target in "$PENDING_OFFICIAL_EXPORT" "$PENDING_OFFICIAL_EXPORT_DESTINATION"; do
+    if [ -z "$target" ]; then
+      continue
+    fi
+    case "$target" in
+      "$ROOT"/.fkst/official/exports/.pending.*|\
+      "$ROOT"/.fkst/official/exports/fkst-hosted-*) ;;
+      *)
+        echo "refusing to clean invalid pending official export: $target" >&2
+        cleanup_failed=true
+        continue
+        ;;
+    esac
+    if [ -L "$target" ]; then
+      echo "refusing to clean symlink pending official export: $target" >&2
+      cleanup_failed=true
+    elif [ -e "$target" ]; then
+      if ! chmod -R u+w "$target" || ! rm -rf -- "$target"; then
+        echo "cannot clean pending official export: $target" >&2
+        cleanup_failed=true
+      fi
+    fi
+  done
+  if [ "$cleanup_failed" = true ]; then
+    return 2
+  fi
+  PENDING_OFFICIAL_EXPORT=""
+  PENDING_OFFICIAL_EXPORT_DESTINATION=""
+}
+
 cleanup_run_invocation() {
   local status=$?
   local cleanup_failed=false
   trap - EXIT HUP INT TERM
+
+  if ! cleanup_pending_official_export; then
+    cleanup_failed=true
+  fi
 
   if [ -n "$RUN_INVOCATION_ROOT" ]; then
     case "$RUN_INVOCATION_ROOT" in
@@ -521,22 +560,33 @@ ensure_official_package() {
 persist_official_export() {
   local export_parent="$ROOT/.fkst/official/exports"
   local destination
+  local pending_destination
+  local suffix
 
   ensure_official_package
   require_runtime_path "$export_parent"
   mkdir -p "$export_parent"
-  if ! destination="$(mktemp -d "$export_parent/fkst-hosted-$OFFICIAL_FETCHED_SHA.XXXXXX")"; then
-    echo "cannot create persistent official package export" >&2
+  if ! pending_destination="$(mktemp -d "$export_parent/.pending.XXXXXX")"; then
+    echo "cannot create pending official package export" >&2
     return 2
   fi
+  PENDING_OFFICIAL_EXPORT="$pending_destination"
+  suffix="${pending_destination##*/}"
+  suffix="${suffix#.pending.}"
+  destination="$export_parent/fkst-hosted-$OFFICIAL_FETCHED_SHA.$$.${suffix}"
+  PENDING_OFFICIAL_EXPORT_DESTINATION="$destination"
+  require_runtime_path "$pending_destination"
   require_runtime_path "$destination"
-  if ! cp -R "$OFFICIAL_ROOT/." "$destination/" \
+  if [ -e "$destination" ] \
+      || ! cp -R "$OFFICIAL_ROOT/." "$pending_destination/" \
+      || ! mv -- "$pending_destination" "$destination" \
       || ! chmod -R a-w "$destination"; then
-    chmod -R u+w "$destination" 2>/dev/null || true
-    rm -rf -- "$destination"
+    cleanup_pending_official_export || true
     echo "cannot persist official package export: ref=$OFFICIAL_FETCHED_SHA" >&2
     return 2
   fi
+  PENDING_OFFICIAL_EXPORT=""
+  PENDING_OFFICIAL_EXPORT_DESTINATION=""
   printf 'official_package_root=%s\n' "$destination"
 }
 
